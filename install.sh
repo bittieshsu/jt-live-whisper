@@ -949,14 +949,31 @@ check_argos_model() {
         fi
         echo ""
         run_spinner "下載模型..." python3 -c "
+import os, ssl
 from argostranslate import package
 package.update_package_index()
 pkgs = package.get_available_packages()
 en_zh = next((p for p in pkgs if p.from_code == 'en' and p.to_code == 'zh'), None)
 if en_zh:
-    path = en_zh.download()
-    package.install_from_path(path)
-    print('OK')
+    try:
+        path = en_zh.download()
+        package.install_from_path(path)
+        print('OK')
+    except Exception as e:
+        if 'SSL' in str(e) or 'CERTIFICATE' in str(e).upper():
+            ssl._create_default_https_context = ssl._create_unverified_context
+            os.environ['CURL_CA_BUNDLE'] = ''
+            os.environ['REQUESTS_CA_BUNDLE'] = ''
+            package.update_package_index()
+            pkgs2 = package.get_available_packages()
+            en_zh2 = next((p for p in pkgs2 if p.from_code == 'en' and p.to_code == 'zh'), None)
+            if en_zh2:
+                package.install_from_path(en_zh2.download())
+                print('OK')
+            else:
+                print('FAIL')
+        else:
+            print('FAIL')
 else:
     print('FAIL')
 "

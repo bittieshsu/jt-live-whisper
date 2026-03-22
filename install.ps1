@@ -934,6 +934,7 @@ if ($argosCheck -eq "OK") {
 } else {
     info "下載英翻中 / 中翻英模型..."
     & $VENV_PYTHON -c @"
+import os, ssl
 try:
     import argostranslate.package as pkg
     pkg.update_package_index()
@@ -941,7 +942,24 @@ try:
     for p in avail:
         if (p.from_code == 'en' and p.to_code == 'zh') or \
            (p.from_code == 'zh' and p.to_code == 'en'):
-            pkg.install_from_path(p.download())
+            try:
+                pkg.install_from_path(p.download())
+            except Exception as e:
+                if 'SSL' in str(e) or 'CERTIFICATE' in str(e).upper():
+                    # SSL 失敗：停用驗證重試
+                    ssl._create_default_https_context = ssl._create_unverified_context
+                    os.environ['CURL_CA_BUNDLE'] = ''
+                    os.environ['REQUESTS_CA_BUNDLE'] = ''
+                    try:
+                        import urllib3
+                        urllib3.disable_warnings()
+                    except: pass
+                    pkg.update_package_index()
+                    avail2 = pkg.get_available_packages()
+                    for p2 in avail2:
+                        if p2.from_code == p.from_code and p2.to_code == p.to_code:
+                            pkg.install_from_path(p2.download())
+                            break
 except Exception:
     pass
 "@ 2>&1 | Out-Null
