@@ -581,6 +581,7 @@ jt-live-whisper/
   translate_meeting.py     主程式（即時辨識、離線處理、翻譯、摘要，跨平台）
   webui.py                 WebUI 伺服器（FastAPI + WebSocket，瀏覽器介面後端）
   webui.html               WebUI 前端（單一 HTML，內嵌 CSS/JS）
+  subtitle_overlay.py      懸浮字幕覆蓋視窗（PyQt6，啟用時由主程式自動啟動）
   start.sh                 啟動腳本（macOS）
   start.ps1                啟動腳本（Windows）
   install.sh               安裝腳本（macOS）
