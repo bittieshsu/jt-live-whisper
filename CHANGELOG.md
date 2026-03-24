@@ -1,5 +1,12 @@
 # Changelog
 
+### v2.15.4 (2026-03-24)
+
+**修正**
+- install.sh 補上缺少的 `check_notice()` 函式定義（升級後首次安裝報 command not found）
+- install.sh / install.ps1 Argos 模型下載加入 SSL 憑證驗證失敗自動重試（企業網路相容）
+- README.md 目錄結構補上 subtitle_overlay.py
+
 ### v2.15.3 (2026-03-22)
 
 **新功能**

@@ -196,7 +196,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.15.3 - 100% 全地端 AI 語音工具集 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.15.4 - 100% 全地端 AI 語音工具集 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -215,6 +215,10 @@ check_install() {
 check_fail() {
     echo -e "  ${C_ERR}[失敗]${NC} $1"
     ((failed++)) || true
+}
+
+check_notice() {
+    echo -e "  ${C_WARN}[注意]${NC} $1"
 }
 
 section() {
