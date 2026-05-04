@@ -343,11 +343,45 @@ def _get_model_openai(model_size: str):
 
 # ── 辨識函式 ──
 
-def _transcribe_faster(wav_path, model_size, language):
+# faster-whisper 離線辨識參數（含長音檔幻覺防護，與用戶端 _FW_OFFLINE_KW 一致）
+# - condition_on_previous_text=False：切斷上一段 prompt 傳染
+# - hallucination_silence_threshold=2.0：偵測到幻覺時跳過 ≥2s 靜音（需 word_timestamps=True）
+# - repetition_penalty=1.05：抑制連續重複片段
+_FW_KW = dict(
+    beam_size=5,
+    vad_filter=True,
+    vad_parameters={"min_silence_duration_ms": 500},
+    condition_on_previous_text=False,
+    temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+    compression_ratio_threshold=2.4,
+    log_prob_threshold=-1.0,
+    no_speech_threshold=0.6,
+    repetition_penalty=1.05,
+    word_timestamps=True,
+    hallucination_silence_threshold=2.0,
+)
+
+# 寬鬆模式參數（用戶端帶 noisy=1 時切換，對應低音量/監視器/行車紀錄類音源）
+# 用戶端在上傳前已做音量增益，伺服器只需放寬 VAD / no_speech / log_prob
+_FW_KW_LOOSE = dict(
+    beam_size=5,
+    vad_filter=False,
+    condition_on_previous_text=False,
+    temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+    compression_ratio_threshold=2.4,
+    log_prob_threshold=None,
+    no_speech_threshold=0.3,
+    repetition_penalty=1.05,
+    word_timestamps=False,
+)
+
+
+def _transcribe_faster(wav_path, model_size, language, noisy=False):
     """faster-whisper 辨識"""
     m = _get_model_faster(model_size)
     t0 = time.monotonic()
-    segments_iter, info = m.transcribe(wav_path, language=language, beam_size=5, vad_filter=True)
+    kw = _FW_KW_LOOSE if noisy else _FW_KW
+    segments_iter, info = m.transcribe(wav_path, language=language, **kw)
     segments = []
     full_text = []
     for seg in segments_iter:
@@ -358,10 +392,11 @@ def _transcribe_faster(wav_path, model_size, language):
     return segments, full_text, round(info.duration, 1), round(time.monotonic() - t0, 1)
 
 
-def _transcribe_faster_stream(wav_path, model_size, language):
+def _transcribe_faster_stream(wav_path, model_size, language, noisy=False):
     """faster-whisper 串流版，yield (segment_dict, duration) per segment"""
     m = _get_model_faster(model_size)
-    segments_iter, info = m.transcribe(wav_path, language=language, beam_size=5, vad_filter=True)
+    kw = _FW_KW_LOOSE if noisy else _FW_KW
+    segments_iter, info = m.transcribe(wav_path, language=language, **kw)
     for seg in segments_iter:
         text = seg.text.strip()
         if text:
@@ -405,8 +440,9 @@ class _ProgressCapture:
         self._orig.flush()
 
 
-def _transcribe_openai(wav_path, model_size, language, progress_q=None):
-    """openai-whisper 辨識。progress_q: Queue，用於回報辨識進度。"""
+def _transcribe_openai(wav_path, model_size, language, progress_q=None, noisy=False):
+    """openai-whisper 辨識。progress_q: Queue，用於回報辨識進度。
+    noisy=True：低音量音源切換寬鬆參數（no_speech 0.3、停用 logprob 過濾）。"""
     m, ow_name = _get_model_openai(model_size)
 
     # 取得音訊時長
@@ -422,16 +458,36 @@ def _transcribe_openai(wav_path, model_size, language, progress_q=None):
 
     t0 = time.monotonic()
 
+    # openai-whisper 防幻覺參數（API 與 faster-whisper 略有不同）
+    if noisy:
+        _ow_kw = dict(
+            beam_size=5,
+            condition_on_previous_text=False,
+            temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+            compression_ratio_threshold=2.4,
+            logprob_threshold=None,
+            no_speech_threshold=0.3,
+        )
+    else:
+        _ow_kw = dict(
+            beam_size=5,
+            condition_on_previous_text=False,
+            temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+            compression_ratio_threshold=2.4,
+            logprob_threshold=-1.0,
+            no_speech_threshold=0.6,
+        )
+
     # 有 progress_q 時用 verbose=True + stdout 攔截追蹤進度
     if progress_q is not None and audio_duration > 0:
         old_stdout = sys.stdout
         sys.stdout = _ProgressCapture(old_stdout, progress_q, audio_duration)
         try:
-            result = m.transcribe(wav_path, language=language, beam_size=5, verbose=True)
+            result = m.transcribe(wav_path, language=language, verbose=True, **_ow_kw)
         finally:
             sys.stdout = old_stdout
     else:
-        result = m.transcribe(wav_path, language=language, beam_size=5)
+        result = m.transcribe(wav_path, language=language, **_ow_kw)
 
     segments = []
     full_text = []
@@ -521,10 +577,15 @@ async def transcribe(
     model: str = Form("large-v3-turbo"),
     language: str = Form("en"),
     stream: str = Form("false"),
+    noisy: str = Form("false"),
 ):
-    """接收音訊檔，回傳辨識結果（stream=true 時串流 NDJSON）"""
+    """接收音訊檔，回傳辨識結果（stream=true 時串流 NDJSON）。
+    noisy=1/true：用戶端音源分析判定為低音量錄音，套用寬鬆參數。"""
     client_ip = request.client.host if request.client else ""
     _set_active_task("transcribe", model, language, client_ip)
+    is_noisy = str(noisy).lower() in ("1", "true", "yes")
+    if is_noisy:
+        print(f"[{client_ip}] noisy=1 → 寬鬆參數")
 
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -544,7 +605,7 @@ async def transcribe(
                     dur = 0
                     cancelled = False
                     try:
-                        for seg, dur in _transcribe_faster_stream(tmp_path, model, language):
+                        for seg, dur in _transcribe_faster_stream(tmp_path, model, language, noisy=is_noisy):
                             count += 1
                             yield json.dumps({
                                 "type": "segment", "index": count - 1,
@@ -578,7 +639,7 @@ async def transcribe(
                     progress_q = queue.Queue()
                     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                     future = pool.submit(_transcribe_openai, tmp_path, model, language,
-                                         progress_q=progress_q)
+                                         progress_q=progress_q, noisy=is_noisy)
                     cancelled = False
                     audio_dur = 0
                     last_pct = 0
@@ -643,10 +704,10 @@ async def transcribe(
         try:
             if _backend == "openai-whisper":
                 segments, full_text, duration, proc_time = await asyncio.to_thread(
-                    _transcribe_openai, tmp.name, model, language)
+                    _transcribe_openai, tmp.name, model, language, None, is_noisy)
             else:
                 segments, full_text, duration, proc_time = await asyncio.to_thread(
-                    _transcribe_faster, tmp.name, model, language)
+                    _transcribe_faster, tmp.name, model, language, is_noisy)
         except Exception as e:
             print(f"[錯誤] 辨識失敗: {model} — {e}")
             return JSONResponse(

@@ -742,7 +742,11 @@ function _showLiveIn(live){
   if(_authRole==='read'){$('stopBtn').style.display='none';$('pauseBtn').style.display='none';$('bDevices').innerHTML=''}
   startTimer();const b=$('stopBtn');b.disabled=false;b.innerHTML='停止 <kbd>S</kbd>'}
 async function tryBackToSetup(){
-  try{const r=await fetch('/api/status',{headers:_authHeaders(),signal:AbortSignal.timeout(2000)});if(r.ok){showSetup();return}}catch(e){}
+  // 重試 2 次（webui.py 偶爾因 _stop_proc 短暫忙碌，避免誤判離線）
+  for(let i=0;i<2;i++){
+    try{const r=await fetch('/api/status',{headers:_authHeaders(),signal:AbortSignal.timeout(4000)});if(r.ok){showSetup();return}}catch(e){}
+    if(i===0)await new Promise(r=>setTimeout(r,500));
+  }
   showToast('WebUI 伺服器已離線，請重新執行 ./start.sh --webui','err');
 }
 function showSetup(){if(_authRole==='read'){$('pLive').classList.remove('shown');$('pLive').classList.remove('on');document.body.classList.remove('has-live');$('cfgLoading').innerHTML='<div style="text-align:center;color:var(--text-dim);font-size:14px;line-height:2">唯讀模式<br>等待主機開始辨識...</div>';$('cfgLoading').style.display='';return}
@@ -753,7 +757,9 @@ function showSetup(){if(_authRole==='read'){$('pLive').classList.remove('shown')
     setup.style.display='flex';setup.classList.add('fade-out');
     requestAnimationFrame(()=>requestAnimationFrame(()=>setup.classList.remove('fade-out')));
   },300);
-  dot.classList.remove('on');$('hMode').textContent='--';stopTimer()}
+  dot.classList.remove('on');$('hMode').textContent='--';stopTimer();
+  // 停止按鈕還原（離線處理 'stopped' → showSetup 路徑也要重設）
+  const sb=$('stopBtn');if(sb){sb.disabled=false;sb.innerHTML='停止 <kbd>S</kbd>'}}
 let _outputFiles=[],_outputDirs=[];
 async function openOutputFolder(){
   if(!_outputDirs.length)return;

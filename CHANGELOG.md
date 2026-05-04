@@ -1,5 +1,60 @@
 # Changelog
 
+### v2.16.4 (2026-05-04)
+
+**修正 — 連續離線辨識穩定性**
+- 客戶回報：Windows + RTX 3060 12GB + large-v3-turbo + 5 分鐘 MP3 檔案，**第 5 個檔案後出現 native crash**（`exit code 3221226505` = `0xC0000409` = `STATUS_STACK_BUFFER_OVERRUN`）；CPU/RAM 不高、VRAM 充裕，重開 PowerShell 後正常 → 確認是 CTranslate2 / cuDNN 等 native lib 連續呼叫累積 state 導致 fast-fail
+- **修法 1：每檔結束主動釋放 GPU 資源**（`_release_gpu_resources()`）
+  - `process_audio_file` 與 `process_bidi_audio_files` 結尾加 `finally` 區塊
+  - 本機 faster-whisper 路徑：transcribe 完成後立即 `del segments_iter, info, model` 釋放 C++ 物件
+  - finally 中 `gc.collect()` + `torch.cuda.empty_cache()` + `torch.cuda.synchronize()` 強制歸還 GPU 記憶體
+  - 對 mlx-whisper / CPU 路徑為 no-op（影響 0）
+
+**修正 — 停止按鈕 escalation**
+- 客戶回報：子程序 native crash 卡死時「停止」按鈕一直停在「停止中…」
+- `_stop_proc()` 三段升級：graceful → SIGTERM → SIGKILL
+  - Linux/macOS：SIGINT（4s）→ SIGTERM（2s）→ SIGKILL（1s）
+  - Windows：CTRL_BREAK_EVENT（4s）→ SIGTERM（2s）→ SIGKILL（1s）
+  - 任何例外都會落到強殺保險，確保進程一定會被清掉
+- `/api/stop` 與 WebSocket `action=stop` 改用 `asyncio.to_thread(_stop_proc)`，避免阻塞 event loop（最壞 7s 不會卡住其他 API）
+
+**修正 — WebUI 紅條誤判**
+- 客戶回報：子程序 crash 時瀏覽器顯示「WebUI 伺服器已離線，請重新執行 ./start.sh --webui」紅條，但其實 webui.py 主程序還活著
+- `tryBackToSetup()` 改為**重試 2 次、每次 4 秒 timeout**（原本單次 2s）→ 避開 `_stop_proc` 短暫忙碌期的誤判
+- `showSetup()` 補上停止按鈕還原（離線處理 'stopped' → showSetup 路徑也會重設按鈕，不再卡「停止中…」）
+
+### v2.16.3 (2026-04-30)
+
+**新增**
+- 離線辨識自動偵測「低音量／監視器／行車紀錄」類錄音並切換寬鬆參數，解決客戶回報「1 小時 53 分鐘錄音只辨識出 97 段、常常只抓到第一段文字」的問題
+  - 偵測手法：上傳/辨識前用 `ffmpeg volumedetect` 取開頭 120 秒的 `mean_volume`（取樣已足以判斷整段特性，避免長音檔分析拖累 large-v3-turbo 本機使用者）
+  - 觸發門檻：`mean_volume < -30 dBFS` → 自動套用增益 + 寬鬆參數；其餘維持 v2.16.2 標準參數**完全不變**，確保乾淨會議錄音辨識能力不受影響
+  - 自動增益：用 ffmpeg `volume` 濾鏡將音量提升至 -18 dBFS（最多 +20 dB），輸出 PCM s16le 暫存檔餵 Whisper，辨識完即清理
+  - 寬鬆參數組 `_FW_OFFLINE_KW_LOOSE`：`vad_filter=False`、`no_speech_threshold=0.3`、`log_prob_threshold=None`、關閉 `word_timestamps` / `hallucination_silence_threshold`（VAD 關了也用不到，順便省成本）
+  - `_drop_stuck_segments()` 在寬鬆模式門檻拉到 90 秒（避免誤殺長靜默後的真實短語）
+  - 套用範圍：離線單向 + 雙向（兩路獨立偵測，避免單側拖累另一側）+ 用戶端→GPU 伺服器（HTTP form 帶 `noisy=1`，伺服器 `_FW_KW_LOOSE` 對應）
+  - 終端顯示一行偵測結果：`[音源分析] mean_volume=-38.2 dBFS → 寬鬆模式，增益 +20.0 dB` 方便診斷
+- **效能保護**：極短/極小音檔（< 200KB）跳過分析；分析只取開頭 120 秒；增益用 PCM s16le 純樣本級處理，整體預處理開銷遠小於辨識本身
+
+**部署**
+- GPU 伺服器（192.168.1.40）需重新部署 `remote_whisper_server.py`（接收 noisy form 參數 + `_FW_KW_LOOSE` / openai-whisper 對應分支）
+
+### v2.16.2 (2026-04-30)
+
+**修正**
+- 離線辨識長音檔 large-v3-turbo 解碼器卡死、單段橫跨數十分鐘只吐一個短詞（如「都可以」），其後出現連串 1 秒重複幻覺（如「接下來、接下來…」）：
+  - 根因：faster-whisper / openai-whisper 預設 `condition_on_previous_text=True`，將上一段結果作為下一段 prompt。一旦短句卡住解碼，幻覺被自我強化形成連環污染
+  - 修法 1：四處 transcribe 呼叫（`translate_meeting.py` 離線單向 / 離線雙向、`remote_whisper_server.py` faster 同步 / 串流、openai-whisper 路徑）統一改用防幻覺參數組
+    - `condition_on_previous_text=False`：切斷上下文傳染
+    - `temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]`：失敗時依序提高溫度重試
+    - `repetition_penalty=1.05`：抑制連續重複
+    - `word_timestamps=True` + `hallucination_silence_threshold=2.0`：偵測幻覺後跳過 ≥2s 靜音
+    - `vad_parameters={"min_silence_duration_ms": 500}`：VAD 靜音偵測更靈敏
+  - 修法 2：新增 `_drop_stuck_segments()` 後置過濾，duration > 30s 但文字 ≤ 6 字（中日韓）/ ≤ 4 詞（拉丁語系）的段落視為解碼器卡死直接丟棄
+  - 套用於離線單向（`run_offline`）與離線雙向（`_filter_segments`）兩條流程
+- 在用戶端 `_FW_OFFLINE_KW` 與伺服器端 `_FW_KW` 共用同一組參數，確保本機 / GPU 伺服器辨識行為一致
+- **部署**：GPU 伺服器（192.168.1.40）需重新部署 `remote_whisper_server.py` 才能受惠
+
 ### v2.16.1 (2026-04-08)
 
 **修正**

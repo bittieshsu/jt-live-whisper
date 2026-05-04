@@ -189,21 +189,39 @@ async def _event_dispatcher():
 
 # ─── 子程序管理 ──────────────────────────────────────────────
 def _stop_proc():
+    """停止子程序，三段升級：graceful → SIGTERM → SIGKILL。
+    Windows 上若子程序在 native crash（如 0xC0000409）卡死，
+    SIGINT/CTRL_BREAK 不一定收得到，必須走 SIGKILL 才殺得掉。"""
     global _proc
     with _proc_lock:
         if _proc and _proc.poll() is None:
             pid = _proc.pid
-            # SIGINT 讓 signal handler 正常清理（儲存錄音檔等），最多等 6 秒
+            # Step 1：graceful（平台相關）
             try:
-                os.kill(pid, signal.SIGINT)
-                _proc.wait(timeout=6)
+                if sys.platform == "win32":
+                    os.kill(pid, signal.CTRL_BREAK_EVENT)
+                else:
+                    os.kill(pid, signal.SIGINT)
+                _proc.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                # Step 2：SIGTERM
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    _proc.wait(timeout=2)
+                except (subprocess.TimeoutExpired, Exception):
+                    # Step 3：SIGKILL（無條件強殺）
+                    try:
+                        os.kill(pid, 9)
+                        _proc.wait(timeout=1)
+                    except Exception:
+                        pass
             except Exception:
-                # 超時：強制 SIGKILL
+                # graceful 失敗（PID 不存在等）→ 直接強殺保險
                 try:
                     os.kill(pid, 9)
-                    _proc.wait(timeout=2)
+                    _proc.wait(timeout=1)
                 except Exception:
-                        pass
+                    pass
             _proc = None
     # 清理靜音 flag 檔案
     for fn in (".mute_lb", ".mute_mic"):
@@ -419,7 +437,7 @@ def _get_config():
         "gpu_host": gpu_host, "summary_descs": summary_descs,
         "recommended_models": recommended_models,
         "default_engine": "llm" if llm_host else "nllb",
-        "last": last, "version": "2.16.1",
+        "last": last, "version": "2.16.4",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -936,7 +954,8 @@ async def api_stop(request: Request):
     err = _check_auth(request, "admin")
     if err:
         return JSONResponse({"status": "error", "error": err}, status_code=403)
-    _stop_proc()
+    # 在 thread pool 跑避免阻塞 event loop（_stop_proc 最多耗 7 秒：4+2+1）
+    await asyncio.to_thread(_stop_proc)
     # 廣播停止事件
     await broadcast(json.dumps({"type": "stopped"}))
     return {"status": "stopped"}
@@ -967,7 +986,7 @@ async def websocket_endpoint(ws: WebSocket):
             try:
                 msg = json.loads(data)
                 if msg.get("action") == "stop":
-                    _stop_proc()
+                    await asyncio.to_thread(_stop_proc)
                     await broadcast(json.dumps({"type": "stopped"}))
                 elif msg.get("action") == "mute":
                     # 寫入靜音 flag 檔案，translate_meeting.py 的 audio callback 會檢查

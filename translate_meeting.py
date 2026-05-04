@@ -773,7 +773,158 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.16.1"
+APP_VERSION = "2.16.4"
+
+# faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
+# - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
+# - temperature 列表：解碼失敗時依序提高溫度重試（faster-whisper 預設行為）
+# - hallucination_silence_threshold=2.0：偵測到幻覺時跳過 ≥2s 靜音（需 word_timestamps=True）
+# - repetition_penalty=1.05：抑制連續重複片段
+_FW_OFFLINE_KW = dict(
+    beam_size=5,
+    vad_filter=True,
+    vad_parameters={"min_silence_duration_ms": 500},
+    condition_on_previous_text=False,
+    temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+    compression_ratio_threshold=2.4,
+    log_prob_threshold=-1.0,
+    no_speech_threshold=0.6,
+    repetition_penalty=1.05,
+    word_timestamps=True,
+    hallucination_silence_threshold=2.0,
+)
+
+# faster-whisper 寬鬆模式：低音量 / 監視器 / 行車紀錄等難搞音源自動切換
+# 觸發條件：mean_volume < -30 dBFS（_analyze_audio_loudness 偵測）
+# 差異：不靠 Silero VAD 預剃除、放寬 no_speech 與 log_prob、關閉 word_timestamps（節省成本）
+_FW_OFFLINE_KW_LOOSE = dict(
+    beam_size=5,
+    vad_filter=False,
+    condition_on_previous_text=False,
+    temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+    compression_ratio_threshold=2.4,
+    log_prob_threshold=None,
+    no_speech_threshold=0.3,
+    repetition_penalty=1.05,
+    word_timestamps=False,
+)
+
+
+def _drop_stuck_segments(segments, loose=False):
+    """過濾解碼器卡死產生的可疑段落：duration 過長但文字過短。
+    典型症狀：單一段橫跨數十分鐘只吐一個短詞（如「都可以」）。
+    loose=True：低音量音源段落本身常較長，門檻拉高避免誤殺真實短語。"""
+    threshold = 90.0 if loose else 30.0
+    out = []
+    for s in segments:
+        try:
+            dur = float(s.get("end", 0)) - float(s.get("start", 0))
+        except (TypeError, ValueError):
+            dur = 0
+        text = (s.get("text") or "").strip()
+        has_cjk = any('぀' <= ch <= '鿿' or '가' <= ch <= '힯' for ch in text)
+        too_short = (len(text) <= 6) if has_cjk else (len(text.split()) <= 4)
+        if dur > threshold and too_short:
+            continue
+        out.append(s)
+    return out
+
+
+def _analyze_audio_loudness(wav_path, sample_seconds=120):
+    """用 ffmpeg volumedetect 取得 mean_volume / max_volume（dBFS）。
+    僅分析開頭 sample_seconds 秒（預設 120s）以加速長音檔處理 —— 監視器/低音量錄音
+    特性整段一致，取樣已足以判斷；對 large-v3-turbo 本機使用者尤其重要。
+    回傳 {'mean_dbfs': float, 'max_dbfs': float} 或 None（偵測失敗）。"""
+    try:
+        cmd = ["ffmpeg", "-nostdin", "-hide_banner"]
+        if sample_seconds and sample_seconds > 0:
+            cmd += ["-t", str(int(sample_seconds))]
+        cmd += ["-i", wav_path, "-af", "volumedetect",
+                "-vn", "-sn", "-dn", "-f", "null", "-"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        out = result.stderr or ""
+        m_mean = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", out)
+        m_max = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", out)
+        if not m_mean:
+            return None
+        return {
+            "mean_dbfs": float(m_mean.group(1)),
+            "max_dbfs": float(m_max.group(1)) if m_max else 0.0,
+        }
+    except Exception:
+        return None
+
+
+def _boost_audio_if_quiet(wav_path, mean_dbfs, target_dbfs=-18.0, max_gain=20.0):
+    """音量偏低時提升至目標音量。
+    回傳 (處理後路徑, 是否新建暫存檔)。max_volume 留 ~3 dB headroom 避免削峰。
+    僅對 mean_volume < -30 dBFS 觸發；其餘維持原檔。
+    使用 PCM s16le 避免重編碼 overhead，對長音檔處理時間可降至 1/5。"""
+    if mean_dbfs >= -30.0:
+        return wav_path, False
+    gain = min(target_dbfs - mean_dbfs, max_gain)
+    if gain <= 0:
+        return wav_path, False
+    base, ext = os.path.splitext(wav_path)
+    out_path = f"{base}.boosted.wav"
+    try:
+        # PCM s16le + 同 SR/channel：純樣本級增益，速度約等於 I/O 上限
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+             "-y", "-i", wav_path, "-af", f"volume={gain:.1f}dB",
+             "-c:a", "pcm_s16le", out_path],
+            capture_output=True, check=True, timeout=900,
+        )
+        return out_path, True
+    except Exception:
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception:
+            pass
+        return wav_path, False
+
+
+def _release_gpu_resources():
+    """每檔離線處理結束後主動釋放 GPU 資源。
+    避免 CTranslate2 / cuDNN / PyTorch 等 native lib 在連續呼叫後累積 state，
+    造成 Windows 上 STATUS_STACK_BUFFER_OVERRUN (0xC0000409) 等 fast-fail 崩潰。
+    對 mlx-whisper / CPU 路徑為 no-op。"""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except Exception:
+        pass
+
+
+def _audio_profile(wav_path, label="", min_size_bytes=200_000):
+    """分析音源並回傳 (處理後路徑, 是否新建暫存檔, use_loose, mean_dbfs)。
+    對乾淨錄音完全不介入；只在 mean_volume < -30 dBFS 時切換寬鬆模式 + 增益。
+    極短/極小音檔（< 200KB）跳過分析以避免不必要的 ffmpeg 啟動成本。"""
+    try:
+        if os.path.getsize(wav_path) < min_size_bytes:
+            return wav_path, False, False, None
+    except OSError:
+        return wav_path, False, False, None
+    info = _analyze_audio_loudness(wav_path)
+    if not info:
+        return wav_path, False, False, None
+    mean_v = info["mean_dbfs"]
+    use_loose = mean_v < -30.0
+    proc_path, boosted = (_boost_audio_if_quiet(wav_path, mean_v) if use_loose
+                          else (wav_path, False))
+    tag = f"{label} " if label else ""
+    if use_loose:
+        gain = min(-18.0 - mean_v, 20.0)
+        boost_msg = f"，增益 +{gain:.1f} dB" if boosted else "（增益失敗，原檔送辨識）"
+        print(f"  {C_DIM}[音源分析] {tag}mean_volume={mean_v:.1f} dBFS → 寬鬆模式{boost_msg}{RESET}")
+    else:
+        print(f"  {C_DIM}[音源分析] {tag}mean_volume={mean_v:.1f} dBFS → 標準模式{RESET}")
+    return proc_path, boosted, use_loose, mean_v
 
 # ─── WebUI 暫停控制（SIGUSR1 toggle）──────────────────────────────
 _webui_pause_event = None  # 由各 streaming 函式設定
@@ -2790,8 +2941,10 @@ class _ProgressBody(io.BytesIO):
 
 
 def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
-                               progress_callback=None, on_upload_done=None):
-    """POST 音訊到伺服器 /v1/audio/transcriptions（串流 NDJSON），回傳 (segments, duration, proc_time, device)"""
+                               progress_callback=None, on_upload_done=None,
+                               noisy=False):
+    """POST 音訊到伺服器 /v1/audio/transcriptions（串流 NDJSON），回傳 (segments, duration, proc_time, device)。
+    noisy=True：用戶端音源分析判定為低音量錄音，伺服器套用寬鬆參數。"""
     host = rw_cfg["host"]
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
     url = f"http://{host}:{port}/v1/audio/transcriptions"
@@ -2832,6 +2985,14 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
         f"Content-Disposition: form-data; name=\"stream\"\r\n\r\n"
         f"true\r\n"
     )
+
+    # noisy field（用戶端音源分析判定，伺服器決定是否切換寬鬆參數）
+    if noisy:
+        body_parts.append(
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"noisy\"\r\n\r\n"
+            f"1\r\n"
+        )
 
     body_parts.append(f"--{boundary}--\r\n")
 
@@ -9670,6 +9831,10 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
     if probe and probe[0] > 0:
         audio_duration = probe[0]
 
+    # 音源分析：mean_volume < -30 dBFS 視為低音量錄音（監視器/行車紀錄/遠場），
+    # 自動增益並切換寬鬆參數。乾淨會議錄音完全不介入。
+    asr_wav_path, _boosted, use_loose, _mean_dbfs = _audio_profile(wav_path)
+
     # 在 ASR 期間背景預熱 LLM（避免 ASR 後模型已卸載導致翻譯超時）
     _warmup_thread = None
     _warmup_ok = [False]
@@ -9691,7 +9856,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
         print(f"  {C_WHITE}辨識位置    GPU 伺服器（{rw_host}:{rw_port}）{RESET}")
 
         # 上傳前檢查伺服器狀態（忙碌/磁碟空間）
-        file_size = os.path.getsize(wav_path) if os.path.isfile(wav_path) else 0
+        file_size = os.path.getsize(asr_wav_path) if os.path.isfile(asr_wav_path) else 0
         if not _check_remote_before_upload(remote_whisper_cfg, file_size):
             print(f"  {C_HIGHLIGHT}[降級] 改用本機 辨識{RESET}")
             remote_whisper_cfg = None
@@ -9713,9 +9878,10 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
 
         try:
             r_segments, r_duration, r_proc_time, r_device = _remote_whisper_transcribe(
-                remote_whisper_cfg, wav_path, model_size, lang,
+                remote_whisper_cfg, asr_wav_path, model_size, lang,
                 progress_callback=_upload_progress,
                 on_upload_done=_on_upload_done,
+                noisy=use_loose,
             )
             raw_segments = r_segments
             used_remote = True
@@ -9747,7 +9913,8 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
         if audio_duration > 0:
             sbar.set_progress("0%")
 
-        segments_iter, info = model.transcribe(wav_path, language=lang, beam_size=5, vad_filter=True)
+        _kw = _FW_OFFLINE_KW_LOOSE if use_loose else _FW_OFFLINE_KW
+        segments_iter, info = model.transcribe(asr_wav_path, language=lang, **_kw)
 
         # 將 generator 轉為 list of dict（與伺服器格式統一）
         raw_segments = []
@@ -9767,8 +9934,22 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
                     "text": text,
                 })
 
+        # 主動釋放 ASR 模型參考（搭配 finally 的 gc + cuda.empty_cache()）
+        # 這條路徑使用本機 faster-whisper，模型與 generator 用完即刪除
+        try: del segments_iter, info, model
+        except NameError: pass
+
+    # 清理增益暫存檔（辨識結束後）
+    if _boosted and asr_wav_path != wav_path:
+        try:
+            os.remove(asr_wav_path)
+        except Exception:
+            pass
+
     seg_count = 0
     try:
+        # 過濾解碼器卡死的可疑長段（門檻依音源寬鬆與否調整）
+        raw_segments = _drop_stuck_segments(raw_segments, loose=use_loose)
         # 收集所有有效段落（過濾幻覺和空白）
         valid_segments = []
         for seg_raw in raw_segments:
@@ -10061,6 +10242,9 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             os.remove(wav_path)
         print(f"\n  {C_HIGHLIGHT}[錯誤] 處理失敗: {e}{RESET}", file=sys.stderr)
         return None, None, None
+    finally:
+        # 釋放 GPU 資源避免 native lib state 累積（0xC0000409 等 fast-fail 崩潰）
+        _release_gpu_resources()
 
 
 def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_mic,
@@ -10137,7 +10321,10 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
 
     # ── ASR：兩路分別辨識 ──
     def _do_asr(wav_path, lang, label):
-        """對單一音訊執行 ASR，回傳 raw_segments list"""
+        """對單一音訊執行 ASR，回傳 (raw_segments list, use_loose)"""
+        # 音源分析（兩路獨立判斷，避免單側拖累另一側）
+        asr_path, _b, _loose, _ = _audio_profile(wav_path, label=label)
+
         used_remote = False
         raw_segs = None
         _rw_cfg = remote_whisper_cfg
@@ -10158,8 +10345,8 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
 
             try:
                 r_segments, r_duration, r_proc_time, r_device = _remote_whisper_transcribe(
-                    _rw_cfg, wav_path, model_size, lang,
-                    progress_callback=_up, on_upload_done=_done)
+                    _rw_cfg, asr_path, model_size, lang,
+                    progress_callback=_up, on_upload_done=_done, noisy=_loose)
                 raw_segs = r_segments
                 used_remote = True
                 sbar.set_task(f"{label} 辨識完成（{len(r_segments)} 段，{r_proc_time:.1f}s）", reset_timer=False)
@@ -10177,7 +10364,10 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
                 from faster_whisper import WhisperModel
             except ImportError:
                 print(f"  {C_HIGHLIGHT}[錯誤] faster-whisper 未安裝{RESET}", file=sys.stderr)
-                return []
+                if _b and asr_path != wav_path:
+                    try: os.remove(asr_path)
+                    except Exception: pass
+                return [], _loose
 
             print(f"  {C_WHITE}{label} 載入模型 {model_size}...{RESET}", end=" ", flush=True)
             model = _call_with_ssl_retry(WhisperModel, model_size, device="auto", compute_type="int8")
@@ -10186,11 +10376,12 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
             sbar = _SummaryStatusBar(model=model_size, task=f"{label} 辨識中", asr_location="本機").start()
 
             _dur = 0
-            _probe = _ffprobe_info(wav_path)
+            _probe = _ffprobe_info(asr_path)
             if _probe and _probe[0] > 0:
                 _dur = _probe[0]
 
-            segments_iter, info = model.transcribe(wav_path, language=lang, beam_size=5, vad_filter=True)
+            _kw = _FW_OFFLINE_KW_LOOSE if _loose else _FW_OFFLINE_KW
+            segments_iter, info = model.transcribe(asr_path, language=lang, **_kw)
             raw_segs = []
             for segment in segments_iter:
                 if _dur > 0:
@@ -10203,7 +10394,16 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
             sbar.freeze()
             sbar.stop()
 
-        return raw_segs or []
+            # 主動釋放本機 faster-whisper 模型（搭配 process_bidi_audio_files 的 finally）
+            try: del segments_iter, info, model
+            except NameError: pass
+
+        # 清理增益暫存檔
+        if _b and asr_path != wav_path:
+            try: os.remove(asr_path)
+            except Exception: pass
+
+        return raw_segs or [], _loose
 
     # 在 ASR 期間背景預熱 LLM（避免 ASR 後模型已卸載導致翻譯超時）
     _warmup_thread = None
@@ -10218,12 +10418,13 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
             break
 
     t_stage = time.monotonic()
-    lb_raw = _do_asr(lb_wav, lb_lang, "系統音訊")
-    mic_raw = _do_asr(mic_wav, mic_lang, "麥克風")
+    lb_raw, lb_loose = _do_asr(lb_wav, lb_lang, "系統音訊")
+    mic_raw, mic_loose = _do_asr(mic_wav, mic_lang, "麥克風")
     t_asr = time.monotonic() - t_stage
 
     # ── 過濾幻覺 + 簡轉繁 ──
-    def _filter_segments(raw_segs, lang, hall_check):
+    def _filter_segments(raw_segs, lang, hall_check, loose=False):
+        raw_segs = _drop_stuck_segments(raw_segs, loose=loose)
         valid = []
         for seg in raw_segs:
             text = seg["text"].strip()
@@ -10240,8 +10441,8 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
             valid.append({"start": seg["start"], "end": seg["end"], "text": text})
         return valid
 
-    lb_segs = _filter_segments(lb_raw, lb_lang, lb_hall)
-    mic_segs = _filter_segments(mic_raw, mic_lang, mic_hall)
+    lb_segs = _filter_segments(lb_raw, lb_lang, lb_hall, loose=lb_loose)
+    mic_segs = _filter_segments(mic_raw, mic_lang, mic_hall, loose=mic_loose)
 
     print(f"\n  {C_OK}辨識完成    {RESET}{C_DIM}系統音訊 {len(lb_segs)} 段 + 麥克風 {len(mic_segs)} 段  [{t_asr:.1f}s]{RESET}")
 
@@ -10540,6 +10741,9 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
             os.remove(mic_wav)
         print(f"\n  {C_HIGHLIGHT}[錯誤] 雙向處理失敗: {e}{RESET}", file=sys.stderr)
         return None, None, None
+    finally:
+        # 釋放 GPU 資源避免 native lib state 累積（0xC0000409 等 fast-fail 崩潰）
+        _release_gpu_resources()
 
 
 def _build_metadata_header(metadata):
