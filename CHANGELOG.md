@@ -1,5 +1,15 @@
 # Changelog
 
+### v2.16.5 (2026-05-05)
+
+**緊急修正 — Windows 切換下一個檔案噴錯（v2.16.4 引發的回歸）**
+- 客戶回報：v2.16.4 跑完一個檔案要切換下一個時，PowerShell 噴出 `forrtl: error (200): program aborting due to control-BREAK event`，webui.py 自己也被 CTRL_BREAK 殺掉、瀏覽器顯示「與伺服器的連線已中斷」
+- 根因：v2.16.4 的 `_stop_proc()` 在 Windows 上用 `os.kill(pid, signal.CTRL_BREAK_EVENT)`，但子程序用 `start_new_session=True` 在 **Windows 是 no-op**（這個參數只在 POSIX 生效）→ 子程序與 webui.py + PowerShell **共享同一個 console process group** → CTRL_BREAK_EVENT 廣播給整組 → 全部一起死
+- 修法：`subprocess.Popen` 平台分流
+  - Windows：`creationflags=subprocess.CREATE_NEW_PROCESS_GROUP` 把子程序隔離成獨立 process group，CTRL_BREAK_EVENT 只會打到子程序，不會炸到 webui.py / PowerShell
+  - POSIX：維持 `start_new_session=True`（脫離 controlling terminal，避免終端 SIGINT 廣播）
+- 此修正使 v2.16.4 的「停止鍵 escalation」在 Windows 真正可用，而不會誤殺整個 WebUI
+
 ### v2.16.4 (2026-05-04)
 
 **修正 — 連續離線辨識穩定性**

@@ -258,9 +258,15 @@ def _start_proc(args: list):
     with _proc_lock:
         cmd = [sys.executable, str(TRANSLATE_SCRIPT), "--webui"] + args
         # stdin 持續送 'y\n' 自動確認所有互動提問（確認開始、錄音等）
-        _proc = subprocess.Popen(cmd, cwd=str(BASE_DIR),
-                                 stdin=subprocess.PIPE,
-                                 start_new_session=True)
+        # Windows 必須用 CREATE_NEW_PROCESS_GROUP 把子程序隔離成獨立 console group，
+        # 否則 CTRL_BREAK_EVENT 會廣播給 webui.py 自己 + PowerShell 一起炸；
+        # POSIX 用 start_new_session 脫離 controlling terminal（避免 SIGINT 廣播）。
+        _popen_kw = {"cwd": str(BASE_DIR), "stdin": subprocess.PIPE}
+        if sys.platform == "win32":
+            _popen_kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            _popen_kw["start_new_session"] = True
+        _proc = subprocess.Popen(cmd, **_popen_kw)
         _proc._start_time = time.monotonic()
         # 背景持續送 y 回答所有 input() 提問（確認開始、錄音、場景等）
         def _auto_yes():
@@ -437,7 +443,7 @@ def _get_config():
         "gpu_host": gpu_host, "summary_descs": summary_descs,
         "recommended_models": recommended_models,
         "default_engine": "llm" if llm_host else "nllb",
-        "last": last, "version": "2.16.4",
+        "last": last, "version": "2.16.5",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
