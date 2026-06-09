@@ -1,5 +1,15 @@
 # Changelog
 
+### v2.16.6 (2026-06-09)
+
+**修正 — RTX 50 系列（Blackwell）本機辨識全程失敗**
+- 客戶回報：Windows + RTX 5090 Laptop GPU（24GB）即時翻譯時，終端不斷噴 `[本機辨識失敗: cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED]`，翻譯 0 筆
+- 根因：RTX 50 系列為 Blackwell 架構（compute capability sm_120），其 INT8 tensor core 需要新的 padding，CTranslate2（faster-whisper 後端）對它跑 `int8` 量化會直接噴 `CUBLAS_STATUS_NOT_SUPPORTED`；而本程式 4 處 `WhisperModel(...)` 全部寫死 `compute_type="int8"`，搭配 `device="auto"` 自動選到該 GPU → 每段辨識都失敗
+- 與 PyTorch 的 `sm_120 is not compatible` 警告無關：faster-whisper 走 CTranslate2 不走 torch，該警告不影響轉錄
+- 修法：新增 `_fw_local_cuda_ok()` / `_fw_device_kwargs()`，本機偵測到 CUDA → 改用 `device="cuda"` + `compute_type="float16"`（速度更快、準確度更好，VRAM 也夠）；無 CUDA 維持 `device="auto"` + `int8`（CPU 上 int8 才快）。Apple Silicon 因 CTranslate2 無 Metal 後端一律走 CPU（ASR 另用 mlx），不受影響
+- 套用於 4 處本機 faster-whisper 載入點（即時單向 / 即時雙向 / 離線單向 / 離線雙向）
+- 伺服器端 `remote_whisper_server.py` 早已用 float16，本次不受影響
+
 ### v2.16.5 (2026-05-05)
 
 **緊急修正 — Windows 切換下一個檔案噴錯（v2.16.4 引發的回歸）**

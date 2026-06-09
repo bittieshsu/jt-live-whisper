@@ -652,6 +652,31 @@ def _has_local_gpu():
 
 
 @lru_cache(maxsize=1)
+def _fw_local_cuda_ok():
+    """本機 CTranslate2（faster-whisper）能否使用 CUDA 加速。
+    Apple Silicon 的 CTranslate2 沒有 Metal 後端，一律走 CPU（ASR 另用 mlx）。"""
+    if _is_apple_silicon():
+        return False
+    try:
+        import ctranslate2
+        return bool(ctranslate2.get_supported_compute_types("cuda"))
+    except Exception:
+        return False
+
+
+def _fw_device_kwargs():
+    """faster-whisper WhisperModel 的 device / compute_type 設定。
+
+    RTX 50 系列（Blackwell, sm_120）跑 int8 量化會噴
+    `cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED`，
+    故 CUDA 一律改用 float16（速度更快、準確度更好，VRAM 也夠）；
+    無 CUDA 時維持 device="auto" + int8（CPU 上 int8 才快）。"""
+    if _fw_local_cuda_ok():
+        return {"device": "cuda", "compute_type": "float16"}
+    return {"device": "auto", "compute_type": "int8"}
+
+
+@lru_cache(maxsize=1)
 def _get_system_memory_gb():
     """取得系統實體記憶體大小（GB）"""
     try:
@@ -773,7 +798,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.16.5"
+APP_VERSION = "2.16.6"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -5728,7 +5753,7 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning)
         warnings.filterwarnings("ignore", category=FutureWarning)
-        fw_model = _call_with_ssl_retry(WhisperModel, model_name, device="auto", compute_type="int8")
+        fw_model = _call_with_ssl_retry(WhisperModel, model_name, **_fw_device_kwargs())
     _hf_logger.setLevel(_hf_log_level)
     if _fw_need_download:
         print(f"  {C_OK}模型下載完成（{time.monotonic() - t0:.1f}s）{RESET}")
@@ -6489,7 +6514,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
             warnings.filterwarnings("ignore", category=FutureWarning)
-            fw_model = _call_with_ssl_retry(WhisperModel, model_name, device="auto", compute_type="int8")
+            fw_model = _call_with_ssl_retry(WhisperModel, model_name, **_fw_device_kwargs())
         _hf_logger.setLevel(_hf_log_level)
         if _fw_need_download:
             print(f"  {C_OK}模型下載完成（{time.monotonic() - t0:.1f}s）{RESET}")
@@ -9904,7 +9929,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             return None, None, None
 
         print(f"  {C_WHITE}載入模型    {model_size}...{RESET}", end=" ", flush=True)
-        model = _call_with_ssl_retry(WhisperModel, model_size, device="auto", compute_type="int8")
+        model = _call_with_ssl_retry(WhisperModel, model_size, **_fw_device_kwargs())
         print(f"{C_OK}✓{RESET}")
         print(f"  {C_WHITE}辨識中...{RESET}\n")
         _webui_send({"type": "progress", "stage": "辨識中", "detail": f"本機 {model_size}"})
@@ -10370,7 +10395,7 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
                 return [], _loose
 
             print(f"  {C_WHITE}{label} 載入模型 {model_size}...{RESET}", end=" ", flush=True)
-            model = _call_with_ssl_retry(WhisperModel, model_size, device="auto", compute_type="int8")
+            model = _call_with_ssl_retry(WhisperModel, model_size, **_fw_device_kwargs())
             print(f"{C_OK}✓{RESET}")
 
             sbar = _SummaryStatusBar(model=model_size, task=f"{label} 辨識中", asr_location="本機").start()

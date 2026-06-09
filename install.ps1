@@ -301,7 +301,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.16.5 - 100% 全地端 AI 語音工具集 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.16.6 - 100% 全地端 AI 語音工具集 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -594,7 +594,9 @@ if ((cmd_exists $nvidiaSmi) -or (Test-Path $nvidiaSmi)) {
             }
 
             # 對應 PyTorch CUDA wheel 版本
-            if     ($CUDA_VERSION -match "^12\.[4-9]|^1[3-9]") { $TORCH_CUDA_TAG = "cu124" }
+            # CUDA 12.8+/13.x：RTX 50 系列（Blackwell, sm_120）需要 cu128（torch 2.7+），cu124 僅到 sm_90
+            if     ($CUDA_VERSION -match "^12\.[89]|^1[3-9]\.") { $TORCH_CUDA_TAG = "cu128" }
+            elseif ($CUDA_VERSION -match "^12\.[4-7]")          { $TORCH_CUDA_TAG = "cu124" }
             elseif ($CUDA_VERSION -match "^12\.")               { $TORCH_CUDA_TAG = "cu121" }
             elseif ($CUDA_VERSION -match "^11\.[8-9]")          { $TORCH_CUDA_TAG = "cu118" }
             else                                                 { $TORCH_CUDA_TAG = "cu121" }
@@ -655,7 +657,9 @@ if (-not $GPU_AVAILABLE) {
                         $CUDA_13_PLUS = $true
                         check_notice "CUDA ${CUDA_VERSION} 偵測到 — 將自動安裝 CUDA 12.x 相容程式庫"
                     }
-                    if     ($CUDA_VERSION -match "^12\.[4-9]|^1[3-9]") { $TORCH_CUDA_TAG = "cu124" }
+                    # CUDA 12.8+/13.x：RTX 50 系列（Blackwell, sm_120）需要 cu128（torch 2.7+），cu124 僅到 sm_90
+                    if     ($CUDA_VERSION -match "^12\.[89]|^1[3-9]\.") { $TORCH_CUDA_TAG = "cu128" }
+                    elseif ($CUDA_VERSION -match "^12\.[4-7]")          { $TORCH_CUDA_TAG = "cu124" }
                     elseif ($CUDA_VERSION -match "^12\.")               { $TORCH_CUDA_TAG = "cu121" }
                     elseif ($CUDA_VERSION -match "^11\.[8-9]")          { $TORCH_CUDA_TAG = "cu118" }
                     else                                                 { $TORCH_CUDA_TAG = "cu121" }
