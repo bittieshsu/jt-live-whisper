@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>jt-live-whisper — 100% 全地端 AI 語音工具集</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="description" content="jt-live-whisper：100% 全地端 AI 語音工具集。即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。支援 macOS / Windows，可選配 GPU 伺服器加速。" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <span class="brand">
+      <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
+        <defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2c3e50"/><stop offset="1" stop-color="#3498db"/></linearGradient></defs>
+        <rect width="64" height="64" rx="14" fill="url(#bm)"/>
+        <g stroke="#fff" stroke-width="4" stroke-linecap="round">
+          <line x1="16" y1="26" x2="16" y2="38"/><line x1="25" y1="18" x2="25" y2="46"/>
+          <line x1="34" y1="24" x2="34" y2="40"/><line x1="43" y1="14" x2="43" y2="50"/><line x1="52" y1="28" x2="52" y2="36"/>
+        </g>
+      </svg>
+      jt-live-whisper
+    </span>
+    <div class="nav-links">
+      <a href="#why"><span class="zh">為什麼</span><span class="en">Why</span></a>
+      <a href="#features"><span class="zh">核心功能</span><span class="en">Features</span></a>
+      <a href="#deploy"><span class="zh">部署</span><span class="en">Deploy</span></a>
+      <a href="#screens"><span class="zh">畫面</span><span class="en">Screenshots</span></a>
+      <a href="#install"><span class="zh">安裝</span><span class="en">Install</span></a>
+      <a href="features.html"><span class="zh">功能詳解</span><span class="en">All features</span></a>
+      <a href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
+      <button class="btn btn-ghost btn-sm" id="langBtn" type="button">English</button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>
+      <span class="zh"><span class="nb">把每一段聲音，</span><span class="nb">即時變成你看得懂的字幕</span></span>
+      <span class="en">Turn any sound into subtitles <span class="nb">you understand</span> — <span class="nb">in real time</span></span>
+    </h1>
+    <p class="lead">
+      <span class="zh">jt-live-whisper 是 100% 全地端的 AI 語音工具集：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識與會議摘要。所有 AI 模型都在你自己的設備上執行，資料不經過任何雲端服務。</span>
+      <span class="en">jt-live-whisper is a 100% on-device AI voice toolkit: live transcription, live translation, batch audio processing, speaker diarization and meeting summaries. Every AI model runs on your own hardware — nothing ever touches the cloud.</span>
+    </p>
+    <ul class="hero-points">
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        <span><span class="zh"><b>完全地端、零雲端 API</b>：會議內容全程留在自有設備</span><span class="en"><b>Fully on-device, no cloud API</b> — meeting content never leaves your machine</span></span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        <span><span class="zh"><b>不限應用程式</b>：Zoom、Teams、Meet、YouTube、Podcast 都能即時翻</span><span class="en"><b>Any app</b> — Zoom, Teams, Meet, YouTube, podcasts, all in real time</span></span></li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        <span><span class="zh"><b>零月租成本</b>：採用自由開源模型，不需付費雲端 API</span><span class="en"><b>Zero subscription</b> — built on free, open-source models</span></span></li>
+    </ul>
+    <div class="cta">
+      <a class="btn btn-primary" href="#install"><span class="zh">三行指令安裝</span><span class="en">Install in 3 commands</span></a>
+      <a class="btn btn-ghost" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener"><span class="zh">前往 GitHub 專案</span><span class="en">Go to GitHub</span></a>
+    </div>
+    <div class="hero-shot">
+      <img class="shot shot-hero" src="shots/webui-chat-bidi.png" loading="lazy" alt="WebUI 英中雙向對話模式 / WebUI bidirectional chat" />
+    </div>
+    <div class="pills">
+      <span class="pill"><span class="zh">即時翻譯字幕</span><span class="en">Live subtitles</span></span>
+      <span class="pill"><span class="zh">中日英互譯</span><span class="en">ZH / JA / EN</span></span>
+      <span class="pill"><span class="zh">講者辨識</span><span class="en">Speaker diarization</span></span>
+      <span class="pill"><span class="zh">AI 會議摘要</span><span class="en">AI summaries</span></span>
+      <span class="pill"><span class="zh">雙向字幕</span><span class="en">Bidirectional</span></span>
+      <span class="pill"><span class="zh">WebUI 介面</span><span class="en">Web UI</span></span>
+      <span class="pill"><span class="zh">懸浮字幕</span><span class="en">Overlay subtitles</span></span>
+      <span class="pill"><span class="zh">關鍵字通知</span><span class="en">Keyword alerts</span></span>
+      <span class="pill">macOS · Windows</span>
+    </div>
+  </div>
+</header>
+
+<section class="callout-sec">
+  <div class="wrap callout">
+    <span class="ci"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 7.5 8 9 4.6-1.5 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></span>
+    <div>
+      <h3><span class="zh">資料留在自己手上，才能安心開機密會議</span><span class="en">Your data stays yours — safe enough for confidential meetings</span></h3>
+      <p><span class="zh">語音辨識、翻譯、講者辨識、摘要全部使用自有設備上的 AI 模型，不需要任何雲端 API Key，也不會把語音或會議內容上傳給第三方。適合企業內部會議、機密討論，以及任何在意隱私的場合。</span><span class="en">Speech recognition, translation, diarization and summarization all run on AI models on your own hardware — no cloud API keys, nothing uploaded to any third party. Built for internal meetings, confidential discussions and anyone who cares about privacy.</span></p>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2><span class="zh">為什麼選 jt-live-whisper</span><span class="en">Why jt-live-whisper</span></h2>
+      <p><span class="zh">一套工具，從即時翻譯到會後摘要全包，全程不離開你的設備。</span><span class="en">One toolkit — from live translation to post-meeting summaries — all without leaving your device.</span></p>
+    </div>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 7.5 8 9 4.6-1.5 8-4 8-9V6z"/></svg></span><span class="zh">完全地端執行</span><span class="en">Fully on-device</span></h3><p><span class="zh">辨識、翻譯、講者辨識、摘要全部用自有設備上的 AI 模型，無需雲端 API Key、不上傳任何資料。</span><span class="en">Recognition, translation, diarization and summaries all use local AI models — no cloud API key, no uploads.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="zh">隱私安全</span><span class="en">Private &amp; secure</span></h3><p><span class="zh">會議內容、語音資料全程留在自有設備，適合企業內部會議與機密討論。</span><span class="en">Meeting content and audio stay on your machine — ideal for internal and confidential discussions.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/></svg></span><span class="zh">零月租成本</span><span class="en">Zero subscription</span></h3><p><span class="zh">不需要付費雲端 API（ChatGPT、Claude、Gemini 等），所有採用的 AI 模型皆為自由開源。</span><span class="en">No paid cloud APIs (ChatGPT, Claude, Gemini…) — every model is free and open source.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10M4 17h16M4 17l-1 3h18l-1-3"/></svg></span><span class="zh">不限應用程式</span><span class="en">Any application</span></h3><p><span class="zh">採用系統音訊裝置層級擷取，理論上任何軟體的聲音輸出都能處理（Zoom、Teams、Meet、YouTube、Podcast 等）。</span><span class="en">Captures at the system-audio device level — virtually any app's output works (Zoom, Teams, Meet, YouTube, podcasts…).</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-7"/></svg></span><span class="zh">功能完整</span><span class="en">Complete toolkit</span></h3><p><span class="zh">從即時轉錄翻譯、離線音訊處理、講者辨識到 AI 摘要，一套搞定。</span><span class="en">From live transcription &amp; translation to offline processing, diarization and AI summaries — all in one.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg></span><span class="zh">三行指令安裝</span><span class="en">Three-command install</span></h3><p><span class="zh">貼上三行指令，安裝腳本自動下載並編譯所有 AI 模型和相依套件，macOS 與 Windows 都支援。</span><span class="en">The installer downloads and builds every AI model and dependency for you — macOS and Windows.</span></p></div>
+    </div>
+    <p class="note" style="margin-top:24px">
+      <span class="zh"><strong>緣起：</strong>某次參加原廠的線上技術課程，全程英文授課，聽得七零八落。為了補足英文聽力的不足，乾脆動手打造了這套工具來即時翻譯，結果功能越做越多，就變成現在這個樣子了 XD</span>
+      <span class="en"><strong>Origin:</strong> Struggling to follow an all-English vendor training session, the author built a tool to translate it live — then kept adding features until it became what you see today. 😄</span>
+    </p>
+  </div>
+</section>
+
+<section id="features" class="alt">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2><span class="zh">核心功能</span><span class="en">Core features</span></h2>
+      <p><span class="zh">即時、離線、講者、摘要——會議全流程都覆蓋。</span><span class="en">Live, offline, speakers and summaries — the whole meeting workflow.</span></p>
+    </div>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="zh">即時語音轉錄翻譯</span><span class="en">Live transcription &amp; translation</span></h3><p><span class="zh">擷取系統音訊，地端 AI 即時辨識並翻譯成繁體中文字幕顯示於終端機。開會、看影片、聽 Podcast 即時翻譯。</span><span class="en">Captures system audio and transcribes &amp; translates it to subtitles in real time — meetings, videos, podcasts.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H4z"/><path d="M2 20h20M9 8l3 2-3 2"/></svg></span><span class="zh">離線音訊檔批次處理</span><span class="en">Offline batch processing</span></h3><p><span class="zh">支援 mp3 / wav / m4a / flac，使用 faster-whisper 離線轉錄翻譯，適合會後補做逐字稿。</span><span class="en">mp3 / wav / m4a / flac via faster-whisper — perfect for post-meeting transcripts.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.2"/><path d="M3 20a6 6 0 0 1 12 0M14 20a5 5 0 0 1 7 0"/></svg></span><span class="zh">講者辨識</span><span class="en">Speaker diarization</span></h3><p><span class="zh">自動辨識音訊中的不同講者並以不同顏色標示，支援自動偵測或手動指定講者人數。</span><span class="en">Detects different speakers and color-codes them — auto-detect or set the speaker count manually.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span><span class="zh">AI 會議摘要</span><span class="en">AI meeting summary</span></h3><p><span class="zh">透過地端 LLM 產出重點整理 + 校正逐字稿，搭配講者辨識，摘要中不同講者以不同顏色區分。</span><span class="en">A local LLM produces key-point summaries plus a corrected transcript, color-coded by speaker.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="zh">時間軸互動逐字稿</span><span class="en">Interactive transcript</span></h3><p><span class="zh">HTML 逐字稿內嵌音訊播放器與波形圖，點波形即跳到該時間點，播放時對應段落即時高亮。</span><span class="en">HTML transcript with an embedded player and waveform — click to seek; the current line highlights as it plays.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4M16 21l4-4-4-4M4 7h11a5 5 0 0 1 5 5M20 17H9a5 5 0 0 1-5-5"/></svg></span><span class="zh">雙向字幕 + 10 種模式</span><span class="en">Bidirectional &amp; 10 modes</span></h3><p><span class="zh">英中 / 日中雙向，同時擷取系統音訊與麥克風，對方外語翻中文、自己中文翻外語；共 10 種功能模式。</span><span class="en">EN↔ZH / JA↔ZH bidirectional from system audio + mic, plus 10 modes in total.</span></p></div>
+    </div>
+    <p style="text-align:center;margin-top:28px"><a class="btn btn-ghost" href="features.html"><span class="zh">看完整功能詳解 →</span><span class="en">See all features →</span></a></p>
+  </div>
+</section>
+
+<section id="deploy">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2><span class="zh">兩種部署方式</span><span class="en">Two ways to deploy</span></h2>
+      <p><span class="zh">一台電腦就能跑；要更快，再加一台 GPU 伺服器。兩種模式可隨時切換、自動降級。</span><span class="en">Run on one machine, or add a GPU server for speed. Switch anytime — it auto-falls back.</span></p>
+    </div>
+    <div class="grid g2">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span><span class="zh">單機模式</span><span class="en">Single machine</span></h3>
+        <p style="margin-bottom:10px"><span class="zh">一台 Mac 或 Windows PC 即可完成所有處理，不需要額外硬體。</span><span class="en">One Mac or Windows PC handles everything — no extra hardware.</span></p>
+        <ul style="margin:0;padding-left:18px;font-size:14px;color:var(--body);line-height:1.8">
+          <li><span class="zh"><b>macOS Apple Silicon</b>（M1–M4）：mlx-whisper Metal GPU 加速，辨識約 1–3 秒</span><span class="en"><b>macOS Apple Silicon</b> (M1–M4): mlx-whisper Metal GPU, ~1–3 s recognition</span></li>
+          <li><span class="zh"><b>Windows + NVIDIA GPU</b>：安裝程式自動啟用 CUDA，辨識約 0.5–1 秒</span><span class="en"><b>Windows + NVIDIA GPU</b>: installer auto-enables CUDA, ~0.5–1 s</span></li>
+          <li><span class="zh"><b>無 GPU / Intel Mac</b>：CPU 辨識，搭配 small 模型可用</span><span class="en"><b>No GPU / Intel Mac</b>: CPU recognition with the small model</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/></svg></span><span class="zh">本機 + GPU 伺服器</span><span class="en">Client + GPU server</span></h3>
+        <p style="margin-bottom:10px"><span class="zh">本機負責音訊擷取與介面，辨識與講者辨識交給區網內的 GPU 伺服器（系統音訊與麥克風兩路都可送遠端）。</span><span class="en">The client captures audio &amp; UI; recognition and diarization run on a LAN GPU server (both system audio &amp; mic).</span></p>
+        <ul style="margin:0;padding-left:18px;font-size:14px;color:var(--body);line-height:1.8">
+          <li><span class="zh">離線辨識快 <b>5–10 倍</b>，即時辨識約 <b>0.3–0.5 秒</b></span><span class="en">Offline <b>5–10× faster</b>; live recognition ~<b>0.3–0.5 s</b></span></li>
+          <li><span class="zh">伺服器可為 DGX Spark 或裝有 NVIDIA GPU 的 Linux 主機（RTX 4090 / 5090 亦可）</span><span class="en">DGX Spark or any Linux box with an NVIDIA GPU (RTX 4090 / 5090 work too)</span></li>
+          <li><span class="zh"><b>伺服器離線自動降級為本機處理</b>，不中斷使用</span><span class="en"><b>Auto-falls back to local</b> if the server is offline — no interruption</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="screens">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow"><span class="zh">實際畫面</span><span class="en">Screenshots</span></span>
+      <h2><span class="zh">畫面導覽</span><span class="en">See it in action</span></h2>
+      <p><span class="zh">點任一張圖可放大。</span><span class="en">Click any image to enlarge.</span></p>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/realtime-en2zh-2.png" loading="lazy" alt="即時英翻中字幕（macOS）" />
+      <div class="screen-txt"><span class="num">01</span>
+        <h3><span class="zh">即時翻譯字幕</span><span class="en">Live translated subtitles</span></h3>
+        <p><span class="zh">擷取系統音訊，地端 AI 一邊聽一邊辨識並翻成繁體中文，字幕即時顯示於終端機，並附上翻譯速度標籤與音訊波形。開會、看影片、聽 Podcast 都能即時跟上。</span><span class="en">Captures system audio and transcribes &amp; translates it live, with speed badges and an audio waveform right in the terminal — keep up with meetings, videos and podcasts.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/webui-settings-1.png" loading="lazy" alt="WebUI 設定頁" />
+      <div class="screen-txt"><span class="num">02</span>
+        <h3><span class="zh">WebUI 瀏覽器介面</span><span class="en">Web UI in your browser</span></h3>
+        <p><span class="zh">`--webui` 在瀏覽器中完成所有設定與操作：即時字幕、離線處理、講者辨識、摘要全包，辨識模型依裝置自動推薦，各階段即時進度顯示，手機 / 平板也能用。</span><span class="en">With <code>--webui</code>, do everything in the browser — live subtitles, offline processing, diarization and summaries — with device-aware model recommendations, live progress, and phone/tablet support.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/webui-subtitle-bidi.png" loading="lazy" alt="WebUI 字幕模式 - 雙向" />
+      <div class="screen-txt"><span class="num">03</span>
+        <h3><span class="zh">雙向字幕模式</span><span class="en">Bidirectional subtitles</span></h3>
+        <p><span class="zh">英中（en_zh）與日中（ja_zh）雙向：同時擷取系統音訊與麥克風，對方外語翻中文、自己中文翻外語，適用於雙語視訊會議。電影風格黑底大字，一眼看清。</span><span class="en">EN↔ZH and JA↔ZH: captures system audio and your mic at once — their language to Chinese, your Chinese to theirs. Big cinema-style captions for bilingual calls.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/offline-menu-1.png" loading="lazy" alt="離線處理選單" />
+      <div class="screen-txt"><span class="num">04</span>
+        <h3><span class="zh">離線批次處理</span><span class="en">Offline batch processing</span></h3>
+        <p><span class="zh">匯入錄音檔即可離線轉錄翻譯。互動式選單依序引導模式、辨識位置與模型、翻譯引擎、講者辨識與摘要設定，最後顯示等效 CLI 指令方便下次直接用。</span><span class="en">Import a recording for offline transcription. The interactive menu walks you through mode, engine, diarization and summary, then prints the equivalent CLI command for next time.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/offline-diarize-result.png" loading="lazy" alt="講者辨識結果" />
+      <div class="screen-txt"><span class="num">05</span>
+        <h3><span class="zh">講者辨識</span><span class="en">Speaker diarization</span></h3>
+        <p><span class="zh">自動辨識音訊中的不同講者，以不同顏色清楚標示，支援自動偵測或手動指定 2–20 位講者。誰在什麼時候說了什麼，一目了然。</span><span class="en">Identifies different speakers and color-codes them — auto-detect or set 2–20 speakers manually. Who said what, when, at a glance.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/summary-output.png" loading="lazy" alt="AI 會議摘要" />
+      <div class="screen-txt"><span class="num">06</span>
+        <h3><span class="zh">AI 會議摘要</span><span class="en">AI meeting summary</span></h3>
+        <p><span class="zh">批次對記錄檔生成摘要，透過地端 LLM 產出重點整理與校正逐字稿。搭配講者辨識時，摘要中不同講者以不同顏色區分，會後重點立即成形。</span><span class="en">Generates summaries from logs via a local LLM — key points plus a corrected transcript, color-coded by speaker when diarization is on.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/offline-transcript.png" loading="lazy" alt="時間軸逐字稿 HTML" />
+      <div class="screen-txt"><span class="num">07</span>
+        <h3><span class="zh">時間軸互動逐字稿</span><span class="en">Interactive timeline transcript</span></h3>
+        <p><span class="zh">時間逐字稿 HTML 內嵌音訊播放器與波形圖，可直接點波形任意位置跳至該時間點；播放時對應段落即時高亮，對照聆聽超方便。另可輸出 SRT / WebVTT 字幕檔。</span><span class="en">The HTML transcript embeds a player and waveform — click anywhere to seek, and the matching line highlights as it plays. SRT / WebVTT export too.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/keyword-alert.png" loading="lazy" alt="關鍵字即時通知" />
+      <div class="screen-txt"><span class="num">08</span>
+        <h3><span class="zh">關鍵字即時通知</span><span class="en">Keyword alerts</span></h3>
+        <p><span class="zh">設定關鍵字，即時辨識出現時自動全螢幕警示 + 音效提醒。可追蹤會議重點，或線上課程在「請實作」「這個會考」時自動提醒，內建冷卻機制避免重複通知。</span><span class="en">Set keywords and get a full-screen alert plus sound the moment they're spoken — great for tracking key topics, with a cooldown to avoid repeats.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/subtitle-overlay.png" loading="lazy" alt="懸浮字幕" />
+      <div class="screen-txt"><span class="num">09</span>
+        <h3><span class="zh">懸浮字幕</span><span class="en">Overlay subtitles</span></h3>
+        <p><span class="zh">桌面半透明字幕覆蓋視窗（PyQt6），可疊加於任何應用程式上方。字體依視窗大小自動縮放、可拖曳移動與調整大小、支援滑鼠穿透與淡入淡出動畫，單語 / 雙語自動切換高度。</span><span class="en">A translucent desktop overlay (PyQt6) that floats over any app — auto-scaling text, drag &amp; resize, click-through mode and fade animations.</span></p>
+      </div>
+    </div>
+
+    <div class="screen-row">
+      <img class="shot" src="shots/forward-telegram-result.png" loading="lazy" alt="字幕轉發到 Telegram" />
+      <div class="screen-txt"><span class="num">10</span>
+        <h3><span class="zh">字幕轉發</span><span class="en">Subtitle forwarding</span></h3>
+        <p><span class="zh">即時字幕自動轉發到通訊平台：Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / 通用 API。可同時啟用多平台、自訂發送間隔與內容（含時間 / 原文 / 譯文）。</span><span class="en">Forwards live subtitles to Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / a custom API — multiple at once, with custom intervals and content.</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="alt">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2><span class="zh">三行指令安裝</span><span class="en">Install in 3 commands</span></h2>
+      <p><span class="zh">安裝腳本自動下載並設定所有地端 AI 模型和相依套件。首次約 10–20 分鐘。</span><span class="en">The installer downloads and configures every local AI model and dependency. First run takes ~10–20 min.</span></p>
+    </div>
+
+    <div class="cmd-label"><span class="zh">macOS — 終端機貼上即可</span><span class="en">macOS — paste into Terminal</span></div>
+<pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
+<span class="g">bash</span> install.sh</pre>
+
+    <div class="cmd-label"><span class="zh">Windows — 以系統管理員開啟 PowerShell</span><span class="en">Windows — open PowerShell as Administrator</span></div>
+<pre>mkdir C:\jt-live-whisper -Force | Out-Null; cd C:\jt-live-whisper
+irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.ps1 -OutFile install.ps1
+<span class="g">powershell</span> -ExecutionPolicy Bypass -File install.ps1</pre>
+
+    <div class="cmd-label"><span class="zh">啟動（推薦 WebUI）</span><span class="en">Launch (Web UI recommended)</span></div>
+<pre><span class="c"># macOS</span>
+./start.sh --webui
+<span class="c"># Windows</span>
+.\start.ps1 --webui</pre>
+
+    <p class="note">
+      <span class="zh"><strong>不裝 LLM 也能翻譯：</strong>程式可切換為 NLLB（中日英互譯）或 Argos（僅英翻中）離線翻譯引擎，完全不需要額外伺服器。注意：摘要功能仍需 LLM 伺服器（推薦 <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a>）。</span>
+      <span class="en"><strong>No LLM needed to translate:</strong> switch to the NLLB (ZH/JA/EN) or Argos (EN→ZH) offline engines — no server required. Summaries still need an LLM server (<a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a> recommended).</span>
+    </p>
+    <p style="text-align:center;margin-top:8px"><a class="btn btn-primary" href="usage.html"><span class="zh">完整安裝與使用說明 →</span><span class="en">Full install &amp; usage docs →</span></a></p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <div>
+      <strong>jt-live-whisper</strong> · <span class="zh">100% 全地端 AI 語音工具集</span><span class="en">100% on-device AI voice toolkit</span><br>
+      <span style="opacity:.7">Apache-2.0 · © 2026 Jason Cheng (Jason Tools)</span>
+    </div>
+    <div>
+      <a href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a> ·
+      <a href="https://github.com/jasoncheng7115/jt-live-whisper/blob/main/SOP.md" target="_blank" rel="noopener">SOP</a> ·
+      <a href="https://github.com/jasoncheng7115/jt-live-whisper/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a> ·
+      <a href="https://github.com/jasoncheng7115/jt-live-whisper/issues" target="_blank" rel="noopener">Issues</a>
+    </div>
+  </div>
+</footer>
+
+<div id="lightbox"><img id="lightbox-img" alt="" /></div>
+<script src="script.js"></script>
+</body>
+</html>

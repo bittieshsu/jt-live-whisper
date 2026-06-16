@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>功能詳解 — jt-live-whisper</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="description" content="jt-live-whisper 功能詳解：使用的 AI 模型、10 種功能模式、本地端辨識與翻譯引擎、會議主題感知翻譯、互動式選單與 CLI、WebUI、關鍵字通知、懸浮字幕、字幕轉發、支援的 LLM 伺服器與產出檔案。" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<nav>
+  <div class="wrap nav-in">
+    <a class="brand" href="index.html" style="text-decoration:none">
+      <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
+        <defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2c3e50"/><stop offset="1" stop-color="#3498db"/></linearGradient></defs>
+        <rect width="64" height="64" rx="14" fill="url(#bm)"/>
+        <g stroke="#fff" stroke-width="4" stroke-linecap="round">
+          <line x1="16" y1="26" x2="16" y2="38"/><line x1="25" y1="18" x2="25" y2="46"/>
+          <line x1="34" y1="24" x2="34" y2="40"/><line x1="43" y1="14" x2="43" y2="50"/><line x1="52" y1="28" x2="52" y2="36"/>
+        </g>
+      </svg>
+      jt-live-whisper
+    </a>
+    <div class="nav-links">
+      <a href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
+      <a href="#models"><span class="zh">AI 模型</span><span class="en">AI models</span></a>
+      <a href="#modes"><span class="zh">功能模式</span><span class="en">Modes</span></a>
+      <a href="#engines"><span class="zh">引擎</span><span class="en">Engines</span></a>
+      <a href="#advanced"><span class="zh">進階特色</span><span class="en">Advanced</span></a>
+      <a href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
+      <button class="btn btn-ghost btn-sm" id="langBtn" type="button">English</button>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" style="padding:64px 0 44px">
+  <div class="wrap">
+    <span class="eyebrow"><span class="zh">功能詳解</span><span class="en">All features</span></span>
+    <h1 style="margin-top:6px"><span class="zh">每一項功能，完整說清楚</span><span class="en">Every feature, in full</span></h1>
+    <p class="lead"><span class="zh">從採用的 AI 模型、10 種功能模式，到關鍵字通知、懸浮字幕與字幕轉發——這裡是 jt-live-whisper 的完整功能地圖。</span><span class="en">From the AI models and 10 modes to keyword alerts, overlay subtitles and forwarding — the complete feature map.</span></p>
+  </div>
+</header>
+
+<section id="models">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">使用的 AI 模型</span><span class="en">AI models used</span></h2>
+      <p><span class="zh">所有模型皆在自有設備上推論（本機或區網內的 GPU 伺服器），不需要任何第三方雲端 API。</span><span class="en">Every model runs on your own hardware (local or a LAN GPU server) — no third-party cloud API.</span></p></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th><span class="zh">用途</span><span class="en">Purpose</span></th>
+          <th><span class="zh">AI 模型</span><span class="en">Model</span></th>
+          <th><span class="zh">說明</span><span class="en">Notes</span></th>
+        </tr></thead>
+        <tbody>
+          <tr><td><span class="zh">語音辨識 (ASR)</span><span class="en">ASR</span></td><td><strong>whisper.cpp</strong></td><td><span class="zh">macOS 即時辨識引擎，支援中日英文，可在本機或 GPU 伺服器執行</span><span class="en">macOS live engine; ZH/JA/EN; local or GPU server</span></td></tr>
+          <tr><td><span class="zh">語音辨識 (ASR)</span><span class="en">ASR</span></td><td><strong>faster-whisper</strong> (CTranslate2)</td><td><span class="zh">Windows 即時辨識 + 全平台離線處理，支援 VAD 靜音過濾</span><span class="en">Windows live + all-platform offline; VAD silence filtering</span></td></tr>
+          <tr><td><span class="zh">語音辨識 (ASR)</span><span class="en">ASR</span></td><td><strong>mlx-whisper</strong></td><td><span class="zh">Apple Silicon GPU 加速，雙向模式（en_zh / ja_zh）即時辨識專用</span><span class="en">Apple Silicon GPU; for bidirectional live modes</span></td></tr>
+          <tr><td><span class="zh">語音辨識 (ASR)</span><span class="en">ASR</span></td><td><strong>Moonshine</strong> (Useful Sensors)</td><td><span class="zh">超低延遲串流辨識模型，英文專用（僅限 Apple Silicon）</span><span class="en">Ultra-low-latency streaming, English only (Apple Silicon)</span></td></tr>
+          <tr><td><span class="zh">翻譯 / 摘要</span><span class="en">Translate / summary</span></td><td><span class="zh">自架 LLM 伺服器（推薦 <strong>Qwen</strong> / <strong>Phi-4</strong> / <strong>GPT-OSS</strong>）</span><span class="en">Self-hosted LLM (<strong>Qwen</strong> / <strong>Phi-4</strong> / <strong>GPT-OSS</strong>)</span></td><td><span class="zh">透過地端 Ollama 或其他 LLM 伺服器，翻譯建議 14B 以上、摘要建議 120B 以上</span><span class="en">Via local Ollama or other servers; ≥14B for translation, ≥120B for summaries</span></td></tr>
+          <tr><td><span class="zh">翻譯 (離線)</span><span class="en">Translate (offline)</span></td><td><strong>NLLB 600M</strong> (Meta)</td><td><span class="zh">離線翻譯，支援中日英互譯（en2zh / zh2en / ja2zh / zh2ja）</span><span class="en">Offline ZH/JA/EN translation</span></td></tr>
+          <tr><td><span class="zh">翻譯 (離線備援)</span><span class="en">Translate (fallback)</span></td><td><strong>Argos Translate</strong></td><td><span class="zh">完全離線的輕量翻譯模型，僅支援英翻中</span><span class="en">Fully offline, lightweight; English→Chinese only</span></td></tr>
+          <tr><td><span class="zh">講者辨識</span><span class="en">Diarization</span></td><td><strong>resemblyzer</strong> + <strong>spectralcluster</strong></td><td><span class="zh">聲紋特徵提取 + 頻譜分群，可在本機或 GPU 伺服器執行</span><span class="en">Voice embeddings + spectral clustering; local or GPU server</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:18px">
+      <span class="zh"><strong>為什麼講者辨識不用 pyannote.audio？</strong> pyannote 的預訓練模型授權限制了用途與場景，且需要在 HuggingFace 註冊帳號、申請存取權限並設定 Token 才能下載。這不符合本工具「零帳號、零註冊、完全地端」的設計理念。resemblyzer + spectralcluster 完全開源、安裝即用、無需任何帳號或 Token。</span>
+      <span class="en"><strong>Why not pyannote.audio for diarization?</strong> Its pretrained models carry usage restrictions and require a HuggingFace account, access request and token. That clashes with the project's "no account, no signup, fully on-device" principle. resemblyzer + spectralcluster are fully open source and work out of the box.</span>
+    </p>
+  </div>
+</section>
+
+<section id="modes" class="alt">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">10 種功能模式</span><span class="en">10 functional modes</span></h2>
+      <p><span class="zh">單向翻譯、雙向翻譯、純轉錄、純錄音，滿足各種使用場景。</span><span class="en">One-way, bidirectional, transcription-only and record-only — for every scenario.</span></p></div>
+    <div class="modes">
+      <div class="mode"><span class="tag">en2zh</span><span><b><span class="zh">英翻中</span><span class="en">EN → ZH</span></b></span></div>
+      <div class="mode"><span class="tag">zh2en</span><span><b><span class="zh">中翻英</span><span class="en">ZH → EN</span></b></span></div>
+      <div class="mode"><span class="tag">ja2zh</span><span><b><span class="zh">日翻中</span><span class="en">JA → ZH</span></b></span></div>
+      <div class="mode"><span class="tag">zh2ja</span><span><b><span class="zh">中翻日</span><span class="en">ZH → JA</span></b></span></div>
+      <div class="mode"><span class="tag">en_zh</span><span><b><span class="zh">英中雙向</span><span class="en">EN ↔ ZH</span></b> <span><span class="zh">系統音訊 + 麥克風</span><span class="en">system + mic</span></span></span></div>
+      <div class="mode"><span class="tag">ja_zh</span><span><b><span class="zh">日中雙向</span><span class="en">JA ↔ ZH</span></b> <span><span class="zh">系統音訊 + 麥克風</span><span class="en">system + mic</span></span></span></div>
+      <div class="mode"><span class="tag">en</span><span><b><span class="zh">純英文轉錄</span><span class="en">English transcription</span></b></span></div>
+      <div class="mode"><span class="tag">zh</span><span><b><span class="zh">純中文轉錄</span><span class="en">Chinese transcription</span></b></span></div>
+      <div class="mode"><span class="tag">ja</span><span><b><span class="zh">純日文轉錄</span><span class="en">Japanese transcription</span></b></span></div>
+      <div class="mode"><span class="tag">record</span><span><b><span class="zh">純錄音</span><span class="en">Record only</span></b></span></div>
+    </div>
+    <p class="note" style="margin-top:18px"><span class="zh">所有即時轉錄模式加上 <code>--mic</code> 即可同時轉錄自己的麥克風語音，雙向模式則自動啟用雙路辨識。</span><span class="en">Add <code>--mic</code> to any live transcription mode to also transcribe your microphone; bidirectional modes enable dual-stream automatically.</span></p>
+  </div>
+</section>
+
+<section id="engines">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">多種本地端引擎</span><span class="en">Multiple local engines</span></h2>
+      <p><span class="zh">辨識與翻譯都有多種引擎可選，依場景與硬體自由搭配。</span><span class="en">Choose recognition and translation engines to fit your scenario and hardware.</span></p></div>
+    <div class="grid g2">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="zh">語音辨識引擎</span><span class="en">Recognition engines</span></h3>
+        <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.8;color:var(--body)">
+          <li><span class="zh"><b>Whisper</b>：高準確度，即時辨識主力</span><span class="en"><b>Whisper</b>: high accuracy, the live default</span></li>
+          <li><span class="zh"><b>Moonshine</b>：超低延遲 ~300ms（英文）</span><span class="en"><b>Moonshine</b>: ultra-low latency ~300 ms (English)</span></li>
+          <li><span class="zh"><b>faster-whisper</b>：離線批次處理，支援 VAD 靜音過濾</span><span class="en"><b>faster-whisper</b>: offline batch, with VAD silence filtering</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h8M9 4v4M7 8c0 4-2 6-4 7M11 8c0 5 3 8 6 9M14 18h7M16 22l2-6 2 6"/></svg></span><span class="zh">翻譯引擎</span><span class="en">Translation engines</span></h3>
+        <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.8;color:var(--body)">
+          <li><span class="zh"><b>LLM</b>：Ollama / OpenAI 相容伺服器，品質最佳</span><span class="en"><b>LLM</b>: Ollama / OpenAI-compatible servers, best quality</span></li>
+          <li><span class="zh"><b>NLLB</b>：離線中日英互譯，無需伺服器</span><span class="en"><b>NLLB</b>: offline ZH/JA/EN, no server needed</span></li>
+          <li><span class="zh"><b>Argos</b>：離線備援（僅英翻中）</span><span class="en"><b>Argos</b>: offline fallback (EN→ZH)</span></li>
+        </ul>
+      </div>
+    </div>
+    <h3 style="margin:30px 0 12px"><span class="zh">支援的本地端 LLM 伺服器</span><span class="en">Supported local LLM servers</span></h3>
+    <p style="margin:0 0 14px;color:var(--muted);font-size:14px"><span class="zh">程式會自動偵測 LLM 伺服器類型，不需手動選擇。</span><span class="en">The app auto-detects the server type — no manual selection.</span></p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th><span class="zh">伺服器</span><span class="en">Server</span></th><th><span class="zh">預設 Port</span><span class="en">Default port</span></th><th>API</th></tr></thead>
+        <tbody>
+          <tr><td>Ollama</td><td>11434</td><td><span class="zh">Ollama 原生</span><span class="en">Ollama native</span></td></tr>
+          <tr><td>LM Studio</td><td>1234</td><td><span class="zh">OpenAI 相容</span><span class="en">OpenAI-compatible</span></td></tr>
+          <tr><td>Jan.ai</td><td>1337</td><td><span class="zh">OpenAI 相容</span><span class="en">OpenAI-compatible</span></td></tr>
+          <tr><td>vLLM</td><td>8000</td><td><span class="zh">OpenAI 相容</span><span class="en">OpenAI-compatible</span></td></tr>
+          <tr><td>LocalAI / llama.cpp</td><td>8080</td><td><span class="zh">OpenAI 相容</span><span class="en">OpenAI-compatible</span></td></tr>
+          <tr><td>LiteLLM</td><td>4000</td><td><span class="zh">OpenAI 相容</span><span class="en">OpenAI-compatible</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="advanced" class="alt">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">進階特色</span><span class="en">Advanced features</span></h2>
+      <p><span class="zh">把即時翻譯變得更實用的那些細節。</span><span class="en">The details that make live translation genuinely useful.</span></p></div>
+    <div class="grid g3">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span><span class="zh">同時轉錄麥克風</span><span class="en">Transcribe your mic</span></h3><p><span class="zh">所有即時模式加上 <code>--mic</code> 即可同時轉錄自己的麥克風語音，雙向模式自動啟用。</span><span class="en">Add <code>--mic</code> to any live mode to also transcribe your own voice; auto-on for bidirectional.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 12h8"/></svg></span><span class="zh">會議主題感知翻譯</span><span class="en">Topic-aware translation</span></h3><p><span class="zh">可指定會議主題（如「ZFS 儲存管理」），讓 LLM 依領域上下文精準翻譯專業術語。</span><span class="en">Set a meeting topic (e.g. "ZFS storage") so the LLM translates domain jargon accurately.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span><span class="zh">自動偵測 LLM 伺服器</span><span class="en">Auto-detect LLM server</span></h3><p><span class="zh">支援 Ollama、LM Studio、Jan.ai、vLLM、LocalAI、llama.cpp、LiteLLM，自動辨識伺服器類型。</span><span class="en">Detects Ollama, LM Studio, Jan.ai, vLLM, LocalAI, llama.cpp and LiteLLM automatically.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9h10M7 13h6"/></svg></span><span class="zh">互動式選單 + CLI</span><span class="en">Interactive menu + CLI</span></h3><p><span class="zh">新手友善的選單介面，進階用戶可用命令列參數直接啟動；選單最後顯示等效 CLI 指令。</span><span class="en">A beginner-friendly menu, or launch directly via CLI — the menu prints the equivalent command.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 20h8M12 18v2"/></svg></span><span class="zh">WebUI 瀏覽器介面</span><span class="en">Web UI</span></h3><p><span class="zh"><code>--webui</code> 在瀏覽器操作所有功能，支援即時字幕、離線處理、講者辨識、摘要，手機 / 平板也可使用。</span><span class="en"><code>--webui</code> drives everything in the browser — live, offline, diarization, summaries — phone/tablet friendly.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M6 6l1.5 1.5M18 18l-1.5-1.5M6 18l1.5-1.5M18 6l-1.5 1.5"/><circle cx="12" cy="12" r="3"/></svg></span><span class="zh">背景降噪</span><span class="en">Background denoise</span></h3><p><span class="zh">即時模式可加 <code>--denoise</code> 啟用背景降噪，提升嘈雜環境的辨識品質。</span><span class="en">Add <code>--denoise</code> in live mode to clean up noisy environments before recognition.</span></p></div>
+    </div>
+
+    <div style="margin-top:34px">
+      <div class="feat-block">
+        <h3><span class="zh">關鍵字即時通知</span><span class="en">Keyword alerts</span></h3>
+        <p><span class="zh">設定關鍵字，即時辨識出現時自動發出通知，可用於追蹤會議重點，或線上課程摸魚時讓系統在「請實作」「這個會考」時自動提醒。支援全螢幕警示特效、瀏覽器推播、音效提示（警示 / 柔和可選）、懸浮字幕閃爍，同一關鍵字冷卻機制避免重複通知。</span><span class="en">Set keywords and get notified the moment they're spoken — track key topics, or get pinged on "let's implement this" / "this is on the exam". Full-screen effects, browser push, sound (alert / soft), overlay flashing, and a per-keyword cooldown.</span></p>
+        <img class="shot shot-hero" src="shots/keyword-alert.png" loading="lazy" alt="關鍵字通知效果" />
+      </div>
+      <div class="feat-block">
+        <h3><span class="zh">懸浮字幕</span><span class="en">Overlay subtitles</span></h3>
+        <p><span class="zh">桌面半透明字幕覆蓋視窗（PyQt6），可疊加於任何應用程式上方。字體依視窗大小自動縮放、可拖曳移動與調整大小、滑鼠穿透模式、字幕切換淡入淡出動畫，單語 / 雙語自動切換高度。（感謝 OSSLab 熊大提供建議）</span><span class="en">A translucent desktop overlay (PyQt6) over any app — auto-scaling text, drag &amp; resize, click-through, fade animations and auto height for mono/bilingual lines.</span></p>
+        <img class="shot shot-hero" src="shots/subtitle-overlay.png" loading="lazy" alt="懸浮字幕效果" />
+      </div>
+      <div class="feat-block">
+        <h3><span class="zh">字幕轉發</span><span class="en">Subtitle forwarding</span></h3>
+        <p><span class="zh">即時字幕自動轉發到通訊平台（Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / 通用 API），可同時啟用多個平台、自訂發送間隔與內容（含時間 / 原文 / 譯文）。通用 API 支援 Body 範本（<code>{{text}}</code> 變數）搭配自訂 Headers。</span><span class="en">Forwards live subtitles to Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / a custom API — multiple at once, with custom intervals and content. The custom API supports a body template (<code>{{text}}</code>) with custom headers.</span></p>
+        <img class="shot shot-hero" src="shots/forward-telegram-result.png" loading="lazy" alt="Telegram 轉發效果" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="outputs">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">產出檔案</span><span class="en">Output files</span></h2>
+      <p><span class="zh">離線處理的產物，都存於 <code>logs/&lt;session&gt;/</code>。</span><span class="en">Offline processing writes everything to <code>logs/&lt;session&gt;/</code>.</span></p></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th><span class="zh">檔案</span><span class="en">File</span></th><th><span class="zh">說明</span><span class="en">Description</span></th><th><span class="zh">需要 LLM</span><span class="en">Needs LLM</span></th></tr></thead>
+        <tbody>
+          <tr><td><code>時間逐字稿_*.txt</code></td><td><span class="zh">帶時間戳逐字稿（翻譯模式含原文 + 譯文）</span><span class="en">Timestamped transcript (source + translation in translate modes)</span></td><td><span class="zh">校正需要</span><span class="en">for correction</span></td></tr>
+          <tr><td><code>時間逐字稿_*.html</code></td><td><span class="zh">互動式逐字稿（點時間戳可播放音訊）</span><span class="en">Interactive transcript (click timestamps to play)</span></td><td><span class="zh">校正需要</span><span class="en">for correction</span></td></tr>
+          <tr><td><code>時間逐字稿_*.srt</code></td><td><span class="zh">SRT 字幕檔</span><span class="en">SRT subtitles</span></td><td><span class="zh">否</span><span class="en">No</span></td></tr>
+          <tr><td><code>時間逐字稿_*.vtt</code></td><td><span class="zh">WebVTT 字幕檔</span><span class="en">WebVTT subtitles</span></td><td><span class="zh">否</span><span class="en">No</span></td></tr>
+          <tr><td><code>摘要_*.txt</code></td><td><span class="zh">AI 重點摘要 + 校正逐字稿</span><span class="en">AI summary + corrected transcript</span></td><td><span class="zh">是</span><span class="en">Yes</span></td></tr>
+          <tr><td><code>摘要_*.html</code></td><td><span class="zh">AI 摘要 HTML（含樣式與相關檔案連結）</span><span class="en">AI summary HTML (styled, with links)</span></td><td><span class="zh">是</span><span class="en">Yes</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:16px"><span class="zh">有設定 LLM 伺服器時，逐字稿會自動經過 LLM 校正（修正 ASR 辨識錯字），純轉錄模式同樣支援。</span><span class="en">With an LLM server configured, transcripts are auto-corrected by the LLM (fixing ASR typos) — including transcription-only modes.</span></p>
+  </div>
+</section>
+
+<section id="quality" class="alt">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">品質與效能說明</span><span class="en">Quality &amp; performance</span></h2></div>
+    <div class="grid g2">
+      <div class="card"><h3><span class="badge">1</span><span class="zh">語音辨識品質</span><span class="en">Recognition quality</span></h3><p><span class="zh">取決於所選 ASR 模型大小、音訊品質（背景噪音、麥克風距離、多人重疊）以及語言種類。</span><span class="en">Depends on model size, audio quality (noise, mic distance, overlap) and language.</span></p></div>
+      <div class="card"><h3><span class="badge">2</span><span class="zh">翻譯品質</span><span class="en">Translation quality</span></h3><p><span class="zh">取決於翻譯引擎與模型能力。LLM 最佳但需伺服器；NLLB / Argos 離線品質較低但無需伺服器。</span><span class="en">Depends on engine and model. LLM is best (needs a server); NLLB / Argos are offline but lower quality.</span></p></div>
+      <div class="card"><h3><span class="badge">3</span><span class="zh">講者辨識準確度</span><span class="en">Diarization accuracy</span></h3><p><span class="zh">受音訊品質、講者數量與聲紋相似度影響，多人交談或遠場收音時可能不準。</span><span class="en">Affected by audio quality, speaker count and voice similarity; crosstalk and far-field hurt accuracy.</span></p></div>
+      <div class="card"><h3><span class="badge">4</span><span class="zh">處理速度</span><span class="en">Processing speed</span></h3><p><span class="zh">取決於硬體算力（CPU / GPU）與模型大小。GPU 伺服器可大幅加速；純 CPU 較慢。</span><span class="en">Depends on hardware (CPU/GPU) and model size. A GPU server is much faster; CPU-only is slow.</span></p></div>
+    </div>
+    <p class="disclaimer" style="margin-top:24px">
+      <span class="zh"><strong>免責聲明：</strong>本工具按「現狀」（AS IS）提供，不附帶任何明示或暗示的保證。語音辨識、翻譯、講者辨識及摘要等功能的輸出僅供參考，不保證準確性與完整性。使用者應自行驗證輸出，不應將未經人工審核的輸出直接用於法律文件、醫療紀錄、財務報告或其他需要高度準確性的場合。使用者應確保擁有合法錄音權利並遵守當地隱私法規。作者及貢獻者不對因使用本工具而產生的任何損害承擔責任。</span>
+      <span class="en"><strong>Disclaimer:</strong> Provided "AS IS" without warranty of any kind. Recognition, translation, diarization and summary outputs are for reference only and are not guaranteed to be accurate or complete. Verify outputs yourself; do not use unreviewed output for legal, medical, financial or other high-stakes purposes. Ensure you have the legal right to record and comply with local privacy laws. The author and contributors are not liable for any damages arising from use.</span>
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <div>
+      <strong>jt-live-whisper</strong> · <span class="zh">100% 全地端 AI 語音工具集</span><span class="en">100% on-device AI voice toolkit</span><br>
+      <span style="opacity:.7">Apache-2.0 · © 2026 Jason Cheng (Jason Tools)</span>
+    </div>
+    <div>
+      <a href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a> ·
+      <a href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a> ·
+      <a href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<div id="lightbox"><img id="lightbox-img" alt="" /></div>
+<script src="script.js"></script>
+</body>
+</html>
