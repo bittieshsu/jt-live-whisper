@@ -504,17 +504,17 @@ cd C:\jt-live-whisper
 
 **設定頁面**
 
-![WebUI 設定頁 - 輸入來源與語音辨識](images/webui選項1.png)
+![WebUI 設定頁 - 輸入來源與語音辨識](images/webui-settings-1.png)
 
-![WebUI 設定頁 - 翻譯引擎與音訊裝置](images/webui選項2.png)
+![WebUI 設定頁 - 翻譯引擎與音訊裝置](images/webui-settings-2.png)
 
 **對話模式** - 聊天風格，對方靠左、自己靠右
 
-![WebUI 對話模式 - 英中雙向](images/webui-對話模式-雙向.png)
+![WebUI 對話模式 - 英中雙向](images/webui-chat-bidi.png)
 
 **字幕模式** - 電影風格，黑底大字
 
-![WebUI 字幕模式 - 雙向](images/webui-字幕模式-雙向2.png)
+![WebUI 字幕模式 - 雙向](images/webui-subtitle-bidi.png)
 
 WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝）。
 
@@ -711,11 +711,11 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 - **`en_zh`（英中雙向）**：對方英文翻中文 + 自己中文翻英文。麥克風支援中英混雜輸入，說英文時自動偵測並直接顯示（不翻譯）
 - **`ja_zh`（日中雙向）**：對方日文翻中文 + 自己中文翻日文。麥克風支援中日英混雜輸入，說日文或英文時自動偵測並直接顯示（不翻譯）
 
-![英中雙向即時字幕（終端機）](images/英中雙向-cli.png)
+![英中雙向即時字幕（終端機）](images/bidi-en-zh-cli.png)
 
-![英中雙向離線逐字稿（HTML 聊天風格）](images/英中雙向-htm.png)
+![英中雙向離線逐字稿（HTML 聊天風格）](images/bidi-en-zh-html.png)
 
-![日中雙向即時字幕](images/日中-6.png)
+![日中雙向即時字幕](images/bidi-ja-zh.png)
 
 ![日中雙向離線逐字稿（HTML 聊天風格）](images/bidi-ja-zh-html.png)
 
