@@ -113,6 +113,7 @@ section.alt{background:#fff;border-top:1px solid var(--line);border-bottom:1px s
 .screen-txt .num{display:inline-block;font-size:13px;font-weight:800;color:#fff;background:linear-gradient(135deg,#3498db,#2980b9);border-radius:8px;padding:3px 11px;margin-bottom:8px;letter-spacing:1px;box-shadow:0 2px 8px rgba(0,0,0,.35)}
 .screen-txt h3{margin:0 0 10px;font-size:24px;color:#fff}
 .screen-txt p{margin:0;color:rgba(255,255,255,0.82);line-height:1.7}
+.screen-txt code{color:#bfe3ff;background:rgba(127,211,255,.16)}
 .shot{display:block;width:100%;height:auto;border-radius:12px;border:1px solid rgba(255,255,255,0.10);box-shadow:0 16px 44px rgba(0,0,0,0.42);cursor:zoom-in}
 .shot-hero{margin:0 auto;border:1px solid var(--line);box-shadow:0 18px 50px rgba(15,23,42,0.18)}
 @media(max-width:820px){.screen-row,.screen-row:nth-child(even){flex-direction:column}.screen-row > .shot{flex-basis:auto;width:100%}}
