@@ -174,6 +174,40 @@ td strong{color:var(--ink)}
 .feat-block h3{font-size:20px;margin:0 0 8px}
 .feat-block p{margin:0 0 14px;color:var(--body)}
 
+/* ===== SOP / 文件頁：側欄目錄 + Markdown 內文 ===== */
+.doc-layout{display:flex;gap:38px;align-items:flex-start;padding:34px 0 60px}
+.doc-toc{position:sticky;top:76px;flex:0 0 244px;max-height:calc(100vh - 96px);overflow:auto;
+  background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 14px;box-shadow:0 2px 10px rgba(15,23,42,.04)}
+.doc-toc .toc-title{font-size:12px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin:2px 0 10px 8px}
+.doc-toc a{display:block;font-size:13.5px;color:var(--body);padding:5px 9px;border-radius:8px;line-height:1.4}
+.doc-toc a:hover{background:rgba(52,152,219,.10);color:var(--blue-d);text-decoration:none}
+.doc-toc a.lv3{padding-left:20px;font-size:12.5px;color:var(--muted)}
+.doc-body{flex:1 1 auto;min-width:0}
+@media(max-width:900px){.doc-layout{flex-direction:column}.doc-toc{position:static;width:100%;flex-basis:auto;max-height:none}}
+
+.md{font-size:15px;color:var(--body);line-height:1.75}
+.md h1{font-size:clamp(26px,4vw,34px);margin:0 0 6px;scroll-margin-top:76px}
+.md h2{font-size:24px;margin:42px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--line);scroll-margin-top:76px}
+.md h2::before{content:"";display:inline-block;width:6px;height:20px;background:linear-gradient(180deg,var(--blue),var(--teal));border-radius:3px;margin-right:10px;vertical-align:-3px}
+.md h3{font-size:18.5px;margin:28px 0 10px;color:var(--ink);scroll-margin-top:76px}
+.md h4{font-size:16px;margin:20px 0 8px;color:var(--ink)}
+.md p{margin:0 0 14px}
+.md a{color:var(--blue-d);font-weight:500}
+.md ul,.md ol{margin:0 0 14px;padding-left:24px}
+.md li{margin:4px 0}
+.md li>ul,.md li>ol{margin:6px 0}
+.md hr{border:none;border-top:1px solid var(--line);margin:34px 0}
+.md blockquote{margin:0 0 14px;padding:12px 18px;background:linear-gradient(135deg,#eaf4fb,#f3f9fd);border-left:4px solid var(--blue);border-radius:0 12px 12px 0;color:var(--body)}
+.md blockquote p{margin:0}
+.md img{border-radius:10px;border:1px solid var(--line);box-shadow:0 4px 14px rgba(15,23,42,.08);margin:6px 0}
+.md table{border-collapse:collapse;width:100%;font-size:13.5px;margin:0 0 18px;display:block;overflow-x:auto}
+.md thead{background:#f6f9fc}
+.md th,.md td{text-align:left;padding:10px 14px;border:1px solid var(--line);vertical-align:top}
+.md th{font-weight:700;color:var(--ink);white-space:nowrap}
+.md :not(pre)>code{font-family:var(--mono);background:rgba(52,152,219,.12);color:var(--blue-d);padding:1px 6px;border-radius:6px;font-size:.9em}
+.md pre{margin:0 0 16px}
+.md pre code{background:none;color:inherit;padding:0;font-size:13px}
+
 /* footer */
 footer{background:#0a1019;color:#aab8cc;padding:40px 0;font-size:14px}
 footer a{color:#7fd3ff}
