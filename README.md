@@ -1,6 +1,6 @@
-# jt-live-whisper v2.19.0
+# jt-live-whisper v2.19.1
 
-**100% 全地端 AI 語音工具集**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
+**100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
 ### 🌐 專案網站：**[jasoncheng7115.github.io/jt-live-whisper](https://jasoncheng7115.github.io/jt-live-whisper/)**
 
