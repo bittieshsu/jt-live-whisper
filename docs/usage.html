@@ -96,12 +96,15 @@
 <pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
 <span class="g">bash</span> install.sh</pre>
-    <div class="cmd-label"><span class="zh">Linux（Ubuntu / Debian，會用 sudo 補齊系統套件）</span><span class="en">Linux (Ubuntu / Debian; uses sudo for system packages)</span></div>
+    <div class="cmd-label"><span class="zh">Linux 桌機（Ubuntu / Debian，會用 sudo 補齊系統套件）</span><span class="en">Linux desktop (Ubuntu / Debian; uses sudo for system packages)</span></div>
 <pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
-<span class="g">bash</span> install.sh              <span class="c"># 桌面版</span>
-<span class="g">bash</span> install.sh --server     <span class="c"># 伺服器版（無桌面，WebUI 以 systemd 常駐）</span>
-./install.sh --doctor           <span class="c"># 檢查音訊、套件、GPU 與伺服器連線</span></pre>
+<span class="g">bash</span> install.sh</pre>
+    <div class="cmd-label"><span class="zh">Linux 無桌面伺服器（WebUI 以 systemd 常駐，供區域網路使用）</span><span class="en">Linux headless server (WebUI as a systemd service for your LAN)</span></div>
+<pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
+<span class="g">bash</span> install.sh --server</pre>
+    <p class="note"><span class="zh">兩種安裝都可用 <code>./install.sh --doctor</code> 檢查音訊、套件、GPU 與伺服器連線；<code>--upgrade</code> 升級、<code>--uninstall</code> 移除。</span><span class="en">Both support <code>./install.sh --doctor</code> (audio, packages, GPU, server connectivity), <code>--upgrade</code> and <code>--uninstall</code>.</span></p>
     <div class="cmd-label">Windows (PowerShell)</div>
 <pre>mkdir C:\jt-live-whisper -Force | Out-Null; cd C:\jt-live-whisper
 irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.ps1 -OutFile install.ps1
