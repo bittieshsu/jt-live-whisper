@@ -1544,7 +1544,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.20.0"
+APP_VERSION = "2.20.1"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2234,6 +2234,13 @@ for item in _user_summary:
         if name not in _existing_summary:
             SUMMARY_MODELS.append((name, item.get("desc", "")))
             _existing_summary.add(name)
+# 伺服器沒有預設摘要模型時的備援順序。
+# v2.20.0 把預設從 gpt-oss:120b 換成 qwen3.8:27b，既有使用者的伺服器上可能還沒有
+# 新模型；沒有這層保護，非互動路徑（CLI --input、WebUI）的摘要會直接失敗。
+# 翻譯模型早就有同樣的機制（_TRANSLATE_MODEL_FALLBACKS），摘要漏掉了。
+_SUMMARY_MODEL_FALLBACKS = (SUMMARY_DEFAULT_MODEL, "gpt-oss:120b",
+                            "glm-4.7-flash:q8_0", "gpt-oss:20b")
+
 # 分段門檻的保底值（查不到模型 context window 時使用）
 SUMMARY_CHUNK_FALLBACK_CHARS = 6000
 # prompt 模板 + 回應預留的 token 數（不算逐字稿本身）
@@ -3692,6 +3699,23 @@ def _detect_llm_server(host, port):
     except Exception:
         pass
     return None
+
+
+def _resolve_summary_model(model, host, port, server_type="ollama"):
+    """伺服器上沒有指定的摘要模型時，依序退回備援模型；都沒有就用伺服器上的第一個。
+
+    會印出實際使用的模型——**不可以安靜地換掉**，否則使用者以為在用 A、其實是 B。
+    查不到模型清單（連線失敗等）時原樣回傳，讓後續流程自己報錯。
+    """
+    names = _llm_list_models(host, port, server_type)
+    if not names or model in names:
+        return model
+    for want in _SUMMARY_MODEL_FALLBACKS:
+        if want in names:
+            print(f"  {C_HIGHLIGHT}[摘要模型] 伺服器沒有 {model}，改用 {want}{RESET}")
+            return want
+    print(f"  {C_HIGHLIGHT}[摘要模型] 伺服器沒有 {model}，改用 {names[0]}{RESET}")
+    return names[0]
 
 
 def _llm_list_models(host, port, server_type):
@@ -12319,6 +12343,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
     summary_mode: "both"（摘要+逐字稿）、"summary"（只摘要）、"correct_only"（只校正）、"transcript"（純 ASR）
     summary_rounds: 處理次數（1-3），多次處理後整合可提升品質
     回傳 (output_path, summary_text, html_path)"""
+    model = _resolve_summary_model(model, host, port, server_type)
     with open(input_path, "r", encoding="utf-8") as f:
         transcript = f.read().strip()
 
