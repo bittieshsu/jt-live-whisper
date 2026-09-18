@@ -1564,7 +1564,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.20.4"
+APP_VERSION = "2.20.5"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2236,12 +2236,19 @@ LLM_PRESETS = [
 # 摘要功能設定
 # 2026-09-18 三方交錯 A/B（同一份 63 分鐘逐字稿跑三輪、每輪對調順序）後改為 qwen3.8:27b：
 # 記憶體 17.7GB（gpt-oss:120b 要 65GB）、三輪都比它快、摘要內容還更多，
-# 人名與關鍵數字的正確性三輪全對。gpt-oss:120b 保留為可選項目。
+# 人名與關鍵數字的正確性三輪全對。
+#
+# **這個常數同時決定逐字稿校正用哪個模型**（離線流程 llm_model=summary_model），
+# 所以也用 342 段有標準答案的語料驗過校正（tools/correction_corpus/）：
+#   qwen3.8:27b   每 100 行語意被改 中 10.5 / 日 13.2 / 英 0.9，CER 中 11.57→9.82、英 9.67→9.48
+#   gemma4:26b    22.8 / 16.7 / 7.9，CER 中 →11.0、英 →9.71（變差）
+#   gpt-oss:120b  20.2 / 17.5 / 18.4，CER 中 →11.07、英 →10.81（明顯變差）
+# gpt-oss:120b 保留為可選項目（既有使用者相容），但不建議用於校正。
 SUMMARY_DEFAULT_MODEL = "qwen3.8:27b"
 _BUILTIN_SUMMARY_MODELS = [
-    ("qwen3.8:27b", "品質好、記憶體需求低（推薦）"),
-    ("glm-4.7-flash:q8_0", "速度最快，摘要較精簡"),
-    ("gpt-oss:120b", "品質基準，需要大記憶體主機"),
+    ("qwen3.8:27b", "推薦：摘要與校正實測最準，約 18 GB"),
+    ("glm-4.7-flash:q8_0", "摘要速度最快、內容較精簡；校正未實測"),
+    ("gpt-oss:120b", "約 65 GB；校正會讓英文逐字稿變差，不建議"),
 ]
 
 # 合併使用者自訂摘要模型（config.json 的 summary_models）
@@ -2258,6 +2265,9 @@ for item in _user_summary:
 # v2.20.0 把預設從 gpt-oss:120b 換成 qwen3.8:27b，既有使用者的伺服器上可能還沒有
 # 新模型；沒有這層保護，非互動路徑（CLI --input、WebUI）的摘要會直接失敗。
 # 翻譯模型早就有同樣的機制（_TRANSLATE_MODEL_FALLBACKS），摘要漏掉了。
+# 備援順序刻意把 gpt-oss:120b 放第二：它的校正品質不好（見下），但它是 v2.19 以前的
+# 預設，既有使用者的伺服器上幾乎一定有，退到它至少能動。glm-4.7-flash 的校正沒實測過，
+# 不該排在有實測資料的模型前面。
 _SUMMARY_MODEL_FALLBACKS = (SUMMARY_DEFAULT_MODEL, "gpt-oss:120b",
                             "glm-4.7-flash:q8_0", "gpt-oss:20b")
 
