@@ -63,7 +63,8 @@ try:
         _detect_llm_server as _tm_detect_llm_server,
         _BUILTIN_TRANSLATE_MODELS as _TM_TRANSLATE_MODELS,
         DEFAULT_TRANSLATE_MODEL as _TM_DEFAULT_TRANSLATE_MODEL,
-    )
+    SUMMARY_DEFAULT_MODEL as _TM_SUMMARY_DEFAULT_MODEL,
+)
 except Exception:
     _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
                             ("qwen2.5:14b", "品質好，較省記憶體（約需 9GB）")]
@@ -531,6 +532,7 @@ def _get_config():
         "modes": modes, "scenes": scenes, "models": models, "engines": engines,
         "llm_models": llm_models, "llm_host": llm_host, "llm_model": llm_model,
         "default_llm_model": _TM_DEFAULT_TRANSLATE_MODEL,
+        "default_summary_model": _TM_SUMMARY_DEFAULT_MODEL,
         "llm_host_auto": llm_host_auto,
         "devices": devices, "auto_loopback": auto_loopback, "auto_mic": auto_mic,
         "gpu_host": gpu_host, "summary_descs": summary_descs,
@@ -538,7 +540,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.20.6",
+        "last": last, "version": "2.20.7",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }

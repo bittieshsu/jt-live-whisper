@@ -563,6 +563,7 @@ async function loadCfg(){
   if(L.gen_srt===false)$('iGenSrt').checked=false;
   if(L.gen_vtt===false)$('iGenVtt').checked=false;
   if(c.summary_descs)_sumDescs=c.summary_descs;
+  if(c.default_summary_model)_sumDefault=c.default_summary_model;
   _updateSumModels(c.llm_models.map(m=>m.value));cselSetValue($('iSumModel'),L.summary_model||'');
   engChg();$('iMode').addEventListener('change',()=>{engChg();_updateModelRec(cselVal($('iMode')))});$('iEngine').addEventListener('change',engChg);$('iAsrLoc').addEventListener('change',()=>{const v=cselVal($('iAsrLoc'));if(v&&!['en_zh','ja_zh'].includes(cselVal($('iMode'))))_asrLastVal=v;engChg()});
   const st=await(await fetch('/api/status',{headers:_authHeaders()})).json();
@@ -696,9 +697,9 @@ function engChg(){
     else{micNote.style.display='none'}
   }else{micNote.style.display='none'}
 }
-let _sumDescs={};
+let _sumDescs={};let _sumDefault="";
 function _sumLabel(m){const d=_sumDescs[m];return d?m+' — '+d:m}
-function _updateSumModels(models){const prev=cselVal($('iSumModel'));const items=[{value:'',label:'預設（gpt-oss:120b）',tag:''}];models.sort((a,b)=>a.localeCompare(b)).forEach(m=>items.push({value:m,label:_sumLabel(m),tag:m===prev?'前次使用':''}));cselSetItems($('iSumModel'),items);if(prev)cselSetValue($('iSumModel'),prev)}
+function _updateSumModels(models){const prev=cselVal($('iSumModel'));const items=[{value:'',label:'預設（'+(_sumDefault||'')+'）',tag:''}];models.sort((a,b)=>a.localeCompare(b)).forEach(m=>items.push({value:m,label:_sumLabel(m),tag:m===prev?'前次使用':''}));cselSetItems($('iSumModel'),items);if(prev)cselSetValue($('iSumModel'),prev)}
 async function fetchLlmModels(h){try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok&&d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_updateSumModels(d.models)}}catch(e){}}
 async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').innerHTML='<span style="color:var(--text-dim)">測試中...</span>';$('testBtn').disabled=true;_llmQueried=false;try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok){$('testResult').innerHTML='<span class="test-ok">連線成功（'+d.server_type+'，'+d.models.length+' 個模型）</span>';if(d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_llmQueried=true;_updateSumModels(d.models)}}else{$('testResult').innerHTML='<span class="test-err">'+esc(d.error)+'</span>'}}catch(e){$('testResult').innerHTML='<span class="test-err">'+esc(e.message)+'</span>'}$('testBtn').disabled=false}
 /* Start/Stop */
