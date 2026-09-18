@@ -301,7 +301,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.20.5 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.20.6 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -313,6 +313,13 @@ Write-Host ""
 # ═══════════════════════════════════════════════════════════════
 
 if ($Upgrade) {
+    # 升級要更新的檔案清單（與 install.sh 的 _UPGRADE_FILES 一致）。
+    # 原本補檔與升級各自維護一份且內容不同，漏掉 README.md / CHANGELOG.md，
+    # 升級後看不到改了什麼、README 版本號還停在舊版（2026-09-18 Windows 實機發現）。
+    $UPGRADE_FILES = @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1",
+                       "install-linux.sh","SOP.md","README.md","CHANGELOG.md","webui.py",
+                       "webui.html","subtitle_overlay.py","sck_audio_capture.swift")
+
     section "從 GitHub 升級程式"
 
     $tmpDir = Join-Path $env:TEMP "jt-upgrade-$(Get-Random)"
@@ -353,7 +360,7 @@ if ($Upgrade) {
         }
         if ($missingFiles.Count -gt 0) {
             info "版本相同但缺少檔案，補充安裝中..."
-            foreach ($f in @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1","SOP.md","webui.py","webui.html","subtitle_overlay.py")) {
+            foreach ($f in $UPGRADE_FILES) {
                 $src = Join-Path $repoDir $f
                 if (Test-Path $src) { Copy-Item $src (Join-Path $SCRIPT_DIR $f) -Force }
             }
@@ -397,7 +404,7 @@ if ($Upgrade) {
 
     # 更新檔案
     $updated = 0
-    foreach ($f in @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1","SOP.md","webui.py","webui.html","subtitle_overlay.py")) {
+    foreach ($f in $UPGRADE_FILES) {
         $src = Join-Path $repoDir $f
         if (Test-Path $src) {
             Copy-Item $src (Join-Path $SCRIPT_DIR $f) -Force
