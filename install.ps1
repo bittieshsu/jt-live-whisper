@@ -353,18 +353,25 @@ if ($Upgrade) {
     Write-Host "  ${C_WHITE}最新版本: v${remoteVer}${NC}"
 
     if ($localVer -eq $remoteVer) {
-        # 版本相同但檢查是否缺少檔案（舊版升級可能漏掉新檔案）
-        $missingFiles = @()
-        foreach ($f in @("webui.py","webui.html","subtitle_overlay.py")) {
-            if (-not (Test-Path (Join-Path $SCRIPT_DIR $f))) { $missingFiles += $f }
+        # 版本相同時逐檔比對「內容」而不是只看檔案在不在。
+        # 只檢查存在與否會漏掉「檔案在、但內容是舊的」——例如某一版的升級清單漏了
+        # README.md / CHANGELOG.md，之後再升級也永遠補不回來（與 install.sh 同步修正）。
+        $staleFiles = @()
+        foreach ($f in $UPGRADE_FILES) {
+            $src = Join-Path $repoDir $f
+            if (-not (Test-Path $src)) { continue }
+            $dst = Join-Path $SCRIPT_DIR $f
+            if (-not (Test-Path $dst)) { $staleFiles += $f; continue }
+            $a = (Get-FileHash $src -Algorithm SHA256).Hash
+            $b = (Get-FileHash $dst -Algorithm SHA256).Hash
+            if ($a -ne $b) { $staleFiles += $f }
         }
-        if ($missingFiles.Count -gt 0) {
-            info "版本相同但缺少檔案，補充安裝中..."
-            foreach ($f in $UPGRADE_FILES) {
-                $src = Join-Path $repoDir $f
-                if (Test-Path $src) { Copy-Item $src (Join-Path $SCRIPT_DIR $f) -Force }
+        if ($staleFiles.Count -gt 0) {
+            info "版本相同但有檔案與最新版不符，更新中..."
+            foreach ($f in $staleFiles) {
+                Copy-Item (Join-Path $repoDir $f) (Join-Path $SCRIPT_DIR $f) -Force
             }
-            check_ok "已補充安裝缺少的檔案（$($missingFiles -join '、')）"
+            check_ok "已更新與最新版不符的檔案（$($staleFiles -join '、')）"
         } else {
             check_ok "已經是最新版本 (v${localVer})"
         }
