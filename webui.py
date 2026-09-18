@@ -526,7 +526,7 @@ def _get_config():
     except Exception:
         pass
     if not summary_descs:
-        summary_descs = {"qwen3.8:27b": "品質好、記憶體需求低（推薦）", "glm-4.7-flash:q8_0": "速度最快，摘要較精簡", "gpt-oss:120b": "品質基準，需要大記憶體主機"}
+        summary_descs = {"qwen3.8:27b": "推薦：摘要與校正實測最準，約 18 GB", "glm-4.7-flash:q8_0": "摘要速度最快、內容較精簡；校正未實測", "gpt-oss:120b": "約 65 GB；校正會讓英文逐字稿變差，不建議"}
     return {
         "modes": modes, "scenes": scenes, "models": models, "engines": engines,
         "llm_models": llm_models, "llm_host": llm_host, "llm_model": llm_model,
@@ -538,7 +538,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.20.4",
+        "last": last, "version": "2.20.5",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }

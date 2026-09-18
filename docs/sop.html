@@ -98,7 +98,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.20.4 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.20.5 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -240,7 +240,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 <tr>
 <td>摘要 / 逐字稿校正 (LLM)</td>
 <td>自架 LLM 伺服器，預設 <strong>qwen3.8:27b</strong></td>
-<td>會議摘要與逐字稿校正；建議 27B 以上，可與翻譯用不同模型</td>
+<td>會議摘要與逐字稿校正（兩者共用同一個模型）；建議 27B 以上，可與翻譯用不同模型</td>
 </tr>
 <tr>
 <td>翻譯 (離線)</td>
@@ -1791,7 +1791,7 @@ cd C:\jt-live-whisper
 </thead>
 <tbody><tr>
 <td><strong>qwen3.8:27b</strong>（預設）</td>
-<td>品質好、記憶體需求低（推薦）</td>
+<td>推薦：摘要與校正實測最準，約 18 GB</td>
 </tr>
 <tr>
 <td>gpt-oss:20b</td>
@@ -2656,10 +2656,10 @@ cd C:\jt-live-whisper
 <td>如 gemma4:26b（預設）或 qwen2.5:14b，品質與速度兼顧</td>
 </tr>
 <tr>
-<td>摘要</td>
+<td>摘要 / 逐字稿校正</td>
 <td>27B 以上</td>
 <td>~18 GB</td>
-<td>預設 qwen3.8:27b；要更高品質可換 gpt-oss:120b（約 65 GB）</td>
+<td>預設 qwen3.8:27b。實測它的校正品質優於 120B 級模型，<strong>不需要</strong>更大的模型</td>
 </tr>
 </tbody></table>
 <p>LLM 伺服器可安裝在本機或區域網路內的任何主機。推薦使用 <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/">NVIDIA DGX Spark</a>（128 GB 統一記憶體），可同時執行翻譯模型與摘要模型。沒有 LLM 伺服器時，程式可切換為 NLLB/Argos 離線翻譯引擎（但摘要功能仍需 LLM）。</p>
