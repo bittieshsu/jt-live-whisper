@@ -38,6 +38,8 @@ import torch
 import uvicorn
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 app = FastAPI(title="jt-whisper-server")
 
@@ -46,7 +48,9 @@ _active_task_lock = threading.Lock()
 _active_task = None  # dict: {type, model, language, started, client_ip} or None
 
 def _set_active_task(task_type, model, language, client_ip=""):
+    """登記進行中的作業，回傳代表這筆作業的 token（給 _clear_active_task 核對用）"""
     global _active_task
+    token = object()
     with _active_task_lock:
         _active_task = {
             "type": task_type,
@@ -54,18 +58,22 @@ def _set_active_task(task_type, model, language, client_ip=""):
             "language": language,
             "started": time.time(),
             "client_ip": client_ip,
+            "_token": token,
         }
+    return token
 
-def _clear_active_task():
+def _clear_active_task(token=None):
+    """清除進行中的作業；有給 token 時只清自己那筆，避免誤清之後才開始的作業"""
     global _active_task
     with _active_task_lock:
-        _active_task = None
+        if token is None or (_active_task is not None and _active_task.get("_token") is token):
+            _active_task = None
 
 def _get_active_task():
     with _active_task_lock:
         if _active_task is None:
             return None
-        return dict(_active_task)
+        return {k: v for k, v in _active_task.items() if not k.startswith("_")}
 
 # ── 偵測最佳後端引擎 ──
 _models: dict = {}
@@ -582,7 +590,8 @@ async def transcribe(
     """接收音訊檔，回傳辨識結果（stream=true 時串流 NDJSON）。
     noisy=1/true：用戶端音源分析判定為低音量錄音，套用寬鬆參數。"""
     client_ip = request.client.host if request.client else ""
-    _set_active_task("transcribe", model, language, client_ip)
+    task_token = _set_active_task("transcribe", model, language, client_ip)
+    stream_handed_off = False   # 串流回應交出後，清理改由 background 負責
     is_noisy = str(noisy).lower() in ("1", "true", "yes")
     if is_noisy:
         print(f"[{client_ip}] noisy=1 → 寬鬆參數")
@@ -626,7 +635,7 @@ async def transcribe(
                     except Exception as e:
                         yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
                     finally:
-                        _clear_active_task()
+                        _clear_active_task(task_token)
                         try:
                             os.unlink(tmp_path)
                         except OSError:
@@ -691,14 +700,35 @@ async def transcribe(
                     finally:
                         if not cancelled:
                             pool.shutdown(wait=False)
-                        _clear_active_task()
+                        _clear_active_task(task_token)
                         try:
                             os.unlink(tmp_path)
                         except OSError:
                             pass
 
-            # 串流模式由 generator 負責刪除暫存檔，不走 finally
-            return StreamingResponse(generate(), media_type="text/x-ndjson")
+            # 串流模式由 generator 負責刪除暫存檔，不走 finally。
+            # 用戶端中途斷線時，Starlette 只取消外層迭代、不會關閉這個同步 generator，
+            # generator 的 finally 就永遠不會執行 → 忙碌標記卡住、所有用戶端一直等、暫存檔殘留。
+            # 回應結束（含斷線）後一定會跑 background，由它關閉 generator 並補做清理。
+            gen = generate()
+
+            def _cleanup_stream():
+                try:
+                    gen.close()   # 未執行完時觸發 GeneratorExit，走 generator 自己的取消流程
+                except Exception as e:
+                    print(f"[警告] 關閉辨識串流失敗: {e}")
+                _clear_active_task(task_token)
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+            async def _cleanup_stream_async():
+                await run_in_threadpool(_cleanup_stream)   # openai-whisper 取消時會等執行緒結束，不可卡住 event loop
+
+            stream_handed_off = True
+            return StreamingResponse(gen, media_type="text/x-ndjson",
+                                     background=BackgroundTask(_cleanup_stream_async))
 
         # 非串流模式（用 asyncio.to_thread 避免阻塞 event loop）
         try:
@@ -726,9 +756,9 @@ async def transcribe(
             "backend": _backend,
         }
     finally:
-        # 非串流模式清理（串流模式由 generator 清理，不分後端）
-        if stream.lower() != "true":
-            _clear_active_task()
+        # 非串流模式，或串流回應交出前就出錯時在這裡清理（交出後由 background 清理）
+        if not stream_handed_off:
+            _clear_active_task(task_token)
             try:
                 os.unlink(tmp.name)
             except OSError:
@@ -766,7 +796,7 @@ async def diarize(
         )
 
     client_ip = request.client.host if request.client else ""
-    _set_active_task("diarize", "resemblyzer", language="", client_ip=client_ip)
+    diar_token = _set_active_task("diarize", "resemblyzer", language="", client_ip=client_ip)
 
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -800,7 +830,7 @@ async def diarize(
             "device": _torch_device,
         }
     finally:
-        _clear_active_task()
+        _clear_active_task(diar_token)
         try:
             os.unlink(tmp.name)
         except OSError:

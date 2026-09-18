@@ -57,8 +57,17 @@ try:
         _sck_macos_ok as _tm_sck_macos_ok,
         _sck_request_permission as _tm_sck_request_permission,
         _sck_terminal_app_name as _tm_sck_terminal_app_name,
+        PULSE_LOOPBACK_ID as _TM_PULSE_LOOPBACK_ID,
+        _pulse_available as _tm_pulse_available,
+        _pulse_label as _tm_pulse_label,
+        _detect_llm_server as _tm_detect_llm_server,
+        _BUILTIN_TRANSLATE_MODELS as _TM_TRANSLATE_MODELS,
+        DEFAULT_TRANSLATE_MODEL as _TM_DEFAULT_TRANSLATE_MODEL,
     )
 except Exception:
+    _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
+                            ("qwen2.5:14b", "品質好，較省記憶體（約需 9GB）")]
+    _TM_DEFAULT_TRANSLATE_MODEL = "gemma4:26b"
     _TM_WHISPER_MODELS = None
     _TM_SUMMARY_MODELS = None
     _tm_recommended_whisper_model = None
@@ -68,6 +77,43 @@ except Exception:
     _tm_sck_macos_ok = None
     _tm_sck_request_permission = None
     _tm_sck_terminal_app_name = None
+    _TM_PULSE_LOOPBACK_ID = -500
+    _tm_pulse_available = None
+    _tm_pulse_label = None
+    _tm_detect_llm_server = None
+
+# ─── 本機 LLM 伺服器自動探測 ────────────────────────────────────
+# 安裝時常先跳過 LLM 設定（還沒裝 Ollama），之後 config.json 就沒有 llm_host。
+# 這些伺服器的預設位址是可推斷的：先試連接埠有沒有開，再驗證回傳結構確認真的是 LLM
+# 伺服器（8080 常被其他網站服務占用，只看連接埠會誤判）。
+_LOCAL_LLM_CANDIDATES = (
+    ("127.0.0.1", 11434),   # Ollama
+    ("127.0.0.1", 1234),    # LM Studio
+    ("127.0.0.1", 8080),    # llama.cpp server / LocalAI
+)
+_llm_probe_cache = {"t": -1e9, "host": ""}
+
+
+def _probe_local_llm():
+    """回傳本機可用的 LLM 伺服器 "host:port"，找不到回傳空字串（結果快取 30 秒）"""
+    now = time.monotonic()
+    if now - _llm_probe_cache["t"] < 30:
+        return _llm_probe_cache["host"]
+    import socket as _socket
+    found = ""
+    for h, p in _LOCAL_LLM_CANDIDATES:
+        try:
+            with _socket.create_connection((h, p), timeout=0.25):
+                pass
+        except OSError:
+            continue
+        if _tm_detect_llm_server is None or _tm_detect_llm_server(h, p):
+            found = f"{h}:{p}"
+            break
+    _llm_probe_cache["t"] = now
+    _llm_probe_cache["host"] = found
+    return found
+
 
 # ─── 安全設定 ──────────────────────────────────────────────────
 _webui_passwords = {"read": "", "admin": ""}  # 從 config.json 載入
@@ -348,6 +394,8 @@ def _get_config():
         if _TM_WHISPER_MODELS is None:
             raise ImportError("translate_meeting not loaded")
         models = [{"value": n, "label": f"{n}（{d}）"} for n, _, d in _TM_WHISPER_MODELS]
+        # Breeze-ASR-26：台語專用，華語模式也可選用（台灣華語夾雜台語時），固定本機辨識
+        models.append({"value": "breeze-asr-26", "label": "breeze-asr-26（台灣華語／台語，較慢，固定本機）"})
     except Exception:
         models = [
             {"value": "base.en", "label": "base.en（最快，準確度一般）"},
@@ -364,15 +412,10 @@ def _get_config():
         {"value": "argos", "label": "Argos — 本機離線，僅英翻中"},
     ]
     # LLM 翻譯模型清單
-    llm_models = [
-        {"value": "qwen2.5:14b", "label": "qwen2.5:14b — 品質好，速度快（推薦）"},
-        {"value": "qwen2.5:32b", "label": "qwen2.5:32b — 品質很好，中日文翻譯推薦"},
-        {"value": "qwen2.5:7b", "label": "qwen2.5:7b — 品質普通，速度最快"},
-        {"value": "phi4:14b", "label": "phi4:14b — Microsoft，品質不錯"},
-    ]
+    llm_models = [{"value": n, "label": f"{n} — {d}"} for n, d in _TM_TRANSLATE_MODELS]
     # 讀 config.json 的預設 LLM 設定 + 使用者自訂模型
     llm_host = ""
-    llm_model = "qwen2.5:14b"
+    llm_model = _TM_DEFAULT_TRANSLATE_MODEL
     if CONFIG_FILE.exists():
         try:
             cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
@@ -388,6 +431,10 @@ def _get_config():
                     llm_models.append({"value": name, "label": name})
         except Exception:
             pass
+    llm_host_auto = False
+    if not llm_host:
+        llm_host = _probe_local_llm()
+        llm_host_auto = bool(llm_host)
     # 前次使用的設定（webui 自己存的）
     last = {}
     if CONFIG_FILE.exists():
@@ -418,6 +465,16 @@ def _get_config():
                         "name": "ScreenCaptureKit 系統音訊（免安裝 BlackHole）",
                         "channels": 2, "sr": 48000})
         auto_loopback = f"[{_TM_SCK_LOOPBACK_ID}] ScreenCaptureKit 系統音訊"
+    # Linux PipeWire / PulseAudio：預設喇叭的 monitor 來源
+    if sys.platform.startswith("linux") and _tm_pulse_available:
+        try:
+            if _tm_pulse_available():
+                _pl = _tm_pulse_label()
+                devices.append({"id": _TM_PULSE_LOOPBACK_ID, "name": _pl,
+                                "channels": 2, "sr": 48000})
+                auto_loopback = f"[{_TM_PULSE_LOOPBACK_ID}] {_pl}"
+        except Exception:
+            pass
     try:
         import sounddevice as sd
         for i, dev in enumerate(sd.query_devices()):
@@ -428,7 +485,8 @@ def _get_config():
                                 "sr": int(dev["default_samplerate"])})
                 # 自動偵測 loopback
                 nl = name.lower()
-                if not auto_loopback and ("blackhole" in nl or "loopback" in nl):
+                if not auto_loopback and ("blackhole" in nl or "loopback" in nl
+                                          or (sys.platform.startswith("linux") and "monitor" in nl)):
                     auto_loopback = f"[{i}] {name}"
         # 自動偵測麥克風（系統預設輸入，排除 loopback/aggregate）
         default_in = sd.default.device[0]
@@ -437,6 +495,7 @@ def _get_config():
             dn = dinfo["name"].lower()
             if (dinfo["max_input_channels"] > 0
                     and "blackhole" not in dn and "loopback" not in dn
+                    and "monitor" not in dn
                     and "aggregate" not in dn and "聚集" not in dinfo["name"]):
                 auto_mic = f"[{default_in}] {dinfo['name']}"
     except Exception:
@@ -471,12 +530,15 @@ def _get_config():
     return {
         "modes": modes, "scenes": scenes, "models": models, "engines": engines,
         "llm_models": llm_models, "llm_host": llm_host, "llm_model": llm_model,
+        "default_llm_model": _TM_DEFAULT_TRANSLATE_MODEL,
+        "llm_host_auto": llm_host_auto,
         "devices": devices, "auto_loopback": auto_loopback, "auto_mic": auto_mic,
         "gpu_host": gpu_host, "summary_descs": summary_descs,
         "recommended_models": recommended_models,
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
-        "last": last, "version": "2.18.2",
+        "is_linux": sys.platform.startswith("linux"),
+        "last": last, "version": "2.19.0",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -603,6 +665,17 @@ async def api_fonts(request: Request):
     """列出系統中支援中文的字型（僅本機）"""
     if not _is_local(request):
         return JSONResponse({"ok": False}, status_code=403)
+    # Linux：Qt 經 fontconfig 會替缺字自動補字型，inFont('中') 幾乎全部回 True，
+    # 改問 fontconfig 哪些字型真的涵蓋中文
+    if sys.platform.startswith("linux"):
+        try:
+            r = subprocess.run(["fc-list", ":lang=zh", "family"],
+                               capture_output=True, text=True, timeout=10)
+            fonts = sorted({ln.split(",")[0].strip() for ln in r.stdout.splitlines() if ln.strip()})
+            if fonts:
+                return JSONResponse(fonts[:80])
+        except Exception:
+            pass
     try:
         result = subprocess.run(
             [sys.executable, "-c",
@@ -767,7 +840,16 @@ async def api_open_folder(request: Request):
     elif platform.system() == "Windows":
         subprocess.Popen(["explorer", str(full)])
     else:
-        subprocess.Popen(["xdg-open", str(full)])
+        # Linux：沒有圖形桌面時 xdg-open 無從開啟；有桌面時要脫離 session，
+        # 避免檔案管理員掛在 webui.py 底下、並繼承 stdio
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return JSONResponse({"ok": False, "error": f"此主機沒有圖形桌面，請直接前往：{full}"})
+        try:
+            subprocess.Popen(["xdg-open", str(full)],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        except FileNotFoundError:
+            return JSONResponse({"ok": False, "error": f"找不到 xdg-open，請直接前往：{full}"})
     return {"ok": True}
 
 
@@ -891,15 +973,16 @@ def _build_args(body: dict) -> list:
     scene = body.get("scene", "training")
     args.extend(["-s", scene])
     engine = body.get("engine")
-    if engine and mode not in ("en", "zh", "ja"):
+    llm_host = (body.get("llm_host") or "").strip()
+    if engine and mode not in ("en", "zh", "ja", "nan"):
         args.extend(["-e", engine])
         if engine == "llm":
             llm_model = body.get("llm_model", "")
-            llm_host = body.get("llm_host", "")
             if llm_model:
                 args.extend(["--llm-model", llm_model])
-            if llm_host:
-                args.extend(["--llm-host", llm_host])
+    # LLM 主機不只翻譯用，逐字稿校正與 AI 摘要也要用：純轉錄模式、NLLB / Argos 翻譯時同樣要傳
+    if llm_host and mode != "record":
+        args.extend(["--llm-host", llm_host])
     topic = body.get("topic", "").strip()
     if topic:
         args.extend(["--topic", topic])
@@ -1138,7 +1221,10 @@ def main():
     print(f"  http://localhost:{args.port}")
     print(f"  請在瀏覽器中操作\n")
 
-    if not args.no_browser:
+    # Linux 沒有圖形桌面（SSH / 伺服器）時不自動開瀏覽器，避免開出文字模式瀏覽器佔住終端機
+    _headless = (sys.platform.startswith("linux")
+                 and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
+    if not args.no_browser and not _headless:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{args.port}")).start()
 
     # Ctrl+C 強制退出（uvicorn 可能攔截 SIGINT）

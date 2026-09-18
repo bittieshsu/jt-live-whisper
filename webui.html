@@ -252,13 +252,13 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
   </div>
   <!-- 語言翻譯 -->
   <div class="sec" id="rEngine">
-    <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12Z" stroke="currentColor"/><path d="M13 2.05C13 2.05 16 6 16 12C16 18 13 21.95 13 21.95" stroke="currentColor"/><path d="M11 21.95C11 21.95 8 18 8 12C8 6 11 2.05 11 2.05" stroke="currentColor"/><path d="M2.63 15.5H21.37" stroke="currentColor"/><path d="M2.63 8.5H21.37" stroke="currentColor"/></svg>語言翻譯</div>
-    <div class="sec-hint">要更好的翻譯品質，請搭配 LLM 伺服器與適當模型。轉錄模式不需翻譯引擎。</div>
-    <div class="fg"><label>翻譯引擎</label><div class="csel" id="iEngine" data-value=""></div></div>
+    <div class="sec-title" id="engTitle"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12Z" stroke="currentColor"/><path d="M13 2.05C13 2.05 16 6 16 12C16 18 13 21.95 13 21.95" stroke="currentColor"/><path d="M11 21.95C11 21.95 8 18 8 12C8 6 11 2.05 11 2.05" stroke="currentColor"/><path d="M2.63 15.5H21.37" stroke="currentColor"/><path d="M2.63 8.5H21.37" stroke="currentColor"/></svg>語言翻譯</div>
+    <div class="sec-hint" id="engHint">要更好的翻譯品質，請搭配 LLM 伺服器與適當模型。轉錄模式不需翻譯引擎。</div>
+    <div class="fg" id="engineRow"><label>翻譯引擎</label><div class="csel" id="iEngine" data-value=""></div></div>
     <div class="llm-area" id="llmArea">
       <div class="row3"><div class="fg"><label>LLM 主機</label><input id="iLlmHost" placeholder="192.168.1.40:11434"></div><button class="test-btn" id="testBtn" onclick="testLlm()">測試連線</button></div>
       <div id="testResult"></div>
-      <div class="fg" style="margin-top:12px"><label>LLM 模型</label><div class="csel" id="iLlmModel" data-value=""></div></div>
+      <div class="fg" id="llmModelRow" style="margin-top:12px"><label>LLM 模型</label><div class="csel" id="iLlmModel" data-value=""></div></div>
     </div>
   </div>
   <!-- 音訊裝置 -->
@@ -465,9 +465,13 @@ function _updateModelRec(mode){
   // 模型大小排序（用於判斷效能需求）
   const _mOrder={'base.en':0,'base':1,'small.en':2,'small':3,'large-v3-turbo':4,'large-v3':5};
   const recIdx=_mOrder[recM]??6;
+  const isNan=['nan','nan2en'].includes(mode),breezeOk=['zh','zh2en','zh2ja','nan','nan2en'].includes(mode);
   cselSetItems($('iModel'),_cfgModels.map(m=>{
-    const isEnOnly=m.value.endsWith('.en');
+    const isEnOnly=m.value.endsWith('.en'),isBreeze=m.value==='breeze-asr-26';
     if(isNoEng&&isEnOnly)return{value:m.value,label:m.label,tag:'不支援此模式',disabled:true};
+    // 台語只能用 Breeze-ASR-26；Breeze-ASR-26 只支援台語與華語輸入模式
+    if(isNan&&!isBreeze)return{value:m.value,label:m.label,tag:'台語僅支援 breeze-asr-26',disabled:true};
+    if(isBreeze&&!breezeOk)return{value:m.value,label:m.label,tag:'僅台語與華語模式',disabled:true};
     let t=tagFor(m.value,recM,_lastModel);
     if(m.value===recM&&t!=='前次使用')t='此裝置適合';
     else if((_mOrder[m.value]??0)>recIdx&&!t)t='此裝置速度可能較慢';
@@ -476,6 +480,8 @@ function _updateModelRec(mode){
   // 如果目前選的模型被停用，自動切到推薦模型
   const curVal=prev||_lastModel||recM;
   if(isNoEng&&curVal.endsWith('.en'))cselSetValue($('iModel'),recM);
+  else if(isNan&&curVal!=='breeze-asr-26')cselSetValue($('iModel'),'breeze-asr-26');
+  else if(!breezeOk&&curVal==='breeze-asr-26')cselSetValue($('iModel'),_recModels[mode]||'large-v3-turbo');
   else cselSetValue($('iModel'),curVal);
 }
 const _modeLabels={'en2zh':'英翻中字幕','zh2en':'中翻英字幕','ja2zh':'日翻中字幕','zh2ja':'中翻日字幕','en_zh':'英中雙向字幕','ja_zh':'日中雙向字幕','en':'英文轉錄','zh':'中文轉錄','ja':'日文轉錄','nan':'台語轉錄','nan2en':'台翻英字幕','record':'純錄音'};
@@ -505,9 +511,12 @@ function pushVol(v){volHist.push(Math.min(Math.pow(v*20,.6),1));if(volHist.lengt
 pushVol(0);
 /* Config */
 function tagFor(val,def,last){if(val===last)return '前次使用';if(val===def)return '預設';return ''}
-const _modelDesc={'qwen2.5:14b':'品質好，速度快（推薦）','qwen2.5:32b':'品質很好，中日文翻譯推薦','qwen2.5:7b':'品質普通，速度最快','phi4:14b':'Microsoft，品質不錯'};
+const _modelDesc={'gemma4:26b':'速度快、品質好（推薦，約需 17GB）','qwen2.5:14b':'品質好，較省記憶體（約需 9GB）','qwen2.5:32b':'品質很好，中日文翻譯推薦','qwen2.5:7b':'品質普通，速度最快','phi4:14b':'Microsoft，品質不錯'};
 function _llmLabel(n){const d=_modelDesc[n];return d?n+' — '+d:n}
-function _llmItems(models,lastV){return models.sort((a,b)=>a.localeCompare(b)).map(m=>({value:m,label:_llmLabel(m),tag:m===lastV?'前次使用':''}))}
+let _defLlm='gemma4:26b';
+function _llmItems(models,lastV){return models.sort((a,b)=>a.localeCompare(b)).map(m=>({value:m,label:_llmLabel(m),tag:m===lastV?'前次使用':(m===_defLlm?'預設':'')}))}
+// 伺服器沒有目前選的模型時，依序退回預設 → qwen2.5:14b → 清單第一個
+function _pickLlm(models,cur){if(cur&&models.includes(cur))return cur;for(const f of [_defLlm,'qwen2.5:14b'])if(models.includes(f))return f;return models[0]}
 let _selectedFiles=[];
 function _cfgStep(t){const el=$('cfgLoadingText');if(el)el.textContent=t}
 async function loadCfg(){
@@ -531,8 +540,9 @@ async function loadCfg(){
   const defEng=c.default_engine||'llm';
   _allEngines=c.engines.map(e=>({value:e.value,label:e.label,tag:tagFor(e.value,defEng,L.engine)}));
   cselSetItems($('iEngine'),_allEngines);cselSetValue($('iEngine'),L.engine||defEng);
-  cselSetItems($('iLlmModel'),c.llm_models.map(m=>({value:m.value,label:m.label,tag:tagFor(m.value,'qwen2.5:14b',L.llm_model)})));cselSetValue($('iLlmModel'),L.llm_model||c.llm_model||'qwen2.5:14b');
-  if(L.llm_host)$('iLlmHost').value=L.llm_host;else if(c.llm_host)$('iLlmHost').value=c.llm_host;
+  _defLlm=c.default_llm_model||_defLlm;cselSetItems($('iLlmModel'),c.llm_models.map(m=>({value:m.value,label:m.label,tag:tagFor(m.value,c.default_llm_model||'gemma4:26b',L.llm_model)})));cselSetValue($('iLlmModel'),L.llm_model||c.llm_model||c.default_llm_model||'gemma4:26b');
+  if(L.llm_host)$('iLlmHost').value=L.llm_host;
+  else if(c.llm_host){$('iLlmHost').value=c.llm_host;if(c.llm_host_auto)$('testResult').innerHTML='<span class="test-ok">已自動偵測到本機 LLM 伺服器（'+c.llm_host+'）</span>'}
   // Devices
   const devI=[{value:'',label:'自動偵測',tag:''}];if(c.devices)c.devices.forEach(d=>devI.push({value:String(d.id),label:'['+d.id+'] '+d.name,tag:''}));
   cselSetItems($('iDevice'),devI);cselSetValue($('iDevice'),'');cselSetItems($('iMicDev'),devI);cselSetValue($('iMicDev'),'');
@@ -634,9 +644,19 @@ ui.addEventListener('change',()=>{if(ui.files.length)uploadFiles(ui.files)});
 async function uploadFiles(files){for(const f of files){const fd=new FormData();fd.append('file',f);uz.textContent='上傳中: '+f.name+'...';try{const r=await fetch('/api/upload-file',{method:'POST',body:fd});const d=await r.json();if(d.ok){showToast(d.name+' 上傳成功（'+d.size+' MB）','ok');loadFiles()}else{showToast('上傳失敗: '+d.error,'err')}}catch(e){showToast('上傳失敗: '+e.message,'err')}}uz.textContent='拖曳音訊/影片檔案到此處，或點按選擇檔案'}
 let _llmQueried=false;
 let _allEngines=[];
+function _setSecTitle(el,text){
+  // 只換標題文字，保留圖示與收合箭頭
+  const n=[...el.childNodes].find(x=>x.nodeType===3&&x.textContent.trim());
+  if(n)n.textContent=text;
+}
 function engChg(){
-  const m=cselVal($('iMode')),isT=['en','zh','ja','record'].includes(m),isRec=m==='record',isFile=cselVal($('iSource'))==='file';
-  $('rEngine').style.display=isT?'none':'';
+  const m=cselVal($('iMode')),isT=['en','zh','ja','nan','record'].includes(m),isRec=m==='record',isFile=cselVal($('iSource'))==='file';
+  // 純錄音整區隱藏；純轉錄只藏翻譯引擎與翻譯模型，LLM 主機仍要能填（逐字稿校正、AI 摘要會用到）
+  $('rEngine').style.display=isRec?'none':'';
+  $('engineRow').style.display=isT?'none':'';
+  $('llmModelRow').style.display=isT?'none':'';
+  _setSecTitle($('engTitle'),isT?'語言模型':'語言翻譯');
+  $('engHint').textContent=isT?'轉錄模式不需翻譯；LLM 主機用於逐字稿校正與 AI 摘要，沒有也能轉錄。':'要更好的翻譯品質，請搭配 LLM 伺服器與適當模型。轉錄模式不需翻譯引擎。';
   // 純錄音：只需模式 + 裝置
   $('rModelScene').style.display=isRec?'none':'';
   $('rOther').style.display=isRec?'none':'';
@@ -662,7 +682,7 @@ function engChg(){
     if(items.some(e=>e.value===prev&&!e.disabled))cselSetValue($('iEngine'),prev);
     else{const first=items.find(e=>!e.disabled);if(first)cselSetValue($('iEngine'),first.value)}
   }
-  const showLlm=cselVal($('iEngine'))==='llm'&&!isT;
+  const showLlm=!isRec&&(isT||cselVal($('iEngine'))==='llm');
   $('llmArea').classList.toggle('show',showLlm);
   if(showLlm&&!_llmQueried){const h=$('iLlmHost').value.trim();if(h){_llmQueried=true;fetchLlmModels(h)}}
   // GPU 伺服器不支援 --mic
@@ -679,8 +699,8 @@ function engChg(){
 let _sumDescs={};
 function _sumLabel(m){const d=_sumDescs[m];return d?m+' — '+d:m}
 function _updateSumModels(models){const prev=cselVal($('iSumModel'));const items=[{value:'',label:'預設（gpt-oss:120b）',tag:''}];models.sort((a,b)=>a.localeCompare(b)).forEach(m=>items.push({value:m,label:_sumLabel(m),tag:m===prev?'前次使用':''}));cselSetItems($('iSumModel'),items);if(prev)cselSetValue($('iSumModel'),prev)}
-async function fetchLlmModels(h){try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok&&d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));if(p)cselSetValue($('iLlmModel'),p);_updateSumModels(d.models)}}catch(e){}}
-async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').innerHTML='<span style="color:var(--text-dim)">測試中...</span>';$('testBtn').disabled=true;_llmQueried=false;try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok){$('testResult').innerHTML='<span class="test-ok">連線成功（'+d.server_type+'，'+d.models.length+' 個模型）</span>';if(d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));if(p)cselSetValue($('iLlmModel'),p);_llmQueried=true;_updateSumModels(d.models)}}else{$('testResult').innerHTML='<span class="test-err">'+esc(d.error)+'</span>'}}catch(e){$('testResult').innerHTML='<span class="test-err">'+esc(e.message)+'</span>'}$('testBtn').disabled=false}
+async function fetchLlmModels(h){try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok&&d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_updateSumModels(d.models)}}catch(e){}}
+async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').innerHTML='<span style="color:var(--text-dim)">測試中...</span>';$('testBtn').disabled=true;_llmQueried=false;try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok){$('testResult').innerHTML='<span class="test-ok">連線成功（'+d.server_type+'，'+d.models.length+' 個模型）</span>';if(d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_llmQueried=true;_updateSumModels(d.models)}}else{$('testResult').innerHTML='<span class="test-err">'+esc(d.error)+'</span>'}}catch(e){$('testResult').innerHTML='<span class="test-err">'+esc(e.message)+'</span>'}$('testBtn').disabled=false}
 /* Start/Stop */
 async function go(){
   const mode=cselVal($('iMode')),isFile=cselVal($('iSource'))==='file';
@@ -690,7 +710,7 @@ async function go(){
   if(isFile&&!_selectedFiles.length){showToast('請先選擇至少一個音訊檔案','err');return}
   if(needLlm&&!$('iLlmHost').value.trim()){showToast('使用 LLM 翻譯引擎需填寫 LLM 主機地址','err');return}
   if(needLlm&&!cselVal($('iLlmModel'))){showToast('請先測試連線並選擇 LLM 模型','err');return}
-  if(isFile&&$('iSummarize').checked&&!$('iLlmHost').value.trim()){showToast('產生摘要需要 LLM 伺服器，請填寫 LLM 主機地址','err');return}
+  if(isFile&&$('iSummarize').checked&&!$('iLlmHost').value.trim()){showToast('產生摘要需要 LLM 伺服器：請在「'+(['en','zh','ja','nan'].includes(mode)?'語言模型':'語言翻譯')+'」區填寫 LLM 主機（例如本機 Ollama 為 127.0.0.1:11434）','err');return}
   // 檢查是否已在執行
   try{const st=await(await fetch('/api/status',{headers:_authHeaders()})).json();if(st.running){showToast('已有處理正在執行中，請先停止再重新啟動','err');return}}catch(e){}
   curCfg={mode,modeLabel:_modeLabels[mode]||mode,model:cselVal($('iModel')),engine:eng,asrLoc,isFile,record:$('iRec').checked,denoise:$('iDenoise').checked,mic:$('iMic').checked,diarize:isFile&&$('iDiarize').checked,summarize:isFile&&$('iSummarize').checked,subtitle_overlay:$('iOvEnable')&&$('iOvEnable').checked};
@@ -789,7 +809,7 @@ function showSetup(){if(_authRole==='read'){$('pLive').classList.remove('shown')
 let _outputFiles=[],_outputDirs=[];
 async function openOutputFolder(){
   if(!_outputDirs.length)return;
-  try{await fetch('/api/open-folder',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({path:_outputDirs[0]})})}catch(e){}
+  try{const r=await fetch('/api/open-folder',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({path:_outputDirs[0]})});const d=await r.json();if(d&&d.ok===false&&d.error)showToast(d.error,'err')}catch(e){}
 }
 function showDisconnected(msg){
   stopTimer();dot.classList.remove('on');
@@ -1218,7 +1238,7 @@ async function showDevPopup(badgeEl,type){
     // 過濾裝置：lb 顯示所有有 input 的，mic 排除 blackhole/loopback
     const devList=_allDevices.filter(d=>{
       if(isLb)return true;
-      const n=d.name.toLowerCase();return !n.includes('blackhole')&&!n.includes('loopback')&&!n.includes('aggregate')&&!n.includes('聚集')&&d.channels>0});
+      const n=d.name.toLowerCase();return d.id!==-500&&!n.includes('blackhole')&&!n.includes('loopback')&&!n.includes('monitor')&&!n.includes('aggregate')&&!n.includes('聚集')&&d.channels>0});
     const curId=isLb?_curDeviceId:_curMicDeviceId;
     const curName=isLb?_autoLb:_autoMic;
     devList.forEach(d=>{
