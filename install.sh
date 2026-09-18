@@ -1403,18 +1403,25 @@ do_upgrade() {
     echo -e "  ${C_WHITE}最新版本: v${remote_version:-未知}${NC}"
 
     if [ "$local_version" = "$remote_version" ]; then
-        # 版本相同但檢查是否缺少檔案
-        _missing=""
-        for _chk in webui.py webui.html sck_audio_capture.swift install-linux.sh; do
-            [ ! -f "$SCRIPT_DIR/$_chk" ] && _missing="$_missing $_chk"
+        # 版本相同時，逐檔比對內容而不是只看檔案在不在。
+        # 只檢查「存在與否」會漏掉「檔案在、但內容是舊的」——例如某一版的升級清單
+        # 漏了 README.md / CHANGELOG.md，之後再升級也永遠補不回來（v2.20.2 實機踩到）。
+        _stale=""
+        for _uf in $_UPGRADE_FILES; do
+            [ -f "$repo_dir/$_uf" ] || continue
+            if [ ! -f "$SCRIPT_DIR/$_uf" ] || ! cmp -s "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"; then
+                _stale="$_stale $_uf"
+            fi
         done
-        if [ -n "$_missing" ]; then
-            echo -e "  ${C_WARN}版本相同但缺少檔案，補充安裝中...${NC}"
-            for _uf in $_UPGRADE_FILES; do
-                [ -f "$repo_dir/$_uf" ] && cp "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"
+        if [ -n "$_stale" ]; then
+            echo -e "  ${C_WARN}版本相同但有檔案與最新版不符，更新中...${NC}"
+            for _uf in $_stale; do
+                cp "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"
             done
+            chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/install.sh" 2>/dev/null
+            chmod +x "$SCRIPT_DIR/install-linux.sh" 2>/dev/null || true
             build_sck_helper
-            check_ok "已補充安裝缺少的檔案（${_missing}）"
+            check_ok "已更新與最新版不符的檔案（${_stale}）"
         else
             check_ok "已經是最新版本 (v${local_version})"
         fi
