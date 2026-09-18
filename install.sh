@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.20.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.20.2 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1366,6 +1366,11 @@ check_sck() {
     return 0
 }
 
+# 升級時要更新的檔案清單（補檔與升級共用同一份，避免兩邊漂掉而漏檔）
+# README.md 與 CHANGELOG.md 也要更新，否則升級後看不到改了什麼、版本號還停在舊版
+_UPGRADE_FILES="translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh \
+SOP.md README.md CHANGELOG.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift"
+
 do_upgrade() {
     section "從 GitHub 升級程式"
 
@@ -1405,7 +1410,7 @@ do_upgrade() {
         done
         if [ -n "$_missing" ]; then
             echo -e "  ${C_WARN}版本相同但缺少檔案，補充安裝中...${NC}"
-            for _uf in translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh SOP.md webui.py webui.html sck_audio_capture.swift; do
+            for _uf in $_UPGRADE_FILES; do
                 [ -f "$repo_dir/$_uf" ] && cp "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"
             done
             build_sck_helper
@@ -1428,7 +1433,7 @@ do_upgrade() {
 
     # 更新主要程式檔案
     local files_updated=0
-    for fname in translate_meeting.py start.sh install.sh install-linux.sh SOP.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift; do
+    for fname in $_UPGRADE_FILES; do
         if [ -f "$repo_dir/$fname" ]; then
             cp "$repo_dir/$fname" "$SCRIPT_DIR/$fname"
             ((files_updated++)) || true
