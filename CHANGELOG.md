@@ -1,5 +1,11 @@
 # Changelog
 
+### v2.20.6 (2026-09-18)
+
+**修正 — Windows 的 `install.ps1 -Upgrade` 也漏檔（v2.20.2 只修了 macOS / Linux 版）**
+- Windows 實機升級 v2.19.0 → v2.20.5 後，`README.md` 與 `CHANGELOG.md` 仍停在 v2.19.0，另外也漏掉 `install-linux.sh` 與 `sck_audio_capture.swift`
+- `install.ps1` 內有**三份各自維護、內容互不相同**的檔案清單。改為共用一份 `$UPGRADE_FILES`，與 `install.sh` 的 `_UPGRADE_FILES` 一致（歸檔用的清單維持原樣，它額外備份 `config.json` 是刻意的）
+
 ### v2.20.5 (2026-09-18)
 
 **變更 — 摘要／校正模型的建議依實測結果全面更新**
