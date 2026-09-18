@@ -1544,7 +1544,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.19.0"
+APP_VERSION = "2.19.1"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2459,6 +2459,8 @@ def _script_profile(text):
 
 
 _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'’]*")
+# 校正不可憑空插入的字元（括號、引號、數學與排版符號）
+_BRACKET_CHARS = set("[]{}()（）［］｛｝【】〔〕《》〈〉「」『』<>〈〉|/\\@#$%^*_~`«»‹›")
 # 模型偶爾輸出的特殊空白與連字號，換回一般字元
 _PUNCT_NORMALIZE = str.maketrans({"\u00a0": " ", "\u202f": " ", "\u2007": " ",
                                   "\u2010": "-", "\u2011": "-"})
@@ -2497,6 +2499,10 @@ def _accept_correction(original, corrected, protected=None):
     if re.search(r"<0x[0-9A-Fa-f]{2}>", corrected) or "   " in corrected:
         return False
     if "\\" in corrected and "\\" not in original:
+        return False
+    # 憑空長出來的括號／符號（實測 gemma4 把「スナップショット」寫成「スナップ］ショット」）。
+    # 校正只該補一般標點，插入括號類字元一定是雜訊或改寫
+    if (set(corrected) - set(original)) & _BRACKET_CHARS:
         return False
     # 專有名詞不可被刪改；只能換成另一個出現次數更多的專有名詞（修正誤聽）
     if protected:
@@ -2562,7 +2568,7 @@ def _moved_between(orig_a, corr_a, orig_b, corr_b):
 # 場景名稱對照（CLI 用）
 SCENE_MAP = {"meeting": 0, "training": 1, "presentation": 2, "subtitle": 3}
 MODE_MAP = {key: i for i, (key, _, _) in enumerate(MODE_PRESETS)}
-APP_NAME = f"jt-live-whisper v{APP_VERSION} - 100% 全地端 AI 語音工具集"
+APP_NAME = f"jt-live-whisper v{APP_VERSION} - 100% 全地端 AI 語音工具箱"
 APP_AUTHOR = "by Jason Cheng (Jason Tools)"
 
 
@@ -4235,7 +4241,11 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                         continue
                     event = json.loads(line)
                     if event["type"] == "segment":
-                        segments.append({"start": event["start"], "end": event["end"], "text": event["text"]})
+                        # confidence / language 是伺服器 v2.19.0 起才有，舊伺服器沒有就留 None
+                        segments.append({"start": event["start"], "end": event["end"],
+                                         "text": event["text"],
+                                         "confidence": event.get("confidence"),
+                                         "language": event.get("language")})
                         duration = event.get("duration", 0)
                         if progress_callback and duration > 0:
                             pct = min(event["end"] / duration, 1.0)
@@ -7779,8 +7789,15 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
     print(f"{C_TITLE}{'=' * 60}{RESET}")
     print(f"{C_TITLE}{BOLD}  {APP_NAME}{RESET}")
     print(f"{C_TITLE}  {APP_AUTHOR}{RESET}")
-    _fw_label = "mlx-whisper GPU" if use_mlx else "faster-whisper"
-    print(f"  {C_OK}ASR 引擎: Whisper ({model_name}) @ 本機（{_fw_label}）{RESET}")
+    # 有 GPU 伺服器時兩路都送遠端（見 transcribe_chunk 的 use_remote），橫幅要照實寫，
+    # 不可一律顯示「本機」——否則畫面說的和實際做的不一樣
+    if mic_remote_cfg:
+        _asr_where = (f"GPU 伺服器 {mic_remote_cfg.get('host', '?')}:"
+                      f"{mic_remote_cfg.get('whisper_port', REMOTE_WHISPER_DEFAULT_PORT)}"
+                      f"（失敗時自動改用本機）")
+    else:
+        _asr_where = f"本機（{'mlx-whisper GPU' if use_mlx else 'faster-whisper'}）"
+    print(f"  {C_OK}ASR 引擎: Whisper ({model_name}) @ {_asr_where}{RESET}")
     if isinstance(translator_lb, OllamaTranslator):
         _srv_label = "Ollama" if translator_lb.server_type == "ollama" else "OpenAI 相容"
         print(f"  {C_OK}翻譯引擎: {translator_lb.model} @ {translator_lb.host}:{translator_lb.port}（{_srv_label}）{RESET}")
@@ -10131,12 +10148,14 @@ class _SummaryStatusBar:
                 self._active = True
             except Exception:
                 self._active = False
-        # 攔截 SIGWINCH
-        if hasattr(signal, 'SIGWINCH'):
-            self._old_sigwinch = signal.getsignal(signal.SIGWINCH)
-            signal.signal(signal.SIGWINCH, self._on_sigwinch)
-        else:
-            self._old_sigwinch = None
+        # 攔截 SIGWINCH（只有主執行緒能註冊訊號；API 的工作執行緒會跳過）
+        self._old_sigwinch = None
+        if hasattr(signal, 'SIGWINCH') and threading.current_thread() is threading.main_thread():
+            try:
+                self._old_sigwinch = signal.getsignal(signal.SIGWINCH)
+                signal.signal(signal.SIGWINCH, self._on_sigwinch)
+            except ValueError:
+                self._old_sigwinch = None
         self._thread = threading.Thread(target=self._draw_loop, daemon=True)
         self._thread.start()
         return self
@@ -10294,7 +10313,8 @@ class _SummaryStatusBar:
         # 恢復原本的 SIGWINCH handler
         if hasattr(signal, 'SIGWINCH'):
             try:
-                signal.signal(signal.SIGWINCH, self._old_sigwinch or signal.SIG_DFL)
+                if threading.current_thread() is threading.main_thread():
+                    signal.signal(signal.SIGWINCH, self._old_sigwinch or signal.SIG_DFL)
             except Exception:
                 pass
         if self._active:

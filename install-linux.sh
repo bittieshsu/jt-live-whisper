@@ -352,7 +352,7 @@ install_desktop_entry() {
 [Desktop Entry]
 Type=Application
 Name=jt-live-whisper
-Comment=100% 全地端 AI 語音工具集（WebUI）
+Comment=100% 全地端 AI 語音工具箱（WebUI）
 Exec=bash -c 'cd "$SCRIPT_DIR" && ./start.sh --webui'
 Icon=audio-input-microphone
 Terminal=true
