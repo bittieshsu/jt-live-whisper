@@ -1544,7 +1544,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.19.1"
+APP_VERSION = "2.20.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2214,10 +2214,14 @@ LLM_PRESETS = [
 ]
 
 # 摘要功能設定
-SUMMARY_DEFAULT_MODEL = "gpt-oss:120b"
+# 2026-09-18 三方交錯 A/B（同一份 63 分鐘逐字稿跑三輪、每輪對調順序）後改為 qwen3.8:27b：
+# 記憶體 17.7GB（gpt-oss:120b 要 65GB）、三輪都比它快、摘要內容還更多，
+# 人名與關鍵數字的正確性三輪全對。gpt-oss:120b 保留為可選項目。
+SUMMARY_DEFAULT_MODEL = "qwen3.8:27b"
 _BUILTIN_SUMMARY_MODELS = [
-    ("gpt-oss:120b", "品質最好（推薦）"),
-    ("gpt-oss:20b", "速度快，品質一般"),
+    ("qwen3.8:27b", "品質好、記憶體需求低（推薦）"),
+    ("glm-4.7-flash:q8_0", "速度最快，摘要較精簡"),
+    ("gpt-oss:120b", "品質基準，需要大記憶體主機"),
 ]
 
 # 合併使用者自訂摘要模型（config.json 的 summary_models）
@@ -10943,8 +10947,19 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None):
         sbar.set_task("載入聲紋模型")
 
     # 載入音訊
-    wav = preprocess_wav(wav_path)
-    sr = 16000  # resemblyzer preprocess_wav 輸出 16kHz
+    # resemblyzer 的 preprocess_wav() 除了重取樣，還會做 VAD 靜音修剪並「刪掉」那些樣本
+    # （實測 AMI 一場 18.5 分鐘的會議被刪掉 31.9%）。整檔修剪之後，樣本索引就不再對應
+    # 原本的時間戳，越後面的段落偏移越大——AMI 那場到檔尾已經差了將近 6 分鐘，
+    # 等於拿會議別處的聲音去比對，講者辨識必然大亂。
+    # 正確做法是**逐段修剪**：先用原始時間軸切出段落，再對該段落做 preprocess。
+    sr = 16000
+    try:
+        import librosa
+        wav, _ = librosa.load(wav_path, sr=sr, mono=True)
+        _per_segment_trim = True
+    except Exception:
+        wav = preprocess_wav(wav_path)      # 退而求其次，維持舊行為
+        _per_segment_trim = False
 
     # 初始化聲紋編碼器（首次自動下載 ~17MB 模型）
     encoder = VoiceEncoder("cpu")
@@ -10982,6 +10997,10 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None):
         ])
         if len(combined_audio) >= int(0.3 * sr):
             try:
+                if _per_segment_trim:
+                    combined_audio = preprocess_wav(combined_audio, source_sr=sr)
+                if len(combined_audio) < int(0.3 * sr):
+                    continue
                 emb = encoder.embed_utterance(combined_audio)
                 for idx in group:
                     merged_emb_map[idx] = emb
@@ -11011,6 +11030,9 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None):
             end_sample = min(len(wav), int((mid + 0.25) * sr))
 
         audio_slice = wav[start_sample:end_sample]
+        if _per_segment_trim and len(audio_slice) >= int(0.3 * sr):
+            # 切好之後才修剪這一段自己的靜音，不影響時間軸對應
+            audio_slice = preprocess_wav(audio_slice, source_sr=sr)
 
         # 仍然太短則跳過
         if len(audio_slice) < int(0.3 * sr):
