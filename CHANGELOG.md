@@ -1,5 +1,135 @@
 # Changelog
 
+### v2.19.0 (2026-09-17)
+
+**新增 — Linux 支援（Ubuntu / Debian 為主）**
+- 原本只支援 macOS 與 Windows，Linux 上雖然離線處理可用，但即時模式、錄音、WebUI 都找不到系統音訊，安裝腳本也只能在 macOS 上執行
+- **系統音訊擷取**：從「預設喇叭」的 monitor 來源錄音（PipeWire 與 PulseAudio 都提供），**不需要安裝虛擬音效卡、不必改變輸出裝置**。優先使用 `parec`，沒有時改用 `pw-record`；讀取邏輯沿用 macOS ScreenCaptureKit 那一套（float32 pipe、累積滿一個 block 才送出）
+  - 裝置代號 `-500`（系統音訊）與 `-600`（系統音訊 + 麥克風混合錄音），與 macOS / Windows 的用法一致
+  - 擷取目前的預設輸出裝置，換耳機或喇叭時自動跟著換；可用環境變數 `JTLW_MONITOR_SOURCE` 或 `config.json` 的 `linux_monitor_source` 指定其他來源
+  - 即時轉錄、即時翻譯、雙向模式、`--mic`、純錄音、混合錄音、Moonshine、WebUI 全部支援
+- **即時辨識一律使用 faster-whisper**：Linux 不編譯 whisper.cpp（SDL2 讀不到 monitor 來源），有 NVIDIA GPU 時走 CUDA；沒有 GPU 時自動推薦 base.en / small 模型
+- **新增 `install-linux.sh`**（`install.sh` 在 Linux 上自動轉交）
+  - 桌面版：以 apt 補齊 ffmpeg、PortAudio、pulseaudio-utils、PyQt6 需要的 `libxcb-cursor0`、中文字型；建立應用程式選單捷徑
+  - `--server`：無桌面主機，WebUI 以 `jt-live-whisper-webui` systemd 服務常駐
+  - `--doctor`：一次檢查 Python 套件、音訊伺服器、預設喇叭、GPU、GPU 伺服器與 LLM 伺服器連線
+  - `--upgrade` / `--uninstall`
+  - 沒有 NVIDIA GPU 時先安裝 CPU 版 PyTorch，避免 pip 預設下載數 GB 的 CUDA 版
+  - 從 Mac 複製過來的 `config.json` 若含 `/Users/...` 的 SSH Key 路徑，自動改為 `~/.ssh/` 底下的同名檔案
+  - 相依套件：可重複執行，只補缺少的項目；沒有 gcc 時自動安裝 `build-essential` 與 `python3-dev`（最小安裝的 Ubuntu Server 沒有編譯器，resemblyzer / webrtcvad 會安裝失敗）
+  - `--upgrade` 下載新檔案後自動重新執行安裝檢查，補齊新版需要的套件；伺服器版在程式版本變更或服務設定檔變更時重新啟動服務，沒有變更且服務正常時不打擾（可用 `JTLW_SKIP_DEP_CHECK=1` 略過）
+  - 支援 `SUDO_ASKPASS`，透過 SSH 自動部署時也能補裝系統套件
+  - ARM64 + NVIDIA（如 DGX Spark）：PyTorch 改裝 cu128 版；PyPI 的 ARM64 CTranslate2 不含 CUDA，改在本機從原始碼編譯，wheel 快取在 `.ct2-wheels/` 供重裝使用
+    - 編好的函式庫裝在本專案的 `.ct2-local/`，**不裝進 `/usr/local`**：同一台主機若已經在跑 GPU 辨識服務，覆蓋 `/usr/local/lib/libctranslate2` 可能讓它當掉或在重啟後載入不同版本；`start.sh` 會自動把這個目錄加入函式庫路徑
+    - 安裝到其他主機（GPU 伺服器部署）的行為不變
+  - `--uninstall`：移除服務需要 sudo，失敗時原本仍顯示「已移除」並接著刪掉虛擬環境，留下仍在執行的服務；現在會明確回報失敗、列出手動指令，並且不做任何變更
+- `start.sh`：Linux 不再執行 macOS 專用的 BlackHole 檢查（原本一定誤報「缺少 BlackHole」），改為檢查擷取工具與音訊伺服器；NVIDIA 環境自動把 venv 內的 cuBLAS / cuDNN 加入函式庫路徑
+- `--list-devices` 在 Linux 上原本什麼都不印，現在會列出系統音訊來源與所有輸入裝置
+- 開啟結果檔改用 `xdg-open`，並脫離程序群組、切斷標準輸出入：原本呼叫 macOS 的 `open`，Ubuntu 會交給 LibreOffice 開 HTML，而且子程序掛在主程式底下，導致外層指令卡住不結束。沒有圖形桌面時不開啟
+- WebUI：裝置清單加入 Linux 系統音訊並自動選取；麥克風清單排除 monitor 來源；「開啟資料夾」在沒有桌面時回傳路徑並在頁面上提示；中文字型清單改用 fontconfig 查詢（Qt 在 Linux 上會自動補字，原本判斷不準，連不含中文的字型都列入）；沒有桌面時不自動開瀏覽器
+- 懸浮字幕：沒有圖形桌面時直接提示並略過，不再誤報「可能未安裝 PyQt6」
+
+**新增 — 華語模式可選用 Breeze-ASR-26**（[issue #4](https://github.com/jasoncheng7115/jt-live-whisper/issues/4)，感謝 @kermitho 建議並提供實作方向）
+- 台灣的會議常是華語為主、夾雜台語，現在可以在 `zh` / `zh2en` / `zh2ja` 模式選用 `breeze-asr-26`，與 large-v3 做比較：`./start.sh --input 會議.mp3 --mode zh -m breeze-asr-26`
+- 選用時一併套用本模型專屬的處理（`language="en"`、專用辨識參數組、自行切段取得時間戳、即時步進下限、固定本機辨識），不會只換模型卻沿用一般參數組而大幅劣化
+- 沒選 Breeze-ASR-26 時，語言代碼與參數組都和原本完全相同
+- 命令列 `-m`、互動式選單、WebUI 模型清單都可選；英文、日文、雙向模式不支援，指定時改用該模式的推薦模型並提示
+- whisper.cpp 沒有本模型的 ggml 版，走到該路徑時給出明確錯誤訊息
+
+**修正 — 台語模式在三個入口沒有鎖定 Breeze-ASR-26**（v2.18.0 起）
+- 命令列即時模式：有設定 GPU 伺服器時，`--mode nan` 會以 large-v3-turbo 送到 GPU 伺服器辨識，完全沒有用到台語模型。現在一律改在本機以 Breeze-ASR-26 辨識
+- 互動式選單即時模式：台語沒有強制走 Python 端辨識，也沒有鎖定模型，可能用 whisper.cpp 或一般模型去跑台語；也少了即時步進下限。現在自動選用 Breeze-ASR-26、固定本機，並套用步進下限；有 GPU 伺服器時不再詢問辨識位置
+- 互動式選單離線處理：模型清單只列一般 Whisper 模型，選到的模型會被送進台語專用流程，結果錯誤。現在台語模式只列 Breeze-ASR-26
+- 離線處理選用 Breeze-ASR-26 時，一開始就判定本機辨識，不再先顯示「GPU 伺服器」並啟動遠端服務
+- 命令列離線處理 `--mode nan` 沒有加 `-m` 時，會誤顯示「已忽略指定的 large-v3」，現在只有真的指定其他模型時才提示
+
+**修正 — WebUI 純轉錄模式無法設定 LLM 主機，AI 摘要做不出來**（[issue #3](https://github.com/jasoncheng7115/jt-live-whisper/issues/3)，感謝 @kermitho 回報並提供修正方向）
+- 純轉錄模式（英文 / 中文 / 日文 / 台語轉錄）原本把整個「語言翻譯」區塊隱藏，LLM 主機欄位也跟著不見；勾選 AI 摘要後會要求填寫，卻沒有地方可填
+- 現在只隱藏翻譯引擎與翻譯模型，保留 LLM 主機與測試連線，區塊標題改為「語言模型」；純錄音模式才整區隱藏
+- 一併修掉後端的另一半問題：`webui.py` 只有翻譯引擎選 LLM 時才把 LLM 主機傳給主程式，所以就算填了，純轉錄與 NLLB / Argos 翻譯模式的逐字稿校正與摘要仍然連不到。現在只要有填就會傳
+- 缺少 LLM 主機時的提示改為指出要在哪一區填寫，並附上本機 Ollama 的預設位址
+
+**新增 — WebUI 自動偵測本機 LLM 伺服器**（[issue #5](https://github.com/jasoncheng7115/jt-live-whisper/issues/5)，感謝 @kermitho 建議）
+- 安裝時跳過 LLM 設定（例如當時還沒裝 Ollama）後，`config.json` 沒有 `llm_host`，之後使用者得自己知道要填 `127.0.0.1:11434`
+- 現在 `config.json` 沒有設定時，WebUI 會探測本機的 Ollama（11434）、LM Studio（1234）、llama.cpp / LocalAI（8080），找到就自動帶入並顯示「已自動偵測到本機 LLM 伺服器」
+- 除了確認連接埠有開，還會驗證回傳結構確實是 LLM 伺服器（沿用 v2.16.7 的偵測），避免把占用 8080 的其他網站服務誤判成 LLM；結果快取 30 秒，找不到時行為與原本相同
+
+**變更 — 預設翻譯模型改為 gemma4:26b**
+- 在 GPU 伺服器（DGX Spark）上以同一段會議音檔實測即時翻譯：gemma4:26b 每句中位數 0.8 秒、最慢 1.4 秒；原預設 qwen2.5:14b 為 1.0 秒、1.9 秒。gemma4:26b 是 MoE 架構，實際運算量小，生成速度約為 qwen2.5:14b 的兩倍，翻譯也較正確（qwen2.5:14b 會把 billion 譯成「一百億」、偶爾輸出簡體字）
+- gemma4 是會思考的模型，翻譯時一律關閉思考模式，實測回應不含任何推理內容
+- LLM 伺服器沒有 gemma4:26b 時自動改用 qwen2.5:14b，兩者都沒有才選清單第一個；命令列、互動式選單、WebUI 規則一致，已裝 qwen2.5:14b 的使用者不必另外下載
+- gemma4:26b 約需 17GB 顯示記憶體（qwen2.5:14b 約 9GB），記憶體不足時可用 `--llm-model qwen2.5:14b` 或在選單改選
+- 用 `--llm-model` 指定時不受影響；WebUI 會沿用前次使用的模型；終端機選單按 Enter 會改用新預設，前次使用的模型仍有「前次使用」標示，輸入編號即可選回
+
+**修正 — OpenAI 相容伺服器關不掉 gemma4 的思考模式**
+- 原本只送 `chat_template_kwargs: {"enable_thinking": false}`，對 Qwen3 有效，但 Ollama 的 `/v1` 端點與 gemma4 不吃這個參數，每句翻譯前仍會先推理約 190 個 token
+- 改為同時送 `reasoning_effort: "none"`，實測推理內容歸零、每句約 0.4 秒；伺服器不接受這個值（回 HTTP 400）時自動拿掉重送，不影響其他伺服器
+- Ollama 原生 API 的行為不變
+
+**修正 — Windows 上音量分析遇到中文輸出就失敗**（v2.16.3 起）
+- 離線處理的音量分析以 ffmpeg 取得 `mean_volume`，但讀取輸出時沒有指定編碼，Windows 會用 cp950 解碼；ffmpeg 輸出只要含 UTF-8 中文（中文檔名、音檔標籤）就會在背景噴出 `UnicodeDecodeError`，音量分析被默默略過，低音量錄音因此不會啟用增益
+- 改以 UTF-8 讀取，並比照其他 ffmpeg 呼叫不再跳出命令列視窗
+
+**修正 — Windows 上 WebUI 選 Moonshine 無法啟動**
+- Moonshine 即時模式以 `os.get_terminal_size()` 取得終端寬度，標準輸出不是終端機時（WebUI 啟動的子程序、systemd 服務）會直接失敗：Windows 為 `WinError 6`，Linux / macOS 為 `OSError`
+- 改用 `shutil.get_terminal_size()`，取不到時以 80 欄計算
+
+**修正 — LLM 校正會把英文逐字稿翻成中文、竄改內容**（v2.14 起）
+- 離線處理開啟 LLM 校正時，提示詞要求「全部使用台灣繁體中文用語」，模型遇到英文逐字稿就直接翻譯：實測 63 分鐘的英文會議，gpt-oss:120b 把後半段 68 句全部改成中文
+- 其他實測到的錯誤修改：數字被竄改（`$625 billion` 變成「`$6`、一串 tab 字元、`65 billion`」）、英文句子混入中文字與西里爾字母、把一句的內容搬到下一句、在句子中間插入「[雜音]」
+- 校正結果一律做簡轉繁，日文逐字稿的漢字也被轉掉（「会議」→「會議」、「学校」→「學校」）
+- 修正：
+  - 提示詞改為保持每一行原本的語言、不動數字、不改語序、不跨行搬移；中文行才要求台灣用語
+  - **英文與日文逐字稿改用英文提示詞**：中文提示詞會誘導模型把整段翻成中文
+  - 每一行校正結果都要通過檢查，否則保留原文：不可出現原文沒有的文字系統（中文行補英文專有名詞除外）、數字不可改變、整份逐字稿重複出現的專有名詞不可被改掉（TSMC 被改成 TSMS、人名 Ida 被改成 I）、字數不可大增（重複插入片語）、不可從相鄰行搬字、不可有控制字元或亂碼（tab、`<0xA0>`、連續空白、LaTeX 片段）
+  - 不換行連字號、不換行空白等特殊字元自動換回一般字元
+  - 簡轉繁只套用在中文行
+  - 完成訊息會顯示有幾行因修改異常而保留原文
+- **校正改為每批 60 行、同時送 2 批**：原本整份逐字稿一次送，模型回傳的行號會錯位，錯位後的修改全部對不回原文而被丟棄（實測 388 行一次送，gemma4 有 144 行、gpt-oss 有 121 行白做）。改批次後錯位幾乎消失，63 分鐘的會議由 827 秒降到 105 秒
+- 中文逐字稿的校正（同音字、專有名詞，例如 safe → Ceph）照常進行
+
+**修正 — macOS 安裝與啟動的四個問題**（在 macOS 26 / Apple Silicon 實機發現）
+- **選配元件編譯失敗會中止整個安裝，而且畫面上沒有錯誤訊息**：`install.sh` 有 `set -e`，ScreenCaptureKit 元件或 whisper.cpp 編譯失敗時直接結束，後面的 Python 套件、模型、驗證全部沒跑。這兩個都是選配（可退回 BlackHole、可改用 mlx-whisper / faster-whisper），現在編譯失敗會說明原因並繼續安裝
+- **Xcode 命令列工具的 SDK 與編譯器版本不符時毫無提示**：macOS 大版本升級後常見（實測 macOS 26 的 CLT 是 MacOSX27.0.sdk＋Swift 6.4，swiftc 卻是 6.3.3），Swift 與 C 都無法編譯，連帶 whisper.cpp、ScreenCaptureKit 元件、resemblyzer（講者辨識）全部裝不起來。安裝一開始就會試編一個最小程式，偵測到不符時印出修復指令
+- **`start.sh` 從桌面捷徑或 SSH 啟動時找不到 ffmpeg**：Homebrew 只把路徑寫進 `~/.zprofile`，非登入 shell 讀不到。macOS 上自動補上 `/opt/homebrew/bin` 與 `/usr/local/bin`
+- **沒有系統音訊來源時連 WebUI 都打不開**：macOS 上缺 ScreenCaptureKit 元件與 BlackHole 時，`start.sh` 會停在「是否仍然繼續？」，非互動啟動讀不到輸入就直接結束。WebUI 的離線處理不需要系統音訊，現在會提示後繼續啟動
+
+**新增 — macOS 15+ 的「本機網路」權限提示**
+- macOS 15 起連線區域網路裝置需要「本機網路」權限，未授權時 Python 會直接得到 `No route to host`，但同一台的 `curl` 卻連得到，訊息上完全看不出是權限問題
+- GPU 伺服器或區網 LLM 連不上時，會提示到「系統設定 → 隱私權與安全性 → 本機網路」開啟終端機程式，並說明透過 SSH 執行不會跳出授權視窗
+
+**修正 — 摘要的「校正逐字稿」會被靜默截斷**
+- 分批大小依模型宣告的 context window 計算，但模型宣告的值不等於伺服器實際配置的上限（Ollama 的 `OLLAMA_CONTEXT_LENGTH`）。宣告 262,144 的模型會被判定「整份逐字稿可以一次送」，實際輸出寫到一半就停止，**而且沒有任何錯誤訊息**
+- 實測：63 分鐘會議的 43 KB 逐字稿，校正逐字稿只產出 7%，結尾斷在句子中間
+- 修正：每批加上絕對上限（12,000 字），並在校正逐字稿明顯短於輸入時印出警告
+
+**修正 — 不支援思考模式的模型每次呼叫都白送一次請求**
+- 程式一律先送 `think:false`，模型不支援時 Ollama 回 400，再移除欄位重送。翻譯是逐句呼叫，等於每句都送兩次
+- 現在記住哪些模型不支援，之後直接送，不再重試
+
+**修正 — GPU 伺服器在用戶端中途斷線後一直顯示忙碌**（`remote_whisper_server.py`，v2.16 起）
+- 串流辨識時用戶端中斷（關閉程式、網路中斷），伺服器沒有關閉辨識用的 generator，負責清理的程式碼永遠不會執行：忙碌標記一直留著，**所有用戶端都停在「仍在忙碌」等待**，上傳的暫存音檔也不會刪除，只能重啟服務
+- 現在回應結束或斷線後一定會關閉 generator、刪除暫存檔、清除忙碌標記；清除時會核對是不是同一筆作業，不會誤清之後才開始的作業
+- 串流回應送出前就發生錯誤（例如讀取上傳檔失敗）時也會正確清理
+- 實測：舊版斷線 30 秒後仍為忙碌並殘留暫存檔；修正後斷線當下即恢復閒置，正常辨識不受影響
+- **需要更新 GPU 伺服器上的 `server.py` 才會生效**
+
+**修正 — Linux 安裝時卡在「正在檢查伺服器環境」**
+- `config.json` 已設定 GPU 伺服器、但這台主機沒有可免密碼登入的 SSH 金鑰時，SSH 會在轉圈動畫底下等待輸入密碼，透過 SSH 或排程自動部署時就一直卡住（`--upgrade` 之後的相依套件檢查也會遇到）
+- Linux 現在先以不詢問密碼的方式試連；登不進去時略過需要 SSH 的伺服器檢查與修復，只以 HTTP 確認辨識服務是否正常，並提示如何設定金鑰。辨識本身走 HTTP，不受影響
+- macOS 的流程不變
+
+**Linux 支援不影響 Windows / macOS**
+- 所有 Linux 邏輯皆為新增分支；以模擬平台旗標比對新舊版的裝置判斷、錄音代號、模型推薦、ScreenCaptureKit 啟動指令，macOS 與 Windows 各 39 項結果完全一致
+- Windows 測試機實機回歸：`install.ps1` 升級安裝、WASAPI Loopback 即時翻譯、雙向、`--mic`、純錄音、Moonshine、懸浮字幕、離線處理（GPU 伺服器 + 講者辨識 + 摘要、本機 CPU）、WebUI 啟動 / 開始 / 停止皆正常
+- macOS 實機回歸（macOS 26.6.2 / Apple Silicon）：一鍵安裝、whisper.cpp 編譯、ScreenCaptureKit 元件與授權、系統音訊即時字幕、離線處理（本機與 GPU 伺服器）、講者辨識、LLM 翻譯與摘要、台語 Breeze（mlx GPU）、WebUI、懸浮字幕皆正常
+- Linux 實機測試：桌面版 15 項（離線、即時 GPU / CPU / Moonshine / 雙向 / 麥克風、混合錄音、WebUI、互動選單）與伺服器版（全新安裝、systemd 服務、升級、移除）皆通過
+
+**文件**
+- README、SOP、專案網站加入 Linux 的系統需求、安裝、音訊設定、硬體建議、常見問題與移除方式
+- 更正 Moonshine 的平台說明：原本寫「僅限 Apple Silicon」，實際上 Windows 與 Linux 也可使用，只有 Intel Mac 不支援
+
+
 ### v2.18.2 (2026-08-05)
 
 **修正 — macOS 安裝時 whisper.cpp 編譯失敗：`No rule to make target 'whisper-stream'`**（[issue #2](https://github.com/jasoncheng7115/jt-live-whisper/issues/2)，感謝 @jackylinuxcom 回報並提供修正方向）

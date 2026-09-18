@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>安裝與使用 — jt-live-whisper</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-<meta name="description" content="jt-live-whisper 安裝與使用說明：系統需求、磁碟空間、macOS / Windows 音訊裝置設定、快速開始、使用方式、互動式選單、命令列參數、目錄結構、技術架構與硬體建議。" />
+<meta name="description" content="jt-live-whisper 安裝與使用說明：系統需求、磁碟空間、macOS / Windows / Linux 音訊裝置設定、快速開始、使用方式、互動式選單、命令列參數、目錄結構、技術架構與硬體建議。" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -52,10 +52,11 @@
 <section id="req">
   <div class="wrap">
     <div class="sec-head"><h2><span class="zh">系統需求</span><span class="en">System requirements</span></h2></div>
-    <div class="grid g3">
+    <div class="grid g2">
       <div class="card"><h3><span class="badge">A</span>macOS</h3><p><span class="zh">macOS（Apple Silicon / Intel）· Python 3.12+ · <a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a>（需事先安裝）· <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener">BlackHole 2ch</a>（虛擬音訊驅動，<b>選配</b>；macOS 13 以上預設用內建 ScreenCaptureKit，免安裝驅動）</span><span class="en">macOS (Apple Silicon / Intel) · Python 3.12+ · <a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a> (pre-installed) · <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener">BlackHole 2ch</a> (<b>optional</b>; macOS 13+ uses the built-in ScreenCaptureKit, no driver needed)</span></p></div>
       <div class="card"><h3><span class="badge">B</span>Windows</h3><p><span class="zh">Windows 10 以上 · Python 3.12+（從 <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a> 安裝，勾選「Add to PATH」）· PowerShell 5.1+（Windows 10 內建）</span><span class="en">Windows 10+ · Python 3.12+ (from <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a>, check "Add to PATH") · PowerShell 5.1+ (built in)</span></p></div>
-      <div class="card"><h3><span class="badge">C</span><span class="zh">共通</span><span class="en">Common</span></h3><p><span class="zh">地端 LLM 伺服器（翻譯 / 摘要用，推薦 <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a>）。<b>沒有 LLM 伺服器也能用</b>：可切換為 NLLB / Argos 離線翻譯，但摘要功能需要 LLM。</span><span class="en">A local LLM server (for translation/summary; <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a> recommended). <b>Works without one</b> via NLLB / Argos offline translation — but summaries need an LLM.</span></p></div>
+      <div class="card"><h3><span class="badge">C</span>Linux</h3><p><span class="zh">Ubuntu 22.04 / Debian 12 以上（其他發行版需自行安裝系統套件）· Python 3.10+（含 python3-venv）· 桌面版使用 PipeWire 或 PulseAudio，<b>免裝虛擬音效卡</b>；無桌面主機可安裝伺服器版（WebUI 以 systemd 常駐）</span><span class="en">Ubuntu 22.04 / Debian 12+ (other distros: install system packages manually) · Python 3.10+ (with python3-venv) · Desktop uses PipeWire or PulseAudio, <b>no virtual sound card</b>; headless hosts can use the server edition (WebUI as a systemd service)</span></p></div>
+      <div class="card"><h3><span class="badge">D</span><span class="zh">共通</span><span class="en">Common</span></h3><p><span class="zh">地端 LLM 伺服器（翻譯 / 摘要用，推薦 <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a>）。<b>沒有 LLM 伺服器也能用</b>：可切換為 NLLB / Argos 離線翻譯，但摘要功能需要 LLM。</span><span class="en">A local LLM server (for translation/summary; <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a> recommended). <b>Works without one</b> via NLLB / Argos offline translation — but summaries need an LLM.</span></p></div>
     </div>
 
     <h3 style="margin:34px 0 12px"><span class="zh">磁碟空間需求</span><span class="en">Disk space</span></h3>
@@ -95,11 +96,17 @@
 <pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
 <span class="g">bash</span> install.sh</pre>
+    <div class="cmd-label"><span class="zh">Linux（Ubuntu / Debian，會用 sudo 補齊系統套件）</span><span class="en">Linux (Ubuntu / Debian; uses sudo for system packages)</span></div>
+<pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
+<span class="g">bash</span> install.sh              <span class="c"># 桌面版</span>
+<span class="g">bash</span> install.sh --server     <span class="c"># 伺服器版（無桌面，WebUI 以 systemd 常駐）</span>
+./install.sh --doctor           <span class="c"># 檢查音訊、套件、GPU 與伺服器連線</span></pre>
     <div class="cmd-label">Windows (PowerShell)</div>
 <pre>mkdir C:\jt-live-whisper -Force | Out-Null; cd C:\jt-live-whisper
 irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.ps1 -OutFile install.ps1
 <span class="g">powershell</span> -ExecutionPolicy Bypass -File install.ps1</pre>
-    <p class="note"><span class="zh">安裝腳本會自動下載並設定所有地端 AI 模型和相依套件。最後會詢問是否設定 GPU 語音辨識伺服器（選填）。首次安裝約 10–20 分鐘（視網路速度，macOS 需額外編譯 whisper.cpp）。</span><span class="en">The installer downloads and configures all local AI models and dependencies, then offers optional GPU-server setup. First run ~10–20 min (macOS also compiles whisper.cpp).</span></p>
+    <p class="note"><span class="zh">安裝腳本會自動下載並設定所有地端 AI 模型和相依套件。最後會詢問是否設定 GPU 語音辨識伺服器（選填）。首次安裝約 10–20 分鐘（視網路速度，macOS 需額外編譯 whisper.cpp；Linux 不需要）。</span><span class="en">The installer downloads and configures all local AI models and dependencies, then offers optional GPU-server setup. First run ~10–20 min (macOS also compiles whisper.cpp; Linux does not need it).</span></p>
 
     <h3 style="margin:28px 0 10px"><span class="zh">2. 設定音訊裝置</span><span class="en">2. Set up audio</span></h3>
     <div class="grid g2">
@@ -119,18 +126,28 @@ irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/instal
           <li><span class="zh">驗證：執行 <code>.\start.ps1 --list-devices</code> 確認列表中有 loopback 裝置。</span><span class="en">Verify with <code>.\start.ps1 --list-devices</code> — a loopback device should appear.</span></li>
         </ul>
       </div>
+      <div class="card" style="grid-column:1/-1"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg></span>Linux — PipeWire / PulseAudio</h3>
+        <p style="font-size:14px"><span class="zh">Linux <b>不需要</b>安裝虛擬音效卡，也不必改變輸出裝置。程式直接從「預設喇叭」的 monitor 來源錄音，喇叭或耳機照常出聲，會議軟體的設定不用改。</span><span class="en">Linux needs <b>no</b> virtual sound card and no output changes — the app records from the default speaker’s monitor source while your speakers or headphones keep playing.</span></p>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.75;color:var(--body)">
+          <li><span class="zh">擷取的是<b>目前的預設輸出裝置</b>，換耳機或喇叭時自動跟著換；要指定其他來源可設 <code>JTLW_MONITOR_SOURCE</code> 或 config.json 的 <code>linux_monitor_source</code>。</span><span class="en">It follows the <b>current default output</b>; to pick another source set <code>JTLW_MONITOR_SOURCE</code> or <code>linux_monitor_source</code> in config.json.</span></li>
+          <li><span class="zh">即時模式需在<b>桌面工作階段內</b>執行；SSH 連線時連不到音訊伺服器，只能做離線處理。</span><span class="en">Live mode must run <b>inside the desktop session</b>; over SSH the audio server is unreachable, so only offline processing works.</span></li>
+          <li><span class="zh">驗證：執行 <code>./start.sh --list-devices</code>，應看到 <code>[-500] 系統音訊（…）</code>；或執行 <code>./install.sh --doctor</code>。</span><span class="en">Verify with <code>./start.sh --list-devices</code> — <code>[-500] 系統音訊 (…)</code> should appear — or run <code>./install.sh --doctor</code>.</span></li>
+        </ul>
+      </div>
     </div>
 
     <h3 style="margin:28px 0 10px"><span class="zh">3. 安裝地端 LLM（翻譯 / 摘要用）</span><span class="en">3. Install a local LLM (translate / summary)</span></h3>
 <pre><span class="c"># macOS：透過 Homebrew 安裝</span>
 brew install ollama
 <span class="c"># Windows：從 https://ollama.com/ 下載安裝程式</span>
-<span class="c"># 下載推薦的翻譯模型（兩平台皆同）</span>
-ollama pull qwen2.5:14b</pre>
+<span class="c"># Linux：官方安裝腳本</span>
+curl -fsSL https://ollama.com/install.sh | sh
+<span class="c"># 下載推薦的翻譯模型（各平台皆同）</span>
+ollama pull gemma4:26b   <span class="c"># 約 17GB；記憶體不足可改 qwen2.5:14b</span></pre>
     <p class="note"><span class="zh"><strong>推薦硬體：</strong>若有 <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/" target="_blank" rel="noopener">NVIDIA DGX Spark</a>（128GB），把 Ollama 裝在上面 CP 值很高，透過 <code>--llm-host</code> 指向即可。<strong>不裝 LLM 也能翻譯</strong>：可切換 NLLB（中日英互譯）或 Argos（僅英翻中）離線引擎，但摘要仍需 LLM。</span><span class="en"><strong>Recommended:</strong> a <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/" target="_blank" rel="noopener">DGX Spark</a> (128 GB) is great value for Ollama; point to it via <code>--llm-host</code>. <strong>No LLM?</strong> Use NLLB / Argos offline — summaries still need an LLM.</span></p>
 
     <h3 style="margin:28px 0 10px"><span class="zh">4. 啟動</span><span class="en">4. Launch</span></h3>
-<pre><span class="c"># macOS</span>
+<pre><span class="c"># macOS / Linux</span>
 cd ~/Apps/jt-live-whisper
 ./start.sh
 <span class="c"># Windows (PowerShell)</span>
@@ -143,16 +160,16 @@ cd C:\jt-live-whisper
 <section id="usage">
   <div class="wrap">
     <div class="sec-head"><h2><span class="zh">使用方式</span><span class="en">Usage</span></h2>
-      <p><span class="zh">以下以 macOS 指令為主，Windows 請把 <code>./start.sh</code> 換成 <code>.\start.ps1</code>，其餘參數相同。</span><span class="en">Examples use macOS; on Windows replace <code>./start.sh</code> with <code>.\start.ps1</code> — flags are identical.</span></p></div>
+      <p><span class="zh">以下以 macOS / Linux 指令為主，Windows 請把 <code>./start.sh</code> 換成 <code>.\start.ps1</code>，其餘參數相同。</span><span class="en">Examples use macOS / Linux; on Windows replace <code>./start.sh</code> with <code>.\start.ps1</code> — flags are identical.</span></p></div>
 
     <div class="cmd-label"><span class="zh">WebUI 瀏覽器介面（推薦）</span><span class="en">Web UI (recommended)</span></div>
-<pre>./start.sh --webui            <span class="c"># macOS</span>
+<pre>./start.sh --webui            <span class="c"># macOS / Linux</span>
 .\start.ps1 --webui           <span class="c"># Windows</span></pre>
     <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh">自動開啟瀏覽器（預設 <code>http://localhost:19781</code>），網頁中完成所有設定後按「開始」即可。即時 / 離線功能全包，支援淺色 / 深色主題、手機 / 平板。</span><span class="en">Opens the browser (default <code>http://localhost:19781</code>); configure and click Start. Live &amp; offline features, light/dark themes, phone/tablet.</span></p>
 
     <div class="cmd-label"><span class="zh">即時模式（邊聽邊轉）</span><span class="en">Live mode</span></div>
 <pre><span class="c"># CLI 模式（跳過選單）</span>
-./start.sh --mode en2zh --engine llm --llm-model qwen2.5:14b
+./start.sh --mode en2zh --engine llm --llm-model gemma4:26b
 <span class="c"># 英中雙向字幕（對方英文翻中文 + 自己中文翻英文）</span>
 ./start.sh --mode en_zh
 <span class="c"># 日中雙向字幕</span>
@@ -235,7 +252,7 @@ cd C:\jt-live-whisper
         <tr><td><code>--moonshine-model</code></td><td><span class="zh">Moonshine 模型（medium / small / tiny）</span><span class="en">Moonshine model</span></td><td><code>medium</code></td></tr>
         <tr><td><code>-s, --scene</code></td><td><span class="zh">使用場景（meeting / training / presentation / subtitle）</span><span class="en">Scene</span></td><td><code>training</code></td></tr>
         <tr><td><code>-e, --engine</code></td><td><span class="zh">翻譯引擎（llm / nllb / argos）</span><span class="en">Translation engine</span></td><td><code>llm</code></td></tr>
-        <tr><td><code>--llm-model</code></td><td><span class="zh">LLM 翻譯模型</span><span class="en">LLM translation model</span></td><td><code>qwen2.5:14b</code></td></tr>
+        <tr><td><code>--llm-model</code></td><td><span class="zh">LLM 翻譯模型</span><span class="en">LLM translation model</span></td><td><code>gemma4:26b</code><span class="zh">（伺服器沒有時改用 qwen2.5:14b）</span><span class="en"> (falls back to qwen2.5:14b)</span></td></tr>
         <tr><td><code>--llm-host HOST</code></td><td><span class="zh">LLM 伺服器位址（自動偵測類型）</span><span class="en">LLM server address (auto-detected)</span></td><td></td></tr>
         <tr><td><code>--topic TOPIC</code></td><td><span class="zh">會議主題（提升翻譯與摘要品質）</span><span class="en">Meeting topic</span></td><td></td></tr>
         <tr><td><code>-d, --device ID</code></td><td><span class="zh">音訊裝置 ID</span><span class="en">Audio device ID</span></td><td><span class="zh">自動偵測</span><span class="en">auto</span></td></tr>
@@ -268,16 +285,17 @@ cd C:\jt-live-whisper
   subtitle_overlay.py      <span class="c"># 懸浮字幕（PyQt6）</span>
   start.sh / start.ps1     <span class="c"># 啟動腳本</span>
   install.sh / install.ps1 <span class="c"># 安裝腳本</span>
+  install-linux.sh         <span class="c"># Linux 安裝腳本（install.sh 自動轉交）</span>
   remote_whisper_server.py <span class="c"># GPU 伺服器端服務（選配）</span>
   config.json              <span class="c"># 使用者設定（自動產生）</span>
   SOP.md / CHANGELOG.md    <span class="c"># 手冊 / 版本記錄</span>
   logs/  recordings/       <span class="c"># 記錄檔 / 暫存音訊</span>
-  whisper.cpp/  venv/      <span class="c"># 即時引擎 / 虛擬環境</span></pre>
+  whisper.cpp/  venv/      <span class="c"># 即時引擎（macOS / Windows）/ 虛擬環境</span></pre>
       </div>
       <div>
         <div class="cmd-label"><span class="zh">技術架構</span><span class="en">Pipeline</span></div>
 <pre><span class="c"># 即時模式</span>
-<span class="g">系統音訊</span>(ScreenCaptureKit / WASAPI)
+<span class="g">系統音訊</span>(ScreenCaptureKit / WASAPI / PipeWire)
   → Whisper / Moonshine <span class="c"># 地端辨識</span>
     → LLM / NLLB / Argos <span class="c"># 地端翻譯</span>
       → <span class="g">終端字幕 + 記錄檔</span>
@@ -326,6 +344,16 @@ webui.py (FastAPI + WebSocket)
     </table></div>
     <p class="note" style="margin-top:14px"><span class="zh"><strong>Windows + NVIDIA GPU 是最簡單的高效能方案</strong>：不需額外硬體或伺服器，安裝後直接用 large-v3-turbo，即時與離線都有 CUDA 加速。最低建議 6 GB VRAM。</span><span class="en"><strong>Windows + NVIDIA GPU is the simplest high-performance setup</strong> — no extra hardware, CUDA for both live and offline. 6 GB VRAM minimum.</span></p>
 
+    <div class="cmd-label" style="margin-top:18px">Linux</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th><span class="zh">配置</span><span class="en">Config</span></th><th><span class="zh">說明</span><span class="en">Notes</span></th></tr></thead>
+      <tbody>
+        <tr><td><span class="zh">純 CPU</span><span class="en">CPU only</span></td><td><span class="zh">即時模式建議 base.en / small（程式自動推薦），或搭 GPU 伺服器</span><span class="en">Live: base.en / small (auto-recommended), or pair a GPU server</span></td></tr>
+        <tr><td><span class="zh">NVIDIA GPU（6 GB 以上）</span><span class="en">NVIDIA GPU (6 GB+)</span></td><td><span class="zh">自動安裝 CUDA 版 PyTorch，faster-whisper 走 CUDA，建議 large-v3-turbo</span><span class="en">CUDA PyTorch installed automatically; faster-whisper on CUDA, large-v3-turbo</span></td></tr>
+        <tr><td><span class="zh">無桌面伺服器</span><span class="en">Headless server</span></td><td><span class="zh"><code>./install.sh --server</code>：離線處理 + WebUI 常駐服務</span><span class="en"><code>./install.sh --server</code>: offline processing + always-on WebUI</span></td></tr>
+      </tbody>
+    </table></div>
+
     <div class="cmd-label" style="margin-top:18px"><span class="zh">GPU 伺服器（選配，辨識加速）</span><span class="en">GPU server (optional)</span></div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>GPU</th><th>VRAM</th><th><span class="zh">離線 7 分鐘音檔</span><span class="en">Offline 7-min</span></th><th><span class="zh">說明</span><span class="en">Notes</span></th></tr></thead>
@@ -340,13 +368,13 @@ webui.py (FastAPI + WebSocket)
     <div class="tbl-wrap"><table>
       <thead><tr><th><span class="zh">用途</span><span class="en">Use</span></th><th><span class="zh">建議模型</span><span class="en">Model</span></th><th><span class="zh">記憶體 / VRAM</span><span class="en">RAM / VRAM</span></th></tr></thead>
       <tbody>
-        <tr><td><span class="zh">翻譯</span><span class="en">Translation</span></td><td><span class="zh">14B 以上（如 qwen2.5:14b）</span><span class="en">≥14B (e.g. qwen2.5:14b)</span></td><td>~12 GB</td></tr>
+        <tr><td><span class="zh">翻譯</span><span class="en">Translation</span></td><td><span class="zh">14B 以上（如 gemma4:26b、qwen2.5:14b）</span><span class="en">≥14B (e.g. gemma4:26b, qwen2.5:14b)</span></td><td>~12 GB（gemma4:26b ~17 GB）</td></tr>
         <tr><td><span class="zh">摘要</span><span class="en">Summary</span></td><td><span class="zh">120B 以上（如 gpt-oss:120b）</span><span class="en">≥120B (e.g. gpt-oss:120b)</span></td><td>~80 GB</td></tr>
       </tbody>
     </table></div>
 
     <h3 style="margin:34px 0 10px"><span class="zh">升級</span><span class="en">Upgrade</span></h3>
-<pre><span class="c"># macOS</span>
+<pre><span class="c"># macOS / Linux</span>
 ./install.sh --upgrade
 <span class="c"># Windows (PowerShell)</span>
 .\install.ps1 -Upgrade</pre>

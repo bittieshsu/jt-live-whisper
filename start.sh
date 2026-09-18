@@ -5,6 +5,15 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/venv"
 
+# macOS：從桌面捷徑、排程或 SSH 啟動時 PATH 不含 Homebrew（brew 只寫進 ~/.zprofile），
+# 會找不到 ffmpeg；主動補上 Homebrew 的路徑
+if [ "$(uname -s)" = "Darwin" ]; then
+    for _brew_bin in /opt/homebrew/bin /usr/local/bin; do
+        [ -d "$_brew_bin" ] && case ":$PATH:" in *":$_brew_bin:"*) ;; *) PATH="$PATH:$_brew_bin" ;; esac
+    done
+    export PATH
+fi
+
 # 24-bit 真彩色
 C_TITLE='\033[38;2;100;180;255m'   # 藍色
 C_OK='\033[38;2;80;255;120m'       # 綠色
@@ -20,7 +29,7 @@ _COLS=$(tput cols 2>/dev/null || echo 60)
 [ "$_COLS" -lt 40 ] && _COLS=40
 _LINE=$(printf '%*s' "$_COLS" '' | tr ' ' '=')
 echo -e "${C_TITLE}${_LINE}${NC}"
-echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.18.2 - 100% 全地端 AI 語音工具集${NC}"
+echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.19.0 - 100% 全地端 AI 語音工具集${NC}"
 echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 echo -e "${C_TITLE}${_LINE}${NC}"
 echo ""
@@ -40,13 +49,27 @@ fi
 
 # --input 和 --summarize 模式不需要 BlackHole
 SKIP_BLACKHOLE=0
+WEBUI_MODE=0
 for arg in "$@"; do
-    if [ "$arg" = "--input" ] || [ "$arg" = "--summarize" ] || [ "$arg" = "--diarize" ] \
-       || [ "$arg" = "--sck-permission" ] || [ "$arg" = "--list-devices" ]; then
-        SKIP_BLACKHOLE=1
-        break
-    fi
+    case "$arg" in
+        --input|--summarize|--diarize|--sck-permission|--list-devices) SKIP_BLACKHOLE=1 ;;
+        --webui) WEBUI_MODE=1 ;;
+    esac
 done
+
+# Linux：系統音訊走 PipeWire / PulseAudio 的 monitor 來源，不需要 BlackHole
+if [ "$(uname -s)" = "Linux" ]; then
+    if [ "$SKIP_BLACKHOLE" -eq 0 ]; then
+        if ! command -v parec >/dev/null 2>&1 && ! command -v pw-record >/dev/null 2>&1; then
+            echo -e "${C_WARN}[缺少] 系統音訊擷取工具（parec 或 pw-record）${NC}"
+            echo -e "  ${C_DIM}sudo apt install pulseaudio-utils（離線處理音訊檔不受影響）${NC}"
+        elif command -v pactl >/dev/null 2>&1 && ! pactl info >/dev/null 2>&1; then
+            echo -e "${C_WARN}[提醒] 連不到 PipeWire / PulseAudio 音訊伺服器，即時模式將無法擷取系統音訊${NC}"
+            echo -e "  ${C_DIM}SSH 連線時請在桌面工作階段內執行，或確認 XDG_RUNTIME_DIR 已設定${NC}"
+        fi
+    fi
+    SKIP_BLACKHOLE=1
+fi
 
 # ScreenCaptureKit 已授權時不需要 BlackHole 與多重輸出裝置（macOS 13+）
 if [ "$SKIP_BLACKHOLE" -eq 0 ] && [ -x "$SCRIPT_DIR/bin/jt-sck-audio" ]; then
@@ -96,10 +119,16 @@ if [ "$SKIP_BLACKHOLE" -eq 0 ]; then
         fi
         echo -e "${C_WHITE}詳細設定方式請參考 SOP.md 第二章「事前準備：macOS 音訊設定」${NC}"
         echo ""
-        read -p "是否仍然繼續？(y/N) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 0
+        # WebUI 仍可處理音訊檔（只有即時模式需要系統音訊）；非互動啟動時也不能卡在提問
+        if [ "$WEBUI_MODE" = "1" ] || [ ! -t 0 ]; then
+            echo -e "${C_WARN}繼續啟動：離線處理不受影響，即時模式需要系統音訊${NC}"
+            echo ""
+        else
+            read -p "是否仍然繼續？(y/N) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                exit 0
+            fi
         fi
     fi
 fi
@@ -113,6 +142,18 @@ fi
 
 # 啟用 venv 並執行
 source "$VENV_DIR/bin/activate"
+
+# Linux + NVIDIA：faster-whisper（CTranslate2）需要 cuBLAS / cuDNN，
+# 由 pip 安裝的 nvidia-* 套件提供（PyTorch CUDA 版會一併安裝），需加入函式庫搜尋路徑
+if [ "$(uname -s)" = "Linux" ]; then
+    for _nv_lib in "$VENV_DIR"/lib/python3*/site-packages/nvidia/cublas/lib \
+                   "$VENV_DIR"/lib/python3*/site-packages/nvidia/cudnn/lib; do
+        [ -d "$_nv_lib" ] && LD_LIBRARY_PATH="$_nv_lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    done
+    # ARM64 + NVIDIA：install-linux.sh 自行編譯的 CTranslate2 函式庫
+    [ -d "$SCRIPT_DIR/.ct2-local/lib" ] && LD_LIBRARY_PATH="$SCRIPT_DIR/.ct2-local/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH
+fi
 
 echo -e "${C_OK}Python 環境已啟用${NC}"
 
@@ -153,4 +194,4 @@ else
 fi
 
 # 安全網：確保終端機恢復正常（防止 Ctrl+S raw mode 殘留）
-stty sane 2>/dev/null
+stty sane 2>/dev/null || true

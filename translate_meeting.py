@@ -14,9 +14,15 @@ import io
 import math
 import os
 import re
+import concurrent.futures
+import difflib
+import ipaddress
+import platform
+import unicodedata
 import signal
 import subprocess
 import sys
+import shutil
 import threading
 import time
 import wave
@@ -25,6 +31,7 @@ from functools import lru_cache
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
 
 
 _hf_ssl_bypassed = False
@@ -156,6 +163,10 @@ WASAPI_MIXED_ID = -200     # sentinel，表示 Windows 混合錄音（Loopback +
 # macOS ScreenCaptureKit（零設定擷取系統播放音訊，macOS 13+）
 SCK_LOOPBACK_ID = -300     # sentinel，表示使用 ScreenCaptureKit
 SCK_MIXED_ID = -400        # sentinel，表示 macOS 混合錄音（ScreenCaptureKit + 麥克風）
+# Linux PipeWire / PulseAudio 監聽來源（零設定擷取系統播放音訊）
+PULSE_LOOPBACK_ID = -500   # sentinel，表示使用預設喇叭的 monitor 來源
+PULSE_MIXED_ID = -600      # sentinel，表示 Linux 混合錄音（monitor + 麥克風）
+_MIXED_REC_IDS = (WASAPI_MIXED_ID, SCK_MIXED_ID, PULSE_MIXED_ID)
 _PYAUDIOWPATCH_AVAILABLE = False
 if IS_WINDOWS:
     try:
@@ -319,7 +330,9 @@ for _nd in _nllb_search_dirs:
         break
 
 # 跨平台 Loopback 裝置偵測
-_LOOPBACK_LABEL = "WASAPI Loopback" if IS_WINDOWS else "BlackHole 2ch"
+_LOOPBACK_LABEL = ("WASAPI Loopback" if IS_WINDOWS
+                   else "PipeWire / PulseAudio 系統音訊" if IS_LINUX
+                   else "BlackHole 2ch")
 _START_CMD = ".\\start.ps1" if IS_WINDOWS else "./start.sh"
 _INSTALL_CMD = ".\\install.ps1" if IS_WINDOWS else "./install.sh"
 
@@ -355,6 +368,8 @@ def _is_loopback_device(name):
     if IS_WINDOWS:
         return ("loopback" in n or "stereo mix" in n
                 or "what u hear" in n or "wave out" in n)
+    if IS_LINUX:
+        return "monitor" in n or "loopback" in n
     return "blackhole" in n
 
 
@@ -454,6 +469,11 @@ def _detect_bidi_devices():
         lb_id = _find_blackhole_device()
         if lb_id is not None and mic_id is not None:
             return (lb_id, sd.query_devices(lb_id)["name"],
+                    mic_id, sd.query_devices(mic_id)["name"])
+    elif IS_LINUX:
+        mic_id = _find_default_mic()
+        if _pulse_available() and mic_id is not None:
+            return (PULSE_LOOPBACK_ID, _pulse_label(),
                     mic_id, sd.query_devices(mic_id)["name"])
     return None
 
@@ -740,7 +760,17 @@ def _sck_permission_hint(interactive=None):
 def _is_sys_audio_device(device_id):
     """是否為「系統播放音訊」的擷取 sentinel（WASAPI Loopback / ScreenCaptureKit）"""
     return ((IS_WINDOWS and device_id == WASAPI_LOOPBACK_ID)
-            or (IS_MACOS and device_id == SCK_LOOPBACK_ID))
+            or (IS_MACOS and device_id == SCK_LOOPBACK_ID)
+            or (IS_LINUX and device_id == PULSE_LOOPBACK_ID))
+
+
+def _sys_audio_loopback_id():
+    """目前平台的系統音訊擷取 sentinel"""
+    if IS_MACOS:
+        return SCK_LOOPBACK_ID
+    if IS_LINUX:
+        return PULSE_LOOPBACK_ID
+    return WASAPI_LOOPBACK_ID
 
 
 def _capture_stream_info(device_id, cap_channels=2):
@@ -757,6 +787,8 @@ def _capture_stream_info(device_id, cap_channels=2):
             return int(wb_info["defaultSampleRate"]), _cap(wb_info["maxInputChannels"])
     if IS_MACOS and device_id == SCK_LOOPBACK_ID:
         return _SCK_SAMPLERATE, _cap(_SCK_CHANNELS)
+    if IS_LINUX and device_id == PULSE_LOOPBACK_ID:
+        return _PULSE_SAMPLERATE, _cap(_PULSE_CHANNELS)
     import sounddevice as sd
     dev_info = sd.query_devices(device_id)
     return int(dev_info["default_samplerate"]), _cap(dev_info["max_input_channels"])
@@ -774,6 +806,10 @@ def _open_capture_stream(device_id, callback, samplerate, channels, blocksize,
         return _SCKLoopbackStream(
             callback=callback, samplerate=samplerate,
             channels=channels, blocksize=blocksize)
+    if IS_LINUX and device_id == PULSE_LOOPBACK_ID:
+        return _PulseLoopbackStream(
+            callback=callback, samplerate=samplerate,
+            channels=channels, blocksize=blocksize)
     import sounddevice as sd
     return sd.InputStream(
         device=device_id, samplerate=samplerate, channels=channels,
@@ -787,6 +823,9 @@ def _no_audio_hint(device_id):
                 "系統若設為靜音，ScreenCaptureKit 只會收到無聲訊號")
     if IS_WINDOWS and device_id == WASAPI_LOOPBACK_ID:
         return "請確認系統喇叭正在播放聲音，並檢查 WASAPI Loopback 裝置是否正確"
+    if IS_LINUX and device_id == PULSE_LOOPBACK_ID:
+        return ("請確認系統喇叭正在播放聲音，且播放到預設輸出裝置"
+                "（pactl get-default-sink）；喇叭靜音時 monitor 可能只收到無聲訊號")
     return "請確認系統喇叭正在播放聲音，並檢查所選音訊裝置是否正確"
 
 
@@ -879,12 +918,15 @@ class _SCKLoopbackStream:
             except Exception:
                 pass
 
+    def _command(self):
+        return [self._binary, "--rate", str(self._samplerate),
+                "--channels", str(self._channels)]
+
     def start(self):
         if self._proc is not None:
             return
         self._proc = subprocess.Popen(
-            [self._binary, "--rate", str(self._samplerate),
-             "--channels", str(self._channels)],
+            self._command(),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
         )
         threading.Thread(target=self._drain_stderr, daemon=True).start()
@@ -927,6 +969,139 @@ class _SCKLoopbackStream:
         self.close()
 
 
+# ── Linux PipeWire / PulseAudio 系統音訊擷取 ─────────────────────
+# 從「預設喇叭」的 monitor 來源錄音：不需虛擬音效卡、不必改輸出裝置。
+# PipeWire（Ubuntu 22.10+ 預設）與傳統 PulseAudio 都提供 monitor；
+# 優先用 parec（pulseaudio-utils），沒有時退回 pw-record（pipewire-bin）。
+
+_PULSE_SAMPLERATE = 48000
+_PULSE_CHANNELS = 2
+_pulse_cache = {"t": -1e9, "info": None}
+
+
+def _pulse_capture_tool():
+    """回傳可用的擷取工具（'parec' / 'pw-record'）或 None"""
+    if not IS_LINUX:
+        return None
+    import shutil
+    for tool in ("parec", "pw-record"):
+        if shutil.which(tool):
+            return tool
+    return None
+
+
+def _pulse_cmd_output(args):
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=3)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _pulse_monitor_source():
+    """找出預設喇叭的 monitor 來源，回傳 dict(source, sink, desc) 或 None。
+    可用環境變數 JTLW_MONITOR_SOURCE 或 config.json 的 linux_monitor_source 指定來源。
+    結果快取 2 秒（使用者可能中途切換輸出裝置）。"""
+    if not IS_LINUX:
+        return None
+    now = time.monotonic()
+    if now - _pulse_cache["t"] < 2:
+        return _pulse_cache["info"]
+    info = None
+    import shutil
+    if shutil.which("pactl"):
+        sources = []
+        for line in _pulse_cmd_output(["pactl", "list", "short", "sources"]).splitlines():
+            cols = line.split("\t")
+            if len(cols) > 1:
+                sources.append(cols[1])
+        want = (os.environ.get("JTLW_MONITOR_SOURCE")
+                or _config.get("linux_monitor_source") or "")
+        sink = _pulse_cmd_output(["pactl", "get-default-sink"]).strip()
+        if not sink:
+            for line in _pulse_cmd_output(["pactl", "info"]).splitlines():
+                if line.startswith("Default Sink:"):
+                    sink = line.split(":", 1)[1].strip()
+        if want and want in sources:
+            src = want
+        elif sink and f"{sink}.monitor" in sources:
+            src = f"{sink}.monitor"
+        else:
+            src = next((x for x in sources if x.endswith(".monitor")), "")
+        if src:
+            sink_name = src[:-len(".monitor")] if src.endswith(".monitor") else src
+            desc = sink_name
+            # 取喇叭的人類可讀名稱（例如「Built-in Audio Analog Stereo」）
+            _cur = None
+            for line in _pulse_cmd_output(["pactl", "list", "sinks"]).splitlines():
+                line = line.strip()
+                if line.startswith("Name:"):
+                    _cur = line.split(":", 1)[1].strip()
+                elif line.startswith("Description:") and _cur == sink_name:
+                    desc = line.split(":", 1)[1].strip()
+                    break
+            info = {"source": src, "sink": sink_name, "desc": desc}
+    elif shutil.which("pw-record"):
+        # 純 PipeWire、沒有 pactl：由 pw-record 直接錄預設喇叭
+        info = {"source": "", "sink": "", "desc": "預設喇叭"}
+    _pulse_cache["t"] = now
+    _pulse_cache["info"] = info
+    return info
+
+
+def _pulse_available():
+    """Linux 是否能直接擷取系統播放音訊（有擷取工具 + 找得到 monitor 來源）"""
+    return bool(IS_LINUX and _pulse_capture_tool() and _pulse_monitor_source())
+
+
+def _pulse_label():
+    info = _pulse_monitor_source() or {}
+    desc = info.get("desc") or ""
+    return f"系統音訊（{desc}）" if desc else "系統音訊（PipeWire / PulseAudio）"
+
+
+def _pulse_missing_hint():
+    """Linux 找不到系統音訊來源時的排查說明"""
+    if not _pulse_capture_tool():
+        return "請安裝 pulseaudio-utils（sudo apt install pulseaudio-utils）以擷取系統音訊"
+    return ("找不到 PipeWire / PulseAudio 的 monitor 來源；"
+            "請確認音訊伺服器正在執行（pactl info）且有輸出裝置")
+
+
+class _PulseLoopbackStream(_SCKLoopbackStream):
+    """以 parec / pw-record 擷取預設喇叭的 monitor，介面對齊 sd.InputStream。
+    讀取、累積、停止邏輯沿用 _SCKLoopbackStream（同樣是 float32 interleaved pipe）。"""
+
+    def __init__(self, callback, samplerate=_PULSE_SAMPLERATE, channels=_PULSE_CHANNELS,
+                 blocksize=None, dtype="float32"):
+        import numpy as np
+        self._callback = callback
+        self._samplerate = int(samplerate)
+        self._channels = int(channels)
+        self._blocksize = int(blocksize or self._samplerate * 0.1)
+        self._np = np
+        self._proc = None
+        self._thread = None
+        self._stop = threading.Event()
+        self._stderr_tail = deque(maxlen=10)
+        self._tool = _pulse_capture_tool()
+        self._info = _pulse_monitor_source()
+        if not self._tool or not self._info:
+            raise RuntimeError(_pulse_missing_hint())
+
+    def _command(self):
+        rate, ch = str(self._samplerate), str(self._channels)
+        if self._tool == "parec" and self._info.get("source"):
+            return ["parec", "--raw", "--format=float32le", f"--rate={rate}",
+                    f"--channels={ch}", "--latency-msec=50",
+                    "--client-name=jt-live-whisper", "-d", self._info["source"]]
+        cmd = ["pw-record", "--format", "f32", "--rate", rate, "--channels", ch,
+               "-P", "{ stream.capture.sink=true node.name=jt-live-whisper }"]
+        if self._info.get("sink"):
+            cmd += ["--target", self._info["sink"]]
+        return cmd + ["-"]
+
+
 # LLM 伺服器設定（預設無，由 config.json 或 --llm-host 指定）
 OLLAMA_DEFAULT_HOST = None
 OLLAMA_DEFAULT_PORT = 11434
@@ -966,11 +1141,25 @@ if RECORDING_FORMAT not in ("mp3", "ogg", "flac", "wav"):
 
 # 內建翻譯模型（作者篩選推薦）
 _BUILTIN_TRANSLATE_MODELS = [
+    ("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
     ("phi4:14b", "Microsoft，品質不錯"),
     ("qwen2.5:32b", "品質很好，中日文翻譯推薦"),
-    ("qwen2.5:14b", "品質好，速度快（推薦）"),
+    ("qwen2.5:14b", "品質好，較省記憶體（約需 9GB）"),
     ("qwen2.5:7b", "品質普通，速度最快"),
 ]
+
+# 預設翻譯模型；LLM 伺服器沒有時依序退回備援模型，再沒有才選清單第一個
+# gemma4 會思考，翻譯呼叫一律送 think=False（見 _llm_generate）
+DEFAULT_TRANSLATE_MODEL = "gemma4:26b"
+_TRANSLATE_MODEL_FALLBACKS = (DEFAULT_TRANSLATE_MODEL, "qwen2.5:14b")
+
+
+def _default_translate_index(names):
+    """回傳清單中預設翻譯模型的位置（找不到時為 0）"""
+    for want in _TRANSLATE_MODEL_FALLBACKS:
+        if want in names:
+            return names.index(want)
+    return 0
 
 # 合併使用者自訂翻譯模型（config.json 的 translate_models）
 _user_translate = _config.get("translate_models", [])
@@ -1087,25 +1276,45 @@ _BREEZE_REPOS = {
 _BREEZE_WHISPER_LANG = "en"
 
 
+# 華語模式也可選用 Breeze-ASR-26：台灣的會議常是華語為主、夾雜台語。
+# 本模型專屬的處理（language="en"、_FW_NAN_KW、自行 VAD 切段、即時步進下限、
+# 固定本機辨識）都以 _is_nan_mode() 判斷；選用時由 _enforce_nan_model() 打開旗標，
+# 讓這些處理一起生效，避免只換模型卻沿用一般參數組而大幅劣化。
+_BREEZE_OPTIONAL_MODES = ("zh", "zh2en", "zh2ja")
+_breeze_selected = False
+
+
 def _is_nan_mode(mode):
-    """是否為台語輸入模式"""
-    return mode in _NAN_INPUT_MODES
+    """是否走 Breeze-ASR-26 的處理流程：台語模式，或華語模式選用了 Breeze-ASR-26"""
+    return mode in _NAN_INPUT_MODES or (_breeze_selected and mode in _BREEZE_OPTIONAL_MODES)
 
 
 def _enforce_nan_model(mode, model_name, quiet=False):
-    """台語模式只有 Breeze-ASR-26 能用；使用者指定其他模型時改回並提示。
-    非台語模式原樣回傳。"""
-    if not _is_nan_mode(mode) or model_name == BREEZE_MODEL:
-        return model_name
-    if not quiet:
-        print(f"  {C_HIGHLIGHT}[提示] 台語模式僅支援 {BREEZE_MODEL}，"
-              f"已忽略指定的 {model_name}{RESET}")
-    return BREEZE_MODEL
+    """決定實際使用的模型，並同步 Breeze-ASR-26 處理流程的開關。
+    - 台語模式只有 Breeze-ASR-26 能用，指定其他模型時改回並提示
+    - 華語模式（zh / zh2en / zh2ja）可選用 Breeze-ASR-26
+    - 其他模式不支援 Breeze-ASR-26，改用該模式的推薦模型
+    未選用 Breeze-ASR-26 時，回傳值與處理流程都和原本相同。"""
+    global _breeze_selected
+    if mode in _NAN_INPUT_MODES:
+        _breeze_selected = False
+        if model_name != BREEZE_MODEL and not quiet:
+            print(f"  {C_HIGHLIGHT}[提示] 台語模式僅支援 {BREEZE_MODEL}，"
+                  f"已忽略指定的 {model_name}{RESET}")
+        return BREEZE_MODEL
+    if model_name == BREEZE_MODEL and mode not in _BREEZE_OPTIONAL_MODES:
+        fallback = _recommended_whisper_model(mode)
+        if not quiet:
+            print(f"  {C_HIGHLIGHT}[提示] {BREEZE_MODEL} 僅支援台語與華語輸入模式"
+                  f"（nan / nan2en / zh / zh2en / zh2ja），已改用 {fallback}{RESET}")
+        model_name = fallback
+    _breeze_selected = (model_name == BREEZE_MODEL)
+    return model_name
 
 
 def _mode_whisper_lang(mode):
     """依模式決定要傳給 Whisper 的語言代碼"""
-    if mode in _NAN_INPUT_MODES:
+    if _is_nan_mode(mode):
         return _BREEZE_WHISPER_LANG
     if mode in _EN_INPUT_MODES:
         return "en"
@@ -1161,6 +1370,8 @@ def _has_local_gpu():
     if IS_WINDOWS:
         import shutil
         return bool(shutil.which("nvidia-smi"))
+    if IS_LINUX:
+        return _fw_local_cuda_ok()
     return False
 
 
@@ -1266,7 +1477,7 @@ def _has_mlx_whisper():
 def _recommended_whisper_model(mode="en2zh"):
     """根據 CPU 架構與核心數推薦此裝置最適合的即時 Whisper 模型。
     Apple Silicon 有 Metal GPU 加速，同核心數效能遠高於 Intel CPU。"""
-    if _is_nan_mode(mode):
+    if mode in _NAN_INPUT_MODES:
         return BREEZE_MODEL   # 台語只有 Breeze-ASR-26 可用
     cores = os.cpu_count() or 2
     _need_multilang = mode in _NOENG_MODELS
@@ -1281,6 +1492,11 @@ def _recommended_whisper_model(mode="en2zh"):
             return "base.en"
         else:
             return "base.en"
+    # Linux 無 CUDA：faster-whisper 純 CPU，比照 Intel Mac 用小模型
+    if IS_LINUX and not _has_local_gpu():
+        if _need_multilang:
+            return "small"
+        return "small.en" if cores >= 8 else "base.en"
     # Apple Silicon + mlx-whisper：GPU 加速，多語言用 turbo
     if _need_multilang and _is_apple_silicon() and _has_mlx_whisper():
         return "large-v3-turbo"  # mlx-whisper GPU 加速
@@ -1328,7 +1544,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.18.2"
+APP_VERSION = "2.19.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -1397,7 +1613,8 @@ def _nan_adjust_step(mode, length_ms, step_ms, quiet=False):
     new_step = _NAN_MIN_STEP_MS
     new_length = max(length_ms, new_step + 2000)
     if not quiet:
-        print(f"  {C_DIM}[台語] 辨識較慢，步進 {step_ms}ms → {new_step}ms"
+        _tag = "台語" if mode in _NAN_INPUT_MODES else BREEZE_MODEL
+        print(f"  {C_DIM}[{_tag}] 辨識較慢，步進 {step_ms}ms → {new_step}ms"
               f"（緩衝 {length_ms}ms → {new_length}ms）避免字幕越拖越慢{RESET}")
     return new_length, new_step
 
@@ -1532,7 +1749,10 @@ def _analyze_audio_loudness(wav_path, sample_seconds=120):
             cmd += ["-t", str(int(sample_seconds))]
         cmd += ["-i", wav_path, "-af", "volumedetect",
                 "-vn", "-sn", "-dn", "-f", "null", "-"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        # ffmpeg 輸出可能含 UTF-8 中文（檔名、音檔標籤），Windows 預設以 cp950 解碼會失敗，
+        # 導致音量分析被略過、低音量錄音不會啟用增益
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                                encoding="utf-8", errors="replace", **_SUBPROCESS_FLAGS)
         out = result.stderr or ""
         m_mean = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", out)
         m_max = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", out)
@@ -2014,6 +2234,10 @@ for item in _user_summary:
 SUMMARY_CHUNK_FALLBACK_CHARS = 6000
 # prompt 模板 + 回應預留的 token 數（不算逐字稿本身）
 SUMMARY_PROMPT_OVERHEAD_TOKENS = 2000
+# 每批的絕對上限：模型宣告的 context 不等於伺服器實際配置的（Ollama 的 OLLAMA_CONTEXT_LENGTH
+# 可能小很多），照宣告值送會在輸出寫到一半被截斷且沒有任何錯誤訊息。
+# 實測：gemma4:26b 宣告 262144，Ollama 實際 131072 → 43KB 逐字稿一次送，校正逐字稿只吐出 7% 就斷在句中
+SUMMARY_CHUNK_CEILING_CHARS = 12000
 
 SUMMARY_PROMPT_TEMPLATE = """\
 你是專業的會議記錄整理員。請根據以下即時轉錄的逐字稿，完成兩件事：
@@ -2159,12 +2383,181 @@ TRANSCRIPT_CORRECT_PROMPT_TEMPLATE = """\
 - 如果某行是明顯的 ASR 幻覺（無意義的外文音節、亂碼、與上下文完全無關的詞彙），回傳 "序號|[雜音]"
 - 每一行格式為 "序號|文字"，請用完全相同的格式逐行回傳
 - 如果該行不需修正，原封不動回傳
-- 全部使用台灣繁體中文用語（軟體、網路、記憶體、程式、伺服器等）
+- 保持每一行原本的語言，絕對不要翻譯：英文行維持英文、日文行維持日文
+- 中文行使用台灣繁體中文用語（軟體、網路、記憶體、程式、伺服器等）
+- 數字、金額、日期不要更動
+- 每一行只校正該行本身，不要把文字移到其他行，也不要合併或拆分行
 - 專有名詞維持英文原文
 - 直接輸出結果，不要使用 <think> 標籤或任何思考過程
 {topic_line}
 {lines}
 """
+
+# 英文、日文逐字稿改用英文提示詞：中文提示詞會讓模型傾向輸出中文
+# （實測 gpt-oss:120b 即使被要求「不要翻譯」，仍把大量英文行翻成中文）
+TRANSCRIPT_CORRECT_PROMPT_TEMPLATE_EN = """\
+You are a proofreader for speech recognition (ASR) transcripts. Fix recognition errors in the transcript lines below.
+
+Rules:
+- Fix misrecognized words, homophones, and misspelled proper nouns (e.g. "safe" -> "Ceph", "vme" -> "VMware"); you may fix punctuation and capitalization
+- NEVER translate. Every line must stay in its original language: English stays English, Japanese stays Japanese
+- Do not change numbers, amounts, or dates
+- Do not change sentence structure or word order
+- Correct each line on its own. Do not move words to another line, and do not merge or split lines
+- If a line is an obvious ASR hallucination (meaningless syllables, garbage, unrelated to the context), return "number|[雜音]"
+- Each line is formatted as "number|text". Return every line in exactly the same format
+- If a line needs no correction, return it unchanged
+- Output only the result, no explanations and no <think> tags
+{topic_line}
+{lines}
+"""
+
+
+def _transcript_is_chinese(texts):
+    """逐字稿以中文為主（CJK 字元多於拉丁字母、且沒有假名）時回傳 True"""
+    joined = "".join(texts)
+    if _KANA_RE.search(joined):
+        return False
+    cjk = len(_CJK_RE.findall(joined))
+    latin = sum(1 for ch in joined if ch.isascii() and ch.isalpha())
+    return cjk > latin
+
+
+_CORRECT_MAX_LINES = 60   # 每批校正最多幾行
+_CORRECT_PARALLEL = 2     # 同時送出幾批
+
+# ── LLM 校正結果的把關 ──
+# 模型偶爾會把英文整段翻成中文、竄改數字、混入其他文字系統的字元或控制字元、
+# 把文字搬到相鄰行（實測 gpt-oss:120b 把 63 分鐘英文會議的後半段翻成中文；
+# gemma4:26b 把 $625 billion 改成 "$6<tab>65 billion"、插入「成功」與西里爾字母）。
+# 校正只該做小幅修字，不符合的修改一律退回原文。
+_KANA_RE = re.compile(r'[\u3040-\u30ff]')
+_CJK_RE = re.compile(r'[\u3400-\u9fff]')
+_DIGITS_RE = re.compile(r'\d+')
+
+
+def _script_profile(text):
+    """回傳文字中出現的文字系統集合（latin / cjk / kana / 其他 Unicode 字母區塊）"""
+    kinds = set()
+    for ch in text:
+        if ch.isascii():
+            if ch.isalpha():
+                kinds.add("latin")
+            continue
+        if _KANA_RE.match(ch):
+            kinds.add("kana")
+        elif _CJK_RE.match(ch):
+            kinds.add("cjk")
+        elif ch.isalpha():
+            try:
+                name = unicodedata.name(ch)
+            except ValueError:
+                name = "UNKNOWN"
+            # 帶附加符號的拉丁字母（é、ü）仍算拉丁；其他字母區塊（西里爾、希臘…）各自一類
+            kinds.add("latin" if name.startswith("LATIN") else name.split(" ")[0].lower())
+    return kinds
+
+
+_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'’]*")
+# 模型偶爾輸出的特殊空白與連字號，換回一般字元
+_PUNCT_NORMALIZE = str.maketrans({"\u00a0": " ", "\u202f": " ", "\u2007": " ",
+                                  "\u2010": "-", "\u2011": "-"})
+
+
+def _protected_terms(texts):
+    """整份逐字稿中出現兩次以上的專有名詞（全大寫縮寫，或不在句首的大寫開頭詞），回傳 {小寫: 次數}。
+    校正時不可把它們改成別的詞（例如 TSMC 被改成 TSMS、人名 Ida 被改成 I）；
+    改成另一個更常出現的專有名詞則視為修正誤聽（TIA → TI）"""
+    counts = {}
+    for text in texts:
+        for m in _LATIN_TOKEN_RE.finditer(text):
+            tok = m.group(0)
+            before = text[:m.start()].rstrip()
+            sentence_start = not before or before[-1] in ".?!:;\"“"
+            if tok.lower() in _COMMON_WORDS or tok == "I":
+                continue
+            if (len(tok) >= 2 and tok.isupper()) or (not sentence_start and tok[0].isupper()):
+                counts[tok.lower()] = counts.get(tok.lower(), 0) + 1
+    return {w: c for w, c in counts.items() if c >= 2}
+
+
+def _normalize_correction(text):
+    return text.translate(_PUNCT_NORMALIZE)
+
+
+def _accept_correction(original, corrected, protected=None):
+    """判斷 LLM 校正後的單行文字能不能採用（protected：不可刪改的專有名詞，小寫）"""
+    if corrected == original or corrected == "[雜音]":
+        return True
+    if not corrected.strip():
+        return False
+    # 控制字元（tab 等）、位元組殘片（<0xA0>）、連續空白、原文沒有的反斜線（LaTeX 之類）
+    if any(ord(ch) < 32 for ch in corrected):
+        return False
+    if re.search(r"<0x[0-9A-Fa-f]{2}>", corrected) or "   " in corrected:
+        return False
+    if "\\" in corrected and "\\" not in original:
+        return False
+    # 專有名詞不可被刪改；只能換成另一個出現次數更多的專有名詞（修正誤聽）
+    if protected:
+        orig_words = {w.lower() for w in _LATIN_TOKEN_RE.findall(original)}
+        new_words = {w.lower() for w in _LATIN_TOKEN_RE.findall(corrected)}
+        removed = (orig_words & protected.keys()) - new_words
+        added = {w for w in new_words - orig_words if w in protected}
+        for w in removed:
+            if not any(protected[a] > protected[w] for a in added):
+                return False
+    # 行內插入的雜音標記（整行雜音只能是 "[雜音]"）
+    if "[雜音]" in corrected:
+        return False
+    # 文字系統：不可出現原文沒有的文字系統（英文行出現中文 = 被翻譯；出現西里爾字母 = 亂碼）
+    extra = _script_profile(corrected) - _script_profile(original)
+    # 中文行補上英文專有名詞（safe → Ceph）是正常的校正
+    if "cjk" in _script_profile(original):
+        extra.discard("latin")
+    if extra:
+        return False
+    # 數字不可更動（原文有數字時，校正後的數字序列必須相同）
+    orig_digits = _DIGITS_RE.findall(original)
+    if orig_digits and _DIGITS_RE.findall(corrected) != orig_digits:
+        return False
+    # 拉丁文字行的字數不可大增（重複插入片語，例如 "in Hong and you lived in Hong Kong"）
+    n_orig, n_new = len(original.split()), len(corrected.split())
+    if "cjk" not in _script_profile(original) and n_new - n_orig > max(2, n_orig * 0.2):
+        return False
+    # 改動幅度：長度或相似度差太多，多半是改寫或把相鄰行的內容搬進來
+    if not (0.6 <= len(corrected) / max(len(original), 1) <= 1.6):
+        return False
+    if difflib.SequenceMatcher(None, original, corrected).ratio() < 0.5:
+        return False
+    return True
+
+
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z'’]{2,}")
+# 校正時常見的補字（冠詞、連接詞等），不當作「從鄰行搬來的內容」
+_COMMON_WORDS = {
+    "the", "and", "but", "for", "nor", "yet", "you", "are", "was", "were", "has", "had", "have",
+    "that", "this", "with", "from", "they", "their", "there", "then", "than", "its", "it's",
+    "what", "which", "who", "will", "would", "can", "could", "not", "all", "any", "our", "your",
+}
+
+
+def _content_tokens(text):
+    """比對跨行搬移用：拉丁字母取 3 字以上的單字，中日文取相鄰兩字"""
+    toks = {w.lower() for w in _WORD_RE.findall(text)}
+    for run in re.findall(r'[\u3040-\u30ff\u3400-\u9fff]{2,}', text):
+        toks.update(run[i:i + 2] for i in range(len(run) - 1))
+    return toks
+
+
+def _moved_between(orig_a, corr_a, orig_b, corr_b):
+    """相鄰兩行 a、b：a 少掉的內容出現在 b 新增的內容裡（或反過來），視為被搬到別行"""
+    lost_a = _content_tokens(orig_a) - _content_tokens(corr_a)
+    lost_b = _content_tokens(orig_b) - _content_tokens(corr_b)
+    gained_a = _content_tokens(corr_a) - _content_tokens(orig_a)
+    gained_b = _content_tokens(corr_b) - _content_tokens(orig_b)
+    return bool(lost_a & gained_b) or bool(lost_b & gained_a)
+
 
 # 場景名稱對照（CLI 用）
 SCENE_MAP = {"meeting": 0, "training": 1, "presentation": 2, "subtitle": 3}
@@ -2176,7 +2569,7 @@ APP_AUTHOR = "by Jason Cheng (Jason Tools)"
 def check_dependencies(asr_engine="whisper", translate_engine=None):
     """檢查所有必要檔案是否存在"""
     errors = []
-    if asr_engine == "whisper" and not os.path.isfile(WHISPER_STREAM):
+    if asr_engine == "whisper" and not IS_LINUX and not os.path.isfile(WHISPER_STREAM):
         errors.append(f"找不到 whisper-stream: {WHISPER_STREAM}")
     if asr_engine == "moonshine" and not _MOONSHINE_AVAILABLE:
         errors.append("moonshine-voice 未安裝，請執行: pip install moonshine-voice sounddevice numpy")
@@ -2237,6 +2630,11 @@ def select_mode():
 def select_whisper_model(mode="en2zh", use_faster_whisper=False):
     """讓用戶選擇 whisper 模型（包含未下載的模型，選擇後自動下載）
     use_faster_whisper=True 時跳過 ggml 檢查（faster-whisper 自動從 HuggingFace 下載）"""
+    # 台語模式只有 Breeze-ASR-26 可用，不必選
+    if mode in _NAN_INPUT_MODES:
+        _enforce_nan_model(mode, BREEZE_MODEL, quiet=True)
+        print(f"  {C_OK}→ 辨識模型：{BREEZE_MODEL}（台語專用）{RESET}\n")
+        return BREEZE_MODEL, None
     # 列出所有適用模型（不限已安裝）
     candidates = []
     for name, filename, desc in WHISPER_MODELS:
@@ -2246,6 +2644,9 @@ def select_whisper_model(mode="en2zh", use_faster_whisper=False):
         path = os.path.join(MODELS_DIR, filename)
         installed = use_faster_whisper or os.path.isfile(path)
         candidates.append((name, filename, path, desc, installed))
+    # 華語模式可選用 Breeze-ASR-26（固定走 Python 端 faster-whisper / mlx-whisper）
+    if mode in _BREEZE_OPTIONAL_MODES:
+        candidates.append((BREEZE_MODEL, "", None, "台灣華語／台語混用，較慢", True))
 
     if not candidates:
         print("[錯誤] 沒有適用的 whisper 模型！", file=sys.stderr)
@@ -2314,7 +2715,8 @@ def select_whisper_model(mode="en2zh", use_faster_whisper=False):
             sys.exit(1)
 
     print(f"  {C_OK}→ {name}{RESET} {C_DIM}({desc}){RESET}\n")
-    return name, (None if use_faster_whisper else path)
+    _enforce_nan_model(mode, name, quiet=True)
+    return name, (None if (use_faster_whisper or name == BREEZE_MODEL) else path)
 
 
 def select_whisper_model_remote(mode="en2zh"):
@@ -2645,6 +3047,7 @@ def _moonshine_model_arch(name):
 
 def list_audio_devices_sd():
     """自動選擇 Loopback 音訊裝置（sounddevice），找不到才 fallback 顯示選單"""
+    import sounddevice as sd
     # Windows: 優先用 WASAPI Loopback（零設定擷取系統音訊）
     if IS_WINDOWS:
         wb_info = _find_wasapi_loopback()
@@ -2664,6 +3067,13 @@ def list_audio_devices_sd():
             # 有 BlackHole 可退，但仍要讓使用者知道 SCK 沒啟用、以及怎麼啟用
             print(f"  {C_DIM}[提示] 未取得「螢幕錄製」權限，改用 BlackHole；"
                   f"授權後即可免設定多重輸出裝置（./start.sh --sck-permission）{RESET}")
+
+    # Linux: 優先用 PipeWire / PulseAudio 的 monitor（零設定）
+    if IS_LINUX:
+        if _pulse_available():
+            print(f"  {C_OK}ASR 裝置: {_pulse_label()}{RESET}")
+            return PULSE_LOOPBACK_ID
+        print(f"  {C_DIM}[提示] {_pulse_missing_hint()}{RESET}")
 
     devices = sd.query_devices()
     input_devices = []
@@ -2718,6 +3128,7 @@ def list_audio_devices_sd():
 
 def auto_select_device_sd():
     """非互動模式：使用 sounddevice 自動偵測 Loopback 裝置"""
+    import sounddevice as sd
     # Windows: 優先用 WASAPI Loopback
     if IS_WINDOWS:
         wb_info = _find_wasapi_loopback()
@@ -2735,6 +3146,13 @@ def auto_select_device_sd():
         else:
             print(f"{C_DIM}[提示] 未取得「螢幕錄製」權限，改用 BlackHole；"
                   f"授權後即可免設定多重輸出裝置（./start.sh --sck-permission）{RESET}")
+
+    # Linux: 優先用 PipeWire / PulseAudio 的 monitor
+    if IS_LINUX:
+        if _pulse_available():
+            print(f"{C_OK}自動選擇音訊裝置: {_pulse_label()}{RESET}")
+            return PULSE_LOOPBACK_ID
+        print(f"{C_DIM}[提示] {_pulse_missing_hint()}{RESET}")
 
     devices = sd.query_devices()
     for i, dev in enumerate(devices):
@@ -3199,6 +3617,44 @@ class NllbTranslator:
         return result
 
 
+def _is_private_host(host):
+    """判斷是不是區域網路位址（含 .local 主機名）"""
+    host = (host or "").strip()
+    if host.endswith(".local"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
+
+
+def _macos_local_network_hint(host, force=False):
+    """macOS 15 以後連區域網路裝置需要「本機網路」權限，未授權時連線會直接失敗
+    （curl 在終端機可以連，Python 卻回 No route to host）。印出一次提示。"""
+    global _LOCAL_NET_HINT_SHOWN
+    if _LOCAL_NET_HINT_SHOWN or not IS_MACOS or not _is_private_host(host):
+        return
+    if not force and not _macos_version_at_least(15):
+        return
+    _LOCAL_NET_HINT_SHOWN = True
+    print(f"  {C_HIGHLIGHT}[提示] macOS 需要「本機網路」權限才能連線到區域網路的伺服器（{host}）{RESET}")
+    print(f"  {C_DIM}  系統設定 → 隱私權與安全性 → 本機網路 → 開啟你用來執行的終端機程式{RESET}")
+    print(f"  {C_DIM}  第一次執行時會跳出授權視窗；透過 SSH 執行時不會跳出，需先在桌面授權一次{RESET}")
+
+
+_LOCAL_NET_HINT_SHOWN = False
+
+
+def _macos_version_at_least(major):
+    """macOS 主版本是否大於等於 major"""
+    if not IS_MACOS:
+        return False
+    try:
+        return int(platform.mac_ver()[0].split(".")[0]) >= major
+    except (ValueError, IndexError):
+        return False
+
+
 def _detect_llm_server(host, port):
     """自動偵測 LLM 伺服器類型，回傳 "ollama" / "openai" / None
 
@@ -3276,6 +3732,10 @@ def _live_output_line(line, write_lock):
         sys.stdout.flush()
 
 
+# 不支援思考模式的模型（Ollama 對 think 參數回 400）。記起來，避免每次呼叫都白送一次請求
+_NO_THINK_MODELS = set()
+
+
 def _llm_generate(prompt, model, host, port, server_type, stream=False,
                   timeout=30, spinner=None, live_output=False, think=None,
                   on_line=None):
@@ -3291,9 +3751,11 @@ def _llm_generate(prompt, model, host, port, server_type, stream=False,
             "messages": [{"role": "user", "content": prompt}],
             "stream": stream,
         }
-        # OpenAI 相容：部分伺服器支援 chat_template_kwargs 關閉思考
+        # OpenAI 相容：部分伺服器支援 chat_template_kwargs 關閉思考（Qwen3 等）；
+        # Ollama 的 /v1 端點不吃這個，gemma4 要用 reasoning_effort="none" 才關得掉
         if think is False:
             payload["chat_template_kwargs"] = {"enable_thinking": False}
+            payload["reasoning_effort"] = "none"
     else:
         # 預設 Ollama
         url = f"http://{host}:{port}/api/generate"
@@ -3303,7 +3765,7 @@ def _llm_generate(prompt, model, host, port, server_type, stream=False,
             "stream": stream,
         }
         # Ollama：think 必須放頂層，放進 options 會被當成未知欄位忽略
-        if think is not None:
+        if think is not None and (model, host, port) not in _NO_THINK_MODELS:
             payload["think"] = think
 
     def _send():
@@ -3318,9 +3780,15 @@ def _llm_generate(prompt, model, host, port, server_type, stream=False,
         try:
             return _send()
         except urllib.error.HTTPError as e:
-            # 模型不支援思考模式時 Ollama 回 400，移除 think 欄位重送
-            if e.code != 400 or payload.pop("think", None) is None:
+            # 模型不支援思考模式時 Ollama 回 400，移除 think 欄位重送；
+            # 不認得 reasoning_effort="none" 的 OpenAI 相容伺服器同樣回 400，移除後重送
+            if e.code != 400:
                 raise
+            if payload.pop("reasoning_effort", None) is None:
+                if payload.pop("think", None) is None:
+                    raise
+                # 這個模型不支援思考模式，記下來，之後不再送 think
+                _NO_THINK_MODELS.add((model, host, port))
         return _send()
 
     if not stream:
@@ -4113,12 +4581,9 @@ def select_translator(init_host=None, init_port=None, mode="en2zh"):
 
     col = max(_dw(label) for label, *_ in options) + 2
 
-    # 預設選 qwen2.5:14b（若有），否則第一個
-    default_idx = 0
-    for i, (_, _, eng, mod) in enumerate(options):
-        if mod == "qwen2.5:14b":
-            default_idx = i
-            break
+    # 預設選 DEFAULT_TRANSLATE_MODEL（沒有時退回備援），否則第一個
+    default_idx = _default_translate_index(
+        [mod if eng == "llm" else None for _, _, eng, mod in options])
 
     for i, (label, desc, engine, model) in enumerate(options):
         padded = label + ' ' * (col - _dw(label))
@@ -4173,8 +4638,8 @@ def _select_llm_model(host, port, server_type):
     available_models = _llm_list_models(host, port, server_type)
 
     if not available_models:
-        print(f"  {C_HIGHLIGHT}[警告] LLM 伺服器無可用模型，使用預設 qwen2.5:14b{RESET}")
-        return "qwen2.5:14b"
+        print(f"  {C_HIGHLIGHT}[警告] LLM 伺服器無可用模型，使用預設 {DEFAULT_TRANSLATE_MODEL}{RESET}")
+        return DEFAULT_TRANSLATE_MODEL
 
     def _dw(s):
         return sum(2 if '\u4e00' <= c <= '\u9fff' else 1 for c in s)
@@ -4191,11 +4656,7 @@ def _select_llm_model(host, port, server_type):
 
     col = max(_dw(label) for label, *_ in options) + 2
 
-    default_idx = 0
-    for i, (_, _, mod) in enumerate(options):
-        if mod == "qwen2.5:14b":
-            default_idx = i
-            break
+    default_idx = _default_translate_index([mod for _, _, mod in options])
 
     print(f"\n\n{C_TITLE}{BOLD}▎ LLM 翻譯模型{RESET}")
     print(f"{C_DIM}{'─' * 60}{RESET}")
@@ -4393,10 +4854,16 @@ def _input_interactive_menu(args):
 
         # ── 第三步前：辨識模型（依位置推薦）──
         available_models = []
-        for name, _filename, desc in WHISPER_MODELS:
-            if is_chinese and name.endswith(".en"):
-                continue
-            available_models.append((name, desc))
+        if mode_key in _NAN_INPUT_MODES:
+            # 台語只有 Breeze-ASR-26 可用
+            available_models.append((BREEZE_MODEL, "台語專用，輸出漢字（固定本機辨識）"))
+        else:
+            for name, _filename, desc in WHISPER_MODELS:
+                if is_chinese and name.endswith(".en"):
+                    continue
+                available_models.append((name, desc))
+            if mode_key in _BREEZE_OPTIONAL_MODES:
+                available_models.append((BREEZE_MODEL, "台灣華語／台語混用，較慢（固定本機辨識）"))
         # 預設：GPU 伺服器推薦 large-v3-turbo，本機按 CPU 推薦
         if use_remote_whisper:
             recommended = "large-v3-turbo"
@@ -4538,11 +5005,8 @@ def _input_interactive_menu(args):
                     translate_models.append(("Argos 本機離線翻譯", "僅英翻中，免 LLM 伺服器", "argos"))
 
                 _last_tm = _config.get("last_llm_model")
-                default_ollama = 0
-                for i, (name, _, eng) in enumerate(translate_models):
-                    if name == "qwen2.5:14b" and eng == "llm":
-                        default_ollama = i
-                        break
+                default_ollama = _default_translate_index(
+                    [name if eng == "llm" else None for name, _, eng in translate_models])
 
                 def _dw_tm(s):
                     return sum(2 if '\u4e00' <= c <= '\u9fff' else 1 for c in s)
@@ -5539,7 +6003,7 @@ def run_stream_moonshine(capture_id: int, translator, moonshine_model_name: str,
     def _clear_partial_line():
         """清除 [...] 部分文字行（需在 print_lock 內呼叫）"""
         if _partial_line_id[0] is not None:
-            cols = os.get_terminal_size().columns if hasattr(os, "get_terminal_size") else 80
+            cols = shutil.get_terminal_size((80, 24)).columns
             print(f"\r{' ' * (cols - 1)}\r", end="", flush=True)
             _partial_line_id[0] = None
 
@@ -5569,7 +6033,7 @@ def run_stream_moonshine(capture_id: int, translator, moonshine_model_name: str,
                 _partial_line_id[0] = event.line.line_id
                 with print_lock:
                     # 用 \r 覆蓋當前行，顯示部分文字（灰色）
-                    cols = os.get_terminal_size().columns if hasattr(os, "get_terminal_size") else 80
+                    cols = shutil.get_terminal_size((80, 24)).columns
                     partial = f"{C_DIM}[...] {text}{RESET}"
                     # 截斷避免超過終端寬度
                     display_text = f"[...] {text}"
@@ -5643,14 +6107,14 @@ def run_stream_moonshine(capture_id: int, translator, moonshine_model_name: str,
         # 錄音裝置與 ASR 裝置可能不同（例如聚集裝置含麥克風+BlackHole）
         use_separate_rec = (rec_device is not None and rec_device != capture_id)
         if use_separate_rec:
-            if rec_device in (WASAPI_MIXED_ID, SCK_MIXED_ID):
+            if rec_device in _MIXED_REC_IDS:
                 # 混合錄音（系統音訊 + 麥克風）
                 _mixed = _setup_mixed_recording(stop_event, meeting_topic)
                 if _mixed:
                     recorder, _mixer, rec_stream, _rec_stream_mic = _mixed
                 else:
                     # 降級為僅系統音訊
-                    rec_device = SCK_LOOPBACK_ID if IS_MACOS else WASAPI_LOOPBACK_ID
+                    rec_device = _sys_audio_loopback_id()
             if _is_sys_audio_device(rec_device):
                 rec_sr, rec_ch = _capture_stream_info(rec_device, cap_channels=None)
                 recorder = _AudioRecorder(rec_sr, rec_ch, topic=meeting_topic, mode=mode)
@@ -5901,14 +6365,14 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
     if record:
         use_separate_rec = (rec_device is not None and rec_device != capture_id)
         if use_separate_rec:
-            if rec_device in (WASAPI_MIXED_ID, SCK_MIXED_ID):
+            if rec_device in _MIXED_REC_IDS:
                 # 混合錄音（系統音訊 + 麥克風）
                 _mixed = _setup_mixed_recording(stop_event, meeting_topic)
                 if _mixed:
                     recorder, _mixer, rec_stream, _rec_stream_mic = _mixed
                 else:
                     # 降級為僅系統音訊
-                    rec_device = SCK_LOOPBACK_ID if IS_MACOS else WASAPI_LOOPBACK_ID
+                    rec_device = _sys_audio_loopback_id()
             if _is_sys_audio_device(rec_device):
                 rec_sr, rec_ch = _capture_stream_info(rec_device, cap_channels=None)
                 recorder = _AudioRecorder(rec_sr, rec_ch, topic=meeting_topic, mode=mode)
@@ -6517,14 +6981,14 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
     if record:
         use_separate_rec = (rec_device is not None and rec_device != capture_id)
         if use_separate_rec:
-            if rec_device in (WASAPI_MIXED_ID, SCK_MIXED_ID):
+            if rec_device in _MIXED_REC_IDS:
                 # 混合錄音（系統音訊 + 麥克風）
                 _mixed = _setup_mixed_recording(stop_event, meeting_topic)
                 if _mixed:
                     recorder, _mixer, rec_stream, _rec_stream_mic = _mixed
                 else:
                     # 降級為僅系統音訊
-                    rec_device = SCK_LOOPBACK_ID if IS_MACOS else WASAPI_LOOPBACK_ID
+                    rec_device = _sys_audio_loopback_id()
             if _is_sys_audio_device(rec_device):
                 rec_sr, rec_ch = _capture_stream_info(rec_device, cap_channels=None)
                 recorder = _AudioRecorder(rec_sr, rec_ch, topic=meeting_topic, mode=mode)
@@ -7292,6 +7756,8 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         lb_name = _find_wasapi_loopback()["name"]
     elif IS_MACOS and lb_device_id == SCK_LOOPBACK_ID:
         lb_name = "ScreenCaptureKit 系統音訊"
+    elif IS_LINUX and lb_device_id == PULSE_LOOPBACK_ID:
+        lb_name = _pulse_label()
     else:
         lb_name = sd.query_devices(lb_device_id)["name"]
 
@@ -8575,6 +9041,11 @@ def _setup_mixed_recording(stop_event, meeting_topic):
         mic_id = _find_mac_mic()
         if not _sck_available() or mic_id is None:
             return None
+    elif IS_LINUX:
+        lb_device_id = PULSE_LOOPBACK_ID
+        mic_id = _find_default_mic()
+        if not _pulse_available() or mic_id is None:
+            return None
     else:
         wb_info = _find_wasapi_loopback()
         lb_device_id = WASAPI_LOOPBACK_ID
@@ -8627,7 +9098,8 @@ def _setup_mixed_recording(stop_event, meeting_topic):
             lb_device_id, lb_callback, lb_sr, lb_ch,
             blocksize=int(lb_sr * 0.1))
     except Exception as e:
-        _lb_label = "ScreenCaptureKit" if IS_MACOS else "WASAPI Loopback"
+        _lb_label = ("ScreenCaptureKit" if IS_MACOS
+                     else "系統音訊 monitor" if IS_LINUX else "WASAPI Loopback")
         print(f"{C_HIGHLIGHT}[警告] 無法開啟 {_lb_label} 錄音: {e}{RESET}")
         recorder.close()
         return None
@@ -8669,6 +9141,16 @@ def _auto_detect_rec_device():
             return SCK_MIXED_ID, f"ScreenCaptureKit 系統音訊 + {mic_name}", "雙方聲音"
         return SCK_LOOPBACK_ID, "ScreenCaptureKit 系統音訊", "僅對方聲音"
 
+    # Linux: PipeWire / PulseAudio monitor（有麥克風時用混合模式）
+    if IS_LINUX and _pulse_available():
+        lb_name = _pulse_label()
+        mic_id = _find_default_mic()
+        if mic_id is not None:
+            import sounddevice as sd
+            mic_name = sd.query_devices(mic_id)["name"]
+            return PULSE_MIXED_ID, f"{lb_name} + {mic_name}", "雙方聲音"
+        return PULSE_LOOPBACK_ID, lb_name, "僅對方聲音"
+
     import sounddevice as sd
     devices = sd.query_devices()
     if IS_MACOS:
@@ -8696,13 +9178,23 @@ def _ask_record_source():
     _last_rec = _config.get("last_rec_choice")  # "1"=混合/雙方 / "2"=僅播放/僅對方
     # 系統音訊 + 麥克風混合（Windows: WASAPI Loopback，macOS: ScreenCaptureKit）
     _wb_info = _find_wasapi_loopback() if IS_WINDOWS else None
-    _sys_audio_ok = bool(_wb_info) if IS_WINDOWS else (IS_MACOS and _sck_available())
+    if IS_WINDOWS:
+        _sys_audio_ok = bool(_wb_info)
+    elif IS_LINUX:
+        _sys_audio_ok = _pulse_available()
+    else:
+        _sys_audio_ok = IS_MACOS and _sck_available()
     if _sys_audio_ok:
-        lb_name = (f"WASAPI Loopback ({_wb_info['name']})" if IS_WINDOWS
-                   else "ScreenCaptureKit 系統音訊")
-        _lb_id = WASAPI_LOOPBACK_ID if IS_WINDOWS else SCK_LOOPBACK_ID
-        _mixed_id = WASAPI_MIXED_ID if IS_WINDOWS else SCK_MIXED_ID
-        mic_id = _find_default_mic() if IS_WINDOWS else _find_mac_mic()
+        if IS_WINDOWS:
+            lb_name = f"WASAPI Loopback ({_wb_info['name']})"
+            _lb_id, _mixed_id = WASAPI_LOOPBACK_ID, WASAPI_MIXED_ID
+        elif IS_LINUX:
+            lb_name = _pulse_label()
+            _lb_id, _mixed_id = PULSE_LOOPBACK_ID, PULSE_MIXED_ID
+        else:
+            lb_name = "ScreenCaptureKit 系統音訊"
+            _lb_id, _mixed_id = SCK_LOOPBACK_ID, SCK_MIXED_ID
+        mic_id = _find_mac_mic() if IS_MACOS else _find_default_mic()
         if mic_id is None:
             print(f"  {C_OK}錄音裝置: {lb_name}{RESET}")
             return _lb_id, lb_name, "僅對方聲音"
@@ -8817,20 +9309,23 @@ def run_record_only(rec_device, topic=None):
     import sounddevice as sd
     import numpy as np
 
-    _is_mixed = rec_device in (WASAPI_MIXED_ID, SCK_MIXED_ID)
+    _is_mixed = rec_device in _MIXED_REC_IDS
     _mixer = None
     _mic_stream = None
-    _lb_device_id = SCK_LOOPBACK_ID if IS_MACOS else WASAPI_LOOPBACK_ID
+    _lb_device_id = _sys_audio_loopback_id()
 
     if _is_mixed:
         # 混合錄音模式：2 個串流（系統音訊 + Mic），波形顯示 2 行
         rec_sr, _ = _capture_stream_info(_lb_device_id, cap_channels=None)
         rec_ch = 2  # 波形顯示用 2 行（系統音訊 / Mic）
-        dev_name = "ScreenCaptureKit 混合錄音" if IS_MACOS else "WASAPI 混合錄音"
+        dev_name = ("ScreenCaptureKit 混合錄音" if IS_MACOS
+                    else "系統音訊 + 麥克風混合錄音" if IS_LINUX else "WASAPI 混合錄音")
     elif _is_sys_audio_device(rec_device):
         rec_sr, rec_ch = _capture_stream_info(rec_device, cap_channels=None)
         if IS_MACOS:
             dev_name = "ScreenCaptureKit 系統音訊"
+        elif IS_LINUX:
+            dev_name = _pulse_label()
         else:
             dev_name = f"WASAPI Loopback ({_find_wasapi_loopback()['name']})"
     else:
@@ -9364,6 +9859,15 @@ def _ask_record(prefer_mix=False):
                 aggregate_id = WASAPI_MIXED_ID
                 aggregate_name = f"WASAPI Loopback + {mic_name}"
 
+    # Linux: PipeWire / PulseAudio monitor + 麥克風
+    if IS_LINUX and _pulse_available():
+        loopback_id = PULSE_LOOPBACK_ID
+        loopback_name = _pulse_label()
+        mic_id = _find_default_mic()
+        if mic_id is not None:
+            aggregate_id = PULSE_MIXED_ID
+            aggregate_name = f"{loopback_name} + {sd.query_devices(mic_id)['name']}"
+
     if IS_MACOS:
         # 0) ScreenCaptureKit（零設定，不需聚集裝置）
         if _sck_available():
@@ -9566,6 +10070,17 @@ def open_file_in_editor(file_path):
     try:
         if IS_WINDOWS:
             os.startfile(file_path)
+        elif IS_LINUX:
+            # 沒有圖形桌面（SSH / 伺服器）時不開啟；xdg-open 會把整個桌面程式
+            # 掛在本程序底下，必須脫離 session 並切斷 stdio，否則外層的 pipe 會卡住
+            if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+                return
+            import shutil
+            if not shutil.which("xdg-open"):
+                return
+            subprocess.Popen(["xdg-open", file_path],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
         else:
             subprocess.Popen(["open", file_path])
     except Exception:
@@ -9830,13 +10345,16 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
     num_ctx = query_ollama_num_ctx(model, host, port, server_type=server_type)
     max_chars = _calc_chunk_max_chars(num_ctx)
 
-    # 3. 分批（按字數切割）
+    # 3. 分批（按字數切割，每批最多 _CORRECT_MAX_LINES 行）
+    #    一批行數太多時，模型回傳的行號容易錯位，錯位後的修改全部對不上原文而被退回
+    #    （實測 388 行一次送，gemma4 有 144 行、gpt-oss 有 121 行因此白做）
     chunks = []       # [[(global_idx, text), ...], ...]
     current_chunk = []
     current_chars = 0
     for idx, (si, li, text) in enumerate(all_lines):
         line_len = len(text) + 10  # 序號 + 分隔符
-        if current_chunk and current_chars + line_len > max_chars:
+        if current_chunk and (current_chars + line_len > max_chars
+                              or len(current_chunk) >= _CORRECT_MAX_LINES):
             chunks.append(current_chunk)
             current_chunk = []
             current_chars = 0
@@ -9845,83 +10363,128 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
     if current_chunk:
         chunks.append(current_chunk)
 
-    # 4. 準備 topic 行
-    topic_line = f"- 本次會議主題：{topic}，請根據此主題的領域知識理解專業術語並正確校正\n" if topic else ""
+    # 4. 依逐字稿語言選提示詞，並準備 topic 行
+    if _transcript_is_chinese([text for _, _, text in all_lines]):
+        prompt_template = TRANSCRIPT_CORRECT_PROMPT_TEMPLATE
+        topic_line = f"- 本次會議主題：{topic}，請根據此主題的領域知識理解專業術語並正確校正\n" if topic else ""
+    else:
+        prompt_template = TRANSCRIPT_CORRECT_PROMPT_TEMPLATE_EN
+        topic_line = (f"- Meeting topic: {topic}. Use domain knowledge of this topic to fix technical terms\n"
+                      if topic else "")
 
     # 5. 設定狀態列
     _llm_loc = "本機" if host in ("localhost", "127.0.0.1", "::1") else "伺服器"
     sbar = _SummaryStatusBar(model=model, task="LLM 校正逐字稿", location=_llm_loc).start()
 
     corrected = {}  # global_idx → corrected_text
+    n_rejected = 0  # 未通過把關、退回原文的行數
+    protected = _protected_terms([text for _, _, text in all_lines])
     total_chunks = len(chunks)
 
+    def _run_chunk(ci, chunk):
+        """送出一批校正（在執行緒中執行），回傳 LLM 原始輸出；失敗時回傳 None"""
+        numbered_lines = "\n".join(f"{i+1}|{text}" for i, (_, text) in enumerate(chunk))
+        prompt = prompt_template.format(topic_line=topic_line, lines=numbered_lines)
+        # timeout 依 chunk 字數動態調整（每千字 60 秒，最低 300 秒）
+        _timeout = max(300, len(numbered_lines) // 1000 * 60 + 300)
+
+        # 即時推送每行校正結果到 WebUI
+        def _on_correct_line(line_text, _chunk=chunk):
+            line_text = line_text.strip()
+            m = re.match(r'^(\d+)\|(.+)$', line_text)
+            if not m:
+                return
+            local_idx = int(m.group(1)) - 1
+            corrected_text = m.group(2).strip()
+            if 0 <= local_idx < len(_chunk):
+                global_idx = _chunk[local_idx][0]
+                orig_si, orig_li, orig_text = all_lines[global_idx]
+                # 只在有變化、且通過把關時推送（簡繁轉換只套用在中文行）
+                if not _KANA_RE.search(orig_text):
+                    corrected_text = S2TWP.convert(corrected_text)
+                corrected_text = _normalize_correction(corrected_text)
+                if (corrected_text != orig_text and corrected_text != "[雜音]"
+                        and _accept_correction(orig_text, corrected_text, protected)):
+                    _corrected_tc = corrected_text
+                    _webui_send({"type": "correction",
+                                 "original": orig_text,
+                                 "corrected": _corrected_tc})
+
+        try:
+            return call_ollama_raw(prompt, model, host, port, timeout=_timeout,
+                                   spinner=sbar, server_type=server_type,
+                                   think=False, on_line=_on_correct_line)
+        except Exception as e:
+            print(f"  {C_HIGHLIGHT}[警告] 第 {ci+1}/{total_chunks} 批校正失敗: {e}{RESET}",
+                  file=sys.stderr)
+            return None
+
     try:
-        for ci, chunk in enumerate(chunks):
-            # 組裝編號行
-            numbered_lines = "\n".join(f"{i+1}|{text}" for i, (_, text) in enumerate(chunk))
-            prompt = TRANSCRIPT_CORRECT_PROMPT_TEMPLATE.format(
-                topic_line=topic_line, lines=numbered_lines)
-
-            task_label = f"LLM 校正逐字稿（{ci+1}/{total_chunks}）" if total_chunks > 1 else "LLM 校正逐字稿"
-            sbar.set_task(task_label)
-
-            # timeout 依 chunk 字數動態調整（每千字 60 秒，最低 300 秒）
-            _timeout = max(300, len(numbered_lines) // 1000 * 60 + 300)
-
-            # 即時推送每行校正結果到 WebUI
-            def _on_correct_line(line_text, _chunk=chunk):
-                line_text = line_text.strip()
-                m = re.match(r'^(\d+)\|(.+)$', line_text)
-                if not m:
-                    return
-                local_idx = int(m.group(1)) - 1
-                corrected_text = m.group(2).strip()
-                if 0 <= local_idx < len(_chunk):
-                    global_idx = _chunk[local_idx][0]
-                    orig_si, orig_li, orig_text = all_lines[global_idx]
-                    # 只在有變化時推送
-                    if corrected_text != orig_text and corrected_text != "[雜音]":
-                        _corrected_tc = S2TWP.convert(corrected_text)
-                        _webui_send({"type": "correction",
-                                     "original": orig_text,
-                                     "corrected": _corrected_tc})
-
-            try:
-                result = call_ollama_raw(prompt, model, host, port, timeout=_timeout,
-                                         spinner=sbar, server_type=server_type,
-                                         think=False, on_line=_on_correct_line)
-            except Exception as e:
-                print(f"  {C_HIGHLIGHT}[警告] 第 {ci+1}/{total_chunks} 批校正失敗: {e}{RESET}",
-                      file=sys.stderr)
-                continue
-
-            if not result:
-                continue
-
-            # 移除 <think>...</think> 標籤（Qwen3 等模型可能忽略 think=False）
-            result = re.sub(r'<think>[\s\S]*?</think>', '', result).strip()
-            result = re.sub(r'<think>[\s\S]*', '', result).strip()
-
-            # 簡繁轉換
-            result = S2TWP.convert(result)
-
-            # 6. 解析回傳，用正則 ^\d+\|(.+)$ 逐行匹配
-            for rline in result.strip().splitlines():
-                rline = rline.strip()
-                m = re.match(r'^(\d+)\|(.+)$', rline)
-                if not m:
+        sbar.set_task(f"LLM 校正逐字稿（{total_chunks} 批）" if total_chunks > 1 else "LLM 校正逐字稿")
+        # 同時送出 _CORRECT_PARALLEL 批（Ollama 預設可並行處理多個請求）；結果回到主執行緒再依序解析
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_CORRECT_PARALLEL) as pool:
+            futures = {pool.submit(_run_chunk, ci, chunk): (ci, chunk) for ci, chunk in enumerate(chunks)}
+            n_done = 0
+            for fut in concurrent.futures.as_completed(futures):
+                ci, chunk = futures[fut]
+                result = fut.result()
+                n_done += 1
+                if total_chunks > 1:
+                    sbar.set_task(f"LLM 校正逐字稿（{n_done}/{total_chunks} 批完成）")
+                if not result:
                     continue
-                local_idx = int(m.group(1)) - 1  # 轉回 0-based
-                corrected_text = m.group(2).strip()
-                if 0 <= local_idx < len(chunk):
-                    global_idx = chunk[local_idx][0]
-                    corrected[global_idx] = corrected_text
 
-            if total_chunks > 1:
-                print(f"  {C_OK}校正第 {ci+1}/{total_chunks} 批完成{RESET}", flush=True)
+                # 移除 <think>...</think> 標籤（Qwen3 等模型可能忽略 think=False）
+                result = re.sub(r'<think>[\s\S]*?</think>', '', result).strip()
+                result = re.sub(r'<think>[\s\S]*', '', result).strip()
+
+                # 6. 解析回傳，用正則 ^\d+\|(.+)$ 逐行匹配
+                for rline in result.strip().splitlines():
+                    rline = rline.strip()
+                    m = re.match(r'^(\d+)\|(.+)$', rline)
+                    if not m:
+                        continue
+                    local_idx = int(m.group(1)) - 1  # 轉回 0-based
+                    corrected_text = m.group(2).strip()
+                    if 0 <= local_idx < len(chunk):
+                        global_idx = chunk[local_idx][0]
+                        orig_text = all_lines[global_idx][2]
+                        # 簡繁轉換只套用在中文行（日文的漢字不可轉；英文行轉了也沒作用）
+                        if not _KANA_RE.search(orig_text):
+                            corrected_text = S2TWP.convert(corrected_text)
+                        corrected_text = _normalize_correction(corrected_text)
+                        if _accept_correction(orig_text, corrected_text, protected):
+                            corrected[global_idx] = corrected_text
+                        else:
+                            n_rejected += 1
     finally:
         sbar.freeze()
         sbar.stop()
+
+    # 6b. 從鄰行搬字：新增的實詞出現在鄰行原文、自己原文卻沒有 → 退回原文（鄰行沒被改也適用）
+    for idx in sorted(corrected):
+        new_text = corrected[idx]
+        if new_text == "[雜音]":
+            continue
+        own = all_lines[idx][2]
+        gained = _content_tokens(new_text) - _content_tokens(own) - _COMMON_WORDS
+        neighbors = set()
+        for j in (idx - 1, idx + 1):
+            if 0 <= j < len(all_lines):
+                neighbors |= _content_tokens(all_lines[j][2])
+        if gained & neighbors:
+            del corrected[idx]
+            n_rejected += 1
+
+    # 6c. 跨行搬移：相鄰兩行都有修改、且內容互相流動時，兩行都退回原文
+    for idx in range(len(all_lines) - 1):
+        a, b = corrected.get(idx), corrected.get(idx + 1)
+        if a is None or b is None or "[雜音]" in (a, b):
+            continue
+        if _moved_between(all_lines[idx][2], a, all_lines[idx + 1][2], b):
+            for k in (idx, idx + 1):
+                if corrected.pop(k, None) is not None:
+                    n_rejected += 1
 
     # 7. 將校正結果寫回 segments_data，標記 [雜音] 行待刪除
     n_corrected = 0
@@ -9955,7 +10518,8 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
                 segments_data.pop(si)
 
     noise_str = f"，移除 {n_noise} 行雜音" if n_noise else ""
-    print(f"  {C_OK}LLM 校正完成{RESET}{C_DIM}（共 {len(all_lines)} 行，修正 {n_corrected} 行{noise_str}）{RESET}")
+    reject_str = f"，{n_rejected} 行修改幅度異常已保留原文" if n_rejected else ""
+    print(f"  {C_OK}LLM 校正完成{RESET}{C_DIM}（共 {len(all_lines)} 行，修正 {n_corrected} 行{noise_str}{reject_str}）{RESET}")
 
 
 def query_ollama_num_ctx(model, host, port, server_type="ollama"):
@@ -10024,6 +10588,32 @@ def _query_openai_context_length(model, host, port):
     return None
 
 
+def _transcript_section_len(summary_text):
+    """取出摘要結果中「校正逐字稿」那一段的字數（沒有這一段時回傳 None）"""
+    m = re.search(r'^##\s*校正逐字稿\s*$', summary_text, re.M)
+    if not m:
+        return None
+    rest = summary_text[m.end():]
+    nxt = re.search(r'^##\s', rest, re.M)
+    return len(rest[:nxt.start()] if nxt else rest)
+
+
+def _warn_if_transcript_truncated(source_text, summary_text, label=""):
+    """校正逐字稿明顯短於輸入時提醒：多半是模型輸出被 context 上限截斷（不會有錯誤訊息）"""
+    got = _transcript_section_len(summary_text)
+    if got is None or len(source_text) < 2000:
+        return False
+    ratio = got / len(source_text)
+    if ratio >= 0.5:
+        return False
+    tag = f"（{label}）" if label else ""
+    print(f"\n  {C_HIGHLIGHT}[警告] 校正逐字稿疑似被截斷{tag}："
+          f"輸入 {len(source_text):,} 字，只產出 {got:,} 字{RESET}", file=sys.stderr)
+    print(f"  {C_DIM}模型實際可用的 context 可能小於它宣告的值；"
+          f"請改用較小的模型分段或降低 SUMMARY_CHUNK_CEILING_CHARS{RESET}", file=sys.stderr)
+    return True
+
+
 def _calc_chunk_max_chars(num_ctx):
     """根據模型 context window 計算每段逐字稿的最大字數
     中文約 1 字 ≈ 1.5 tokens，留空間給 prompt 模板和模型回應。
@@ -10037,7 +10627,7 @@ def _calc_chunk_max_chars(num_ctx):
         return SUMMARY_CHUNK_FALLBACK_CHARS
     # 中文 1 字 ≈ 1.5 token，混合中英文取 1.5 倍換算
     max_chars = int(available_tokens / 1.5)
-    return max(max_chars, SUMMARY_CHUNK_FALLBACK_CHARS)
+    return min(max(max_chars, SUMMARY_CHUNK_FALLBACK_CHARS), SUMMARY_CHUNK_CEILING_CHARS)
 
 
 def _split_transcript_chunks(text, max_chars):
@@ -10620,7 +11210,12 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
     if not os.path.exists(audio_copy):
         shutil.copy2(input_path, audio_copy)
 
-    _lang_disp = "台語（Breeze-ASR-26，輸出漢字）" if _is_nan_mode(mode) else lang
+    if mode in _NAN_INPUT_MODES:
+        _lang_disp = "台語（Breeze-ASR-26，輸出漢字）"
+    elif _is_nan_mode(mode):
+        _lang_disp = "華語（Breeze-ASR-26，台灣華語／台語混用）"
+    else:
+        _lang_disp = lang
     print(f"  {C_WHITE}辨識語言    {_lang_disp}{RESET}")
     print(f"  {C_DIM}記錄檔      {os.path.relpath(session_dir)}/{RESET}")
     _webui_send({"type": "progress", "stage": "準備中", "detail": os.path.basename(input_path)})
@@ -10660,9 +11255,9 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
     raw_segments = None  # 伺服器回傳的 segments list
 
     if remote_whisper_cfg is not None and _is_nan_mode(mode):
-        # 台語走本機：伺服器端套用的是一般模型的防幻覺參數組，對 Breeze-ASR-26
+        # Breeze-ASR-26 走本機：伺服器端套用的是一般模型的防幻覺參數組，對 Breeze-ASR-26
         # 反而大幅劣化（實測 CER 17.99% → 56.42%），且時間戳需由用戶端切段產生
-        print(f"  {C_DIM}[台語] 改用本機辨識（GPU 伺服器的辨識參數不適用本模型）{RESET}")
+        print(f"  {C_DIM}[{BREEZE_MODEL}] 改用本機辨識（GPU 伺服器的辨識參數不適用本模型）{RESET}")
         remote_whisper_cfg = None
 
     if remote_whisper_cfg is not None:
@@ -10707,6 +11302,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             sbar.stop()
             print(f"  {C_HIGHLIGHT}[降級] 伺服器辨識失敗: {e}{RESET}")
             print(f"  {C_HIGHLIGHT}[降級] 改用本機 辨識{RESET}")
+            _macos_local_network_hint((remote_whisper_cfg or {}).get("host", ""))
             remote_whisper_cfg = None  # fallback
 
     if not used_remote:
@@ -11772,6 +12368,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
                      "detail": f"單段，{len(transcript)} 字"})
         summary = call_ollama_raw(prompt, model, host, port, spinner=sbar, live_output=True,
                                   server_type=server_type)
+        _warn_if_transcript_truncated(transcript, summary)
     else:
         # 多段：逐段摘要 + 合併
         segment_summaries = []
@@ -11785,6 +12382,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
             seg = re.sub(r'<think>[\s\S]*?</think>', '', seg).strip()
             seg = re.sub(r'<think>[\s\S]*', '', seg).strip()
             seg = S2TWP.convert(seg)
+            _warn_if_transcript_truncated(chunk, seg, f"第 {i+1}/{len(chunks)} 段")
             segment_summaries.append(seg)
             print(f"  {C_OK}第 {i+1}/{len(chunks)} 段完成{RESET}", flush=True)
 
@@ -12871,7 +13469,7 @@ _status_bar_state = {
     "mode": "en2zh",     # 功能模式
     "model_name": "",    # 模型名稱（如 large-v3-turbo）
     "asr_location": "",  # ASR 位置（"本機" / "伺服器"）
-    "translate_model": "",  # 翻譯模型名稱（如 qwen2.5:14b）
+    "translate_model": "",  # 翻譯模型名稱（如 gemma4:26b）
     "translate_location": "",  # 翻譯位置（"本機" / "伺服器"）
     "rms_history": None,  # deque(maxlen=12)，由 setup_status_bar 初始化
     "rms_lock": None,     # threading.Lock
@@ -13232,7 +13830,7 @@ def parse_args():
         epilog=epilog,
     )
     mode_names = list(MODE_MAP.keys())
-    model_names = [name for name, _, _ in WHISPER_MODELS]
+    model_names = [name for name, _, _ in WHISPER_MODELS] + [BREEZE_MODEL]
     scene_names = list(SCENE_MAP.keys())
     moonshine_model_names = [name for name, _, _ in MOONSHINE_MODELS]
     parser.add_argument(
@@ -13243,7 +13841,8 @@ def parse_args():
         help="語音辨識引擎 (whisper / moonshine / faster-whisper，預設 whisper)")
     parser.add_argument(
         "-m", "--model", choices=model_names, metavar="MODEL",
-        help=f"Whisper 模型 ({' / '.join(model_names)}，--input 預設 large-v3-turbo，中日文品質最好用 -m large-v3)")
+        help=f"語音辨識模型 ({' / '.join(model_names)}，--input 預設 large-v3-turbo，中日文品質最好用 -m large-v3；"
+             f"{BREEZE_MODEL} 限台語與華語模式，台灣華語夾雜台語時可選用)")
     parser.add_argument(
         "--moonshine-model", choices=moonshine_model_names, metavar="MMODEL",
         help=f"Moonshine 模型 ({' / '.join(moonshine_model_names)}，預設 medium)")
@@ -13261,7 +13860,7 @@ def parse_args():
         help="翻譯引擎 (llm / argos / nllb)")
     parser.add_argument(
         "--llm-model", metavar="NAME", dest="ollama_model",
-        help="LLM 翻譯模型名稱 (預設 qwen2.5:14b)")
+        help=f"LLM 翻譯模型名稱 (預設 {DEFAULT_TRANSLATE_MODEL}，伺服器沒有時改用 qwen2.5:14b)")
     parser.add_argument(
         "--llm-host", metavar="HOST", dest="ollama_host",
         help="LLM 伺服器位址，自動偵測 Ollama 或 OpenAI 相容 (例如 192.168.1.40:11434)")
@@ -13354,6 +13953,10 @@ def auto_select_device(model_path):
 
 def resolve_model(model_name):
     """從模型名稱取得完整路徑，找不到就報錯退出"""
+    if model_name == BREEZE_MODEL:
+        print(f"[錯誤] {BREEZE_MODEL} 沒有 whisper.cpp（ggml）版本，"
+              f"請改用 faster-whisper / mlx-whisper 路徑（例如加上 --local-asr）", file=sys.stderr)
+        sys.exit(1)
     for name, filename, desc in WHISPER_MODELS:
         if name == model_name:
             path = os.path.join(MODELS_DIR, filename)
@@ -13476,6 +14079,10 @@ def _confirm_start(cli_cmd):
     print(f"  {C_DIM}等效指令    {RESET}{C_OK}{cli_cmd}{RESET}")
     print(f"  {C_DIM}            （下次可直接執行，不需進入互動選單）{RESET}")
     print(f"{C_DIM}{'─' * 60}{RESET}")
+    # 非互動執行（管線、排程、SSH 腳本）沒有人能回答，直接開始
+    if not sys.stdin.isatty():
+        print(f"\n{C_DIM}非互動執行，直接開始{RESET}")
+        return True
     try:
         ans = input(f"\n{C_WHITE}確認開始？({C_HIGHLIGHT}Y{C_WHITE}/n)：{RESET}").strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -13524,7 +14131,9 @@ def main():
     global _overlay_proc_ref
     if getattr(args, 'subtitle_overlay', False):
         _overlay_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "subtitle_overlay.py")
-        if os.path.isfile(_overlay_script):
+        if IS_LINUX and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            print(f"  {C_HIGHLIGHT}[懸浮字幕] 此工作階段沒有圖形桌面（DISPLAY 未設定），略過覆蓋視窗{RESET}")
+        elif os.path.isfile(_overlay_script):
             # 清除前次殘留的 overlay 程序
             try:
                 if IS_WINDOWS:
@@ -13616,6 +14225,7 @@ def main():
              host, port, diarize, num_speakers, do_summarize,
              server_type, use_remote_whisper, meeting_topic,
              summary_mode, engine) = _input_interactive_menu(args)
+            fw_model = _enforce_nan_model(mode, fw_model)
             if engine == "llm" and not server_type:
                 server_type = "ollama"
             # 雙向模式：確認已選檔案是否為配對，若否則重新選擇
@@ -13673,7 +14283,10 @@ def main():
             num_speakers = args.num_speakers
             do_summarize = args.summarize is not None
             summary_mode = "both" if do_summarize else "correct_only"  # 有 --summarize 才產摘要，否則只校正
-            _default_fw = "large-v3" if (mode in _NOENG_MODELS and (REMOTE_WHISPER_CONFIG or _has_local_gpu())) else "large-v3-turbo"
+            if mode in _NAN_INPUT_MODES:
+                _default_fw = BREEZE_MODEL   # 未指定 -m 時不該提示「已忽略指定的模型」
+            else:
+                _default_fw = "large-v3" if (mode in _NOENG_MODELS and (REMOTE_WHISPER_CONFIG or _has_local_gpu())) else "large-v3-turbo"
             fw_model = _enforce_nan_model(mode, args.model or _default_fw)
             host, port = _resolve_ollama_host(args)
             server_type = None  # CLI 模式稍後偵測
@@ -13707,6 +14320,11 @@ def main():
                                  and not args.local_asr)
             meeting_topic = getattr(args, 'topic', None)
 
+        # Breeze-ASR-26 固定本機辨識：一開始就決定，不必連線、啟動 GPU 伺服器
+        if use_remote_whisper and _is_nan_mode(mode):
+            use_remote_whisper = False
+            print(f"  {C_DIM}[{BREEZE_MODEL}] 使用本機辨識（GPU 伺服器的辨識參數不適用本模型）{RESET}")
+
         # --diarize 檢查 resemblyzer / spectralcluster
         if diarize:
             try:
@@ -13723,7 +14341,7 @@ def main():
         mode_label = next(name for k, name, _ in MODE_PRESETS if k == mode)
         need_translate = mode in _TRANSLATE_MODES
         if not ollama_model:
-            ollama_model = "qwen2.5:14b"
+            ollama_model = DEFAULT_TRANSLATE_MODEL
 
         # ── 連線檢查 ──
         ollama_available = False
@@ -13755,6 +14373,7 @@ def main():
                 model_name_display = ollama_model if need_llm_translate else summary_model
                 pad = " " * (12 - _str_display_width(label))
                 print(f"  {C_WHITE}{label}{pad}{RESET}{C_WHITE}{model_name_display}{RESET} {C_DIM}@ {host}:{port}{RESET} {C_HIGHLIGHT}✗ 無法連接{RESET}")
+                _macos_local_network_hint(host)
 
         if not server_type:
             server_type = "ollama"
@@ -13817,6 +14436,7 @@ def main():
             else:
                 print(f"{C_HIGHLIGHT}✗ 無法連接{RESET}")
                 print(f"  {C_HIGHLIGHT}[降級] 改用本機 辨識{RESET}")
+                _macos_local_network_hint(rw_host)
 
         # 顯示設定資訊
         print(f"\n\n{C_TITLE}{BOLD}▎ 設定總覽{RESET}")
@@ -14299,6 +14919,24 @@ def main():
                 print(f"  {C_OK}[{SCK_MIXED_ID}] ScreenCaptureKit + 麥克風混合錄音{RESET}")
             else:
                 print(f"  {C_HIGHLIGHT}[{SCK_LOOPBACK_ID}] ScreenCaptureKit 系統音訊（尚未取得螢幕錄製權限）{RESET}")
+        if IS_LINUX:
+            print(f"\n\n{C_TITLE}{BOLD}▎ 系統音訊擷取（PipeWire / PulseAudio）{RESET}")
+            _pinfo = _pulse_monitor_source()
+            if _pulse_available():
+                print(f"  {C_OK}[{PULSE_LOOPBACK_ID}] {_pulse_label()}{RESET}  "
+                      f"{C_DIM}{_pinfo.get('source') or '預設喇叭'}，擷取工具 {_pulse_capture_tool()}{RESET}")
+                print(f"  {C_OK}[{PULSE_MIXED_ID}] 系統音訊 + 麥克風混合錄音{RESET}")
+            else:
+                print(f"  {C_HIGHLIGHT}{_pulse_missing_hint()}{RESET}")
+            import sounddevice as _sd_ls
+            print(f"\n\n{C_TITLE}{BOLD}▎ 音訊輸入裝置（sounddevice）{RESET}")
+            _default_in = _sd_ls.default.device[0]
+            for _i, _dev in enumerate(_sd_ls.query_devices()):
+                if _dev["max_input_channels"] > 0:
+                    _tag = f"  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}" if _i == _default_in else ""
+                    print(f"  {C_WHITE}[{_i}] {_dev['name']}{RESET}  "
+                          f"{C_DIM}{_dev['max_input_channels']}ch {int(_dev['default_samplerate'])}Hz{RESET}{_tag}")
+            sys.exit(0)
         if _MOONSHINE_AVAILABLE:
             print(f"\n\n{C_TITLE}{BOLD}▎ sounddevice 音訊裝置{RESET}")
             list_audio_devices_sd()
@@ -14450,9 +15088,15 @@ def main():
             print(f"{C_WARN}[警告] --mic 不支援 Moonshine，忽略 --mic{RESET}")
             args.mic = False
 
-        # GPU 伺服器 Whisper 即時模式（非 Moonshine、非 --local-asr）
+        # Breeze-ASR-26（台語模式，或華語模式指定 -m breeze-asr-26）只在本機執行：
+        # GPU 伺服器套用的是一般模型的參數組，對本模型會大幅劣化
+        if args.model or mode in _NAN_INPUT_MODES:
+            _enforce_nan_model(mode, args.model or BREEZE_MODEL, quiet=True)
+        # GPU 伺服器 Whisper 即時模式（非 Moonshine、非 --local-asr、非 Breeze-ASR-26）
         use_remote_cli = (REMOTE_WHISPER_CONFIG and not args.local_asr
-                          and asr_engine != "moonshine")
+                          and asr_engine != "moonshine" and not _is_nan_mode(mode))
+        if REMOTE_WHISPER_CONFIG and not args.local_asr and _is_nan_mode(mode):
+            print(f"  {C_DIM}[{BREEZE_MODEL}] 改用本機辨識（GPU 伺服器的辨識參數不適用本模型）{RESET}")
         # --mic + GPU 伺服器：麥克風也送遠端辨識（不再限制）
         if use_remote_cli:
             # 伺服器模式：不需本機 whisper-stream
@@ -14626,12 +15270,17 @@ def main():
             # 先判斷是否改用 Python 端本機辨識（在 resolve_model 之前）
             # WASAPI Loopback 與 ScreenCaptureKit 都不是 SDL2 裝置，whisper-stream 讀不到
             # 台語只有 Breeze-ASR-26，whisper.cpp 沒有對應的 ggml 模型，一律走 Python 端
-            _cli_use_local_fw = _is_nan_mode(mode)
+            # Linux 不編譯 whisper.cpp，本機即時辨識一律走 Python 端
+            _cli_use_local_fw = _is_nan_mode(mode) or IS_LINUX
             if args.device is not None:
                 capture_id = args.device
                 if _is_sys_audio_device(capture_id):
                     _cli_use_local_fw = True
             elif IS_MACOS and _sck_available():
+                capture_id = auto_select_device_sd()
+                _cli_use_local_fw = True
+            elif IS_LINUX:
+                # Linux 系統音訊走 PipeWire / PulseAudio monitor，不經 whisper-stream（SDL2）
                 capture_id = auto_select_device_sd()
                 _cli_use_local_fw = True
             elif IS_WINDOWS and _find_wasapi_loopback():
@@ -14775,6 +15424,8 @@ def main():
                     print(f"  {C_WHITE}請確認已安裝 BlackHole 並設定為系統音訊輸出{RESET}")
                 elif IS_WINDOWS:
                     print(f"  {C_WHITE}請確認 WASAPI Loopback 可用且有麥克風{RESET}")
+                elif IS_LINUX:
+                    print(f"  {C_WHITE}{_pulse_missing_hint() if not _pulse_available() else '請確認有可用的麥克風（arecord -l / pactl list short sources）'}{RESET}")
                 sys.exit(1)
             _bidi_lb_id, _bidi_lb_name, _bidi_mic_id, _bidi_mic_name = bidi
             # --mic-device 覆蓋自動偵測的麥克風
@@ -14858,7 +15509,9 @@ def main():
 
         # 辨識位置（GPU 伺服器 / 本機），僅在有設定時顯示
         use_remote_asr = False
-        if REMOTE_WHISPER_CONFIG:
+        if REMOTE_WHISPER_CONFIG and mode in _NAN_INPUT_MODES:
+            print(f"  {C_OK}→ 辨識位置自動設為「本機」（台語模型 Breeze-ASR-26 只在本機執行）{RESET}")
+        elif REMOTE_WHISPER_CONFIG:
             if _early_mic:
                 print(f"  {C_OK}→ 辨識位置自動設為「本機」（麥克風轉錄需要本機 ASR）{RESET}")
             else:
@@ -14933,6 +15586,10 @@ def main():
                 _sck_engine_label = ("mlx-whisper GPU" if (_is_apple_silicon() and _has_mlx_whisper())
                                      else "faster-whisper")
                 print(f"\n{C_DIM}  系統音訊來源為 ScreenCaptureKit，將改用 {_sck_engine_label} 本機辨識{RESET}")
+            if IS_LINUX and asr_engine == "whisper":
+                _use_local_fw = True  # Linux：PipeWire / PulseAudio + faster-whisper
+                print(f"\n{C_DIM}  Linux 本機辨識使用 faster-whisper"
+                      f"{'（CUDA）' if _fw_local_cuda_ok() else '（CPU）'}{RESET}")
             if IS_WINDOWS and asr_engine == "whisper" and _find_wasapi_loopback():
                 _, _probe_path = resolve_model("large-v3-turbo")
                 _sdl_devs = _enumerate_sdl_devices(_probe_path)
@@ -14950,7 +15607,10 @@ def main():
                 ms_model_name = select_moonshine_model()
             else:
                 model_name, model_path = select_whisper_model(mode, use_faster_whisper=_use_local_fw)
+                if _is_nan_mode(mode):
+                    _use_local_fw = True  # Breeze-ASR-26 沒有 ggml 版，whisper-stream 跑不了
                 length_ms, step_ms = select_scene()
+                length_ms, step_ms = _nan_adjust_step(mode, length_ms, step_ms)
 
             # 翻譯引擎（翻譯模式才問）
             translator = None

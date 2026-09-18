@@ -1,21 +1,23 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.18.2 (by Jason Cheng)
+即時英翻中字幕系統 v2.19.0 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [使用流程總結](#五使用流程總結) · [常見問題](#六常見問題) · [檔案說明](#七檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
 
-將英文語音即時轉錄並翻譯成繁體中文字幕顯示於終端機。採用系統音訊層級擷取（macOS 使用內建 ScreenCaptureKit，或 BlackHole 虛擬音訊裝置；Windows 使用 WASAPI Loopback），**理論上任何軟體的聲音輸出都能即時處理**：視訊會議（Zoom、Teams、Meet）、YouTube、Podcast、串流影片、教育訓練等，不限定特定應用程式。亦可離線處理音訊檔案。
+將英文語音即時轉錄並翻譯成繁體中文字幕顯示於終端機。採用系統音訊層級擷取（macOS 使用內建 ScreenCaptureKit，或 BlackHole 虛擬音訊裝置；Windows 使用 WASAPI Loopback；Linux 使用 PipeWire / PulseAudio 的 monitor 來源），**理論上任何軟體的聲音輸出都能即時處理**：視訊會議（Zoom、Teams、Meet）、YouTube、Podcast、串流影片、教育訓練等，不限定特定應用程式。亦可離線處理音訊檔案。
 
-適用平台：macOS（Apple Silicon / Intel）/ Windows 10+
+適用平台：macOS（Apple Silicon / Intel）/ Windows 10+ / Linux（Ubuntu 22.04、Debian 12 以上）
 
 **全地端執行，不依賴雲端服務。** 所有語音辨識、翻譯、摘要皆在自有設備上完成，音訊資料不會離開你的網路環境。有兩種部署方式：
 
-- **單機模式**：一台 Mac 或 Windows PC 即可完成所有處理。語音辨識（Whisper/Moonshine）、翻譯（LLM/NLLB/Argos）全部在本機執行，不需要額外硬體。適合個人使用、外出攜帶。
+- **單機模式**：一台 Mac、Windows PC 或 Linux 桌機即可完成所有處理。語音辨識（Whisper/Moonshine）、翻譯（LLM/NLLB/Argos）全部在本機執行，不需要額外硬體。適合個人使用、外出攜帶。
   - **macOS Apple Silicon**（M1/M2/M3/M4）：透過 mlx-whisper 啟用 Metal GPU 加速，辨識速度約 1-3 秒，效能很好。
   - **macOS Intel**：僅能使用 CPU 辨識，建議搭配 small 模型。
   - **Windows + NVIDIA GPU**：安裝程式會自動偵測 NVIDIA GPU 並安裝 CUDA 版 PyTorch，faster-whisper 辨識走 CUDA 加速，效能與 GPU 伺服器相近（辨識速度約 1-3 秒）。即使沒有另外架設 GPU 伺服器，單機就能享受 GPU 加速的效能。
   - **Windows 無 GPU**：使用 CPU 辨識，建議搭配 small 模型，辨識速度約 5-10 秒。
+  - **Linux + NVIDIA GPU**：安裝程式自動安裝 CUDA 版 PyTorch，faster-whisper 走 CUDA 加速。
+  - **Linux 無 GPU**：使用 CPU 辨識，建議搭配 base.en / small 模型，或搭配 GPU 伺服器。
 
 - **本機 + GPU 伺服器模式**：本機負責音訊擷取與介面操作，語音辨識和講者辨識交由區域網路內的 GPU 伺服器處理（系統音訊和麥克風兩路都可送遠端）。離線辨識速度快 5-10 倍，即時辨識約 0.3-0.5 秒。仍然是全地端架構，資料僅在區域網路內傳輸。適合需要處理大量音訊或追求最佳即時辨識品質的場景。GPU 伺服器可以是 DGX Spark、安裝有 NVIDIA GPU 的 Ubuntu/Linux 主機，搭消費級 RTX 4090/5090 之類亦可（需已安裝 CUDA）。
 
@@ -28,8 +30,8 @@
 **即時模式：**
 
 ```
-系統音訊（macOS: ScreenCaptureKit 或 BlackHole 2ch / Windows: WASAPI Loopback）
-  → 擷取一份音訊給程式（macOS 透過虛擬裝置複製，Windows 直接擷取系統播放）
+系統音訊（macOS: ScreenCaptureKit 或 BlackHole 2ch / Windows: WASAPI Loopback / Linux: PipeWire・PulseAudio monitor）
+  → 擷取一份音訊給程式（macOS 由系統元件或虛擬裝置提供，Windows 與 Linux 直接擷取系統播放）
     → Whisper / Moonshine（即時語音辨識）           ← 本機或 GPU 伺服器
       → LLM（Ollama / OpenAI 相容）/ NLLB / Argos（翻譯）
         → 終端機顯示字幕 + logs/ 記錄檔
@@ -82,10 +84,10 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 | 用途 | AI 模型 | 說明 |
 |------|---------|------|
 | 語音辨識 | **Whisper** (OpenAI) | **多語（中日英）** 主力辨識模型；base / small / large-v3-turbo / large-v3 可選 |
-| 語音辨識 | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，Whisper large-v2 微調，結果直接輸出漢字，不需另外翻譯 |
-| 語音辨識 | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（僅限 Apple Silicon） |
+| 語音辨識 | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，結果直接輸出漢字，不需另外翻譯 |
+| 語音辨識 | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（不支援 Intel Mac） |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + 頻譜分群，可在本機或 GPU 伺服器執行 |
-| 翻譯 (LLM) | 自架 LLM 伺服器，預設 **qwen2.5:14b** | 即時與離線翻譯（本機或區域網路 LLM 伺服器）；建議 14B 以上，並**選用不會思考的模型**——程式雖會自動關閉 Ollama 的思考模式，但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
+| 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯（本機或區域網路 LLM 伺服器）；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
 | 摘要 / 逐字稿校正 (LLM) | 自架 LLM 伺服器，預設 **gpt-oss:120b** | 會議摘要與逐字稿校正；建議 120B 以上，可與翻譯用不同模型 |
 | 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯，支援中日英互譯，僅限本機 |
 | 翻譯 (離線備援) | **Argos Translate** | 完全離線的輕量翻譯模型，僅支援英翻中 |
@@ -95,11 +97,11 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 | 引擎 | 用途 | 可跑的模型 |
 |------|------|-----------|
 | **whisper.cpp** | macOS 即時辨識（音訊來源為 SDL2 裝置時），本機或 GPU 伺服器 | Whisper 全系列（ggml） |
-| **faster-whisper** (CTranslate2) | Windows 即時辨識、全平台離線處理、GPU 伺服器 | Whisper 全系列、Breeze-ASR-26 |
+| **faster-whisper** (CTranslate2) | Windows / Linux 即時辨識、全平台離線處理、GPU 伺服器 | Whisper 全系列、Breeze-ASR-26 |
 | **mlx-whisper** | Apple Silicon GPU 加速（即時與台語離線） | Whisper 全系列、Breeze-ASR-26 |
 | **Moonshine** | 英文超低延遲串流（延遲 ~300ms，僅限本機） | Moonshine medium / small / tiny |
 
-你仍然可以正常從喇叭或耳機聽到聲音。macOS 13 以上使用系統內建的 ScreenCaptureKit 複製一份音訊給辨識程式（只需授權一次「螢幕錄製」，不必安裝驅動）；macOS 12 以下改用 BlackHole 虛擬音訊裝置；Windows 的 WASAPI Loopback 則直接擷取系統播放的音訊，同樣不需要安裝額外驅動。
+你仍然可以正常從喇叭或耳機聽到聲音。macOS 13 以上使用系統內建的 ScreenCaptureKit 複製一份音訊給辨識程式（只需授權一次「螢幕錄製」，不必安裝驅動）；macOS 12 以下改用 BlackHole 虛擬音訊裝置；Windows 的 WASAPI Loopback 則直接擷取系統播放的音訊，同樣不需要安裝額外驅動；Linux 從 PipeWire / PulseAudio 的 monitor 來源擷取，也不需要虛擬音效卡。
 
 **目錄結構：**
 
@@ -109,9 +111,10 @@ jt-live-whisper/
   webui.py                 WebUI 伺服器（FastAPI + WebSocket，瀏覽器介面後端）
   webui.html               WebUI 前端（單一 HTML，內嵌 CSS/JS）
   subtitle_overlay.py      懸浮字幕覆蓋視窗（PyQt6，選配）
-  start.sh                 啟動腳本（macOS）
+  start.sh                 啟動腳本（macOS / Linux）
   start.ps1                啟動腳本（Windows）
-  install.sh               安裝腳本（macOS）
+  install.sh               安裝腳本（macOS；Linux 自動轉交 install-linux.sh）
+  install-linux.sh         安裝腳本（Linux）
   install.ps1              安裝腳本（Windows）
   remote_whisper_server.py GPU 伺服器端 Whisper 辨識服務（選配）
   config.json              使用者設定（自動產生，含 LLM/GPU/WebUI 密碼等）
@@ -330,6 +333,30 @@ Windows 不需要安裝額外的虛擬音訊驅動。程式透過 WASAPI Loopbac
 2. 開啟 PowerShell，執行 `.\start.ps1 --list-devices`
 3. 確認列表中有 loopback 或 stereo mix 裝置
 
+### Linux 音訊設定
+
+Linux 不需要安裝虛擬音效卡，也不必改變輸出裝置。程式直接從「預設喇叭」的 **monitor 來源**錄音（PipeWire 與 PulseAudio 都有提供；Ubuntu 22.10 以後預設為 PipeWire），喇叭或耳機照常出聲，Zoom / Teams 的設定不用改。
+
+```
+對方說話 → Zoom/Teams → 預設喇叭 / 耳機（你聽到）
+                      → monitor 來源（程式以 parec 擷取）→ AI 辨識 → 字幕
+```
+
+#### 2-L1. 確認音訊環境
+
+1. 執行 `./start.sh --list-devices`
+2. 列表最上方應出現 `[-500] 系統音訊（喇叭名稱）` 與 `[-600] 系統音訊 + 麥克風混合錄音`
+3. 或執行 `./install.sh --doctor` 一次檢查音訊伺服器、預設喇叭、擷取工具
+
+#### 2-L2. 注意事項
+
+- 擷取的是**目前的預設輸出裝置**（`pactl get-default-sink`）。換了耳機或喇叭，程式下次偵測時自動跟著換
+- 要指定其他來源：設定環境變數 `JTLW_MONITOR_SOURCE=來源名稱`，或在 `config.json` 加上 `"linux_monitor_source": "來源名稱"`。來源名稱可用 `pactl list short sources` 查詢（通常以 `.monitor` 結尾）
+- 擷取工具優先使用 `parec`（套件 `pulseaudio-utils`），沒有時改用 `pw-record`（套件 `pipewire-bin`）
+- 即時模式必須在**桌面工作階段內**執行。透過 SSH 連線時連不到使用者的音訊伺服器，只能做離線處理
+- 錄音選「系統音訊 + 麥克風」即可同時錄下雙方聲音，不需要建立任何虛擬裝置
+- 遠端桌面（xrdp）連線時，xrdp 會提供自己的虛擬喇叭 `xrdp-sink`，程式一樣可以擷取
+
 ---
 
 ## 三、安裝程式
@@ -345,6 +372,27 @@ mkdir -p ~/Apps/jt-live-whisper && cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
 bash install.sh
 ```
+
+**Linux（Ubuntu / Debian）：**
+
+打開終端機，貼上以下指令（安裝過程會用 `sudo` 補齊系統套件）：
+
+```bash
+mkdir -p ~/Apps/jt-live-whisper && cd ~/Apps/jt-live-whisper
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
+bash install.sh              # 桌面版（即時字幕、WebUI、懸浮字幕）
+bash install.sh --server     # 伺服器版（無桌面，WebUI 以 systemd 服務常駐）
+```
+
+`install.sh` 偵測到 Linux 時會自動改用 `install-linux.sh`，也可以直接執行它。可用參數：
+
+| 參數 | 說明 |
+|---|---|
+| （無） | 桌面版安裝 |
+| `--server` | 伺服器版：不安裝桌面相關套件，建立 `jt-live-whisper-webui` systemd 服務（開機自動啟動） |
+| `--upgrade` | 從 GitHub 升級程式檔案 |
+| `--doctor` | 檢查執行環境：Python 套件、音訊伺服器、GPU、GPU 伺服器與 LLM 伺服器連線 |
+| `--uninstall` | 移除虛擬環境、systemd 服務與應用程式選單捷徑（保留模型、設定與記錄檔） |
 
 **Windows：**
 
@@ -407,6 +455,27 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 | NLLB 600M 翻譯模型 | 離線翻譯模型，中日英互譯 (~600MB) |
 | Argos 翻譯模型 | 離線英→中翻譯模型 |
 
+**本機安裝項目（Linux）：**
+
+| 項目 | 說明 |
+|---|---|
+| 系統套件（apt） | ffmpeg、libportaudio2、python3-venv、python3-dev、build-essential（編譯 resemblyzer / webrtcvad 需要，已有 gcc 時略過）；桌面版另裝 pulseaudio-utils、libxcb-cursor0（PyQt6 需要）、fonts-noto-cjk（中文字型）、xdg-utils |
+| PyTorch | 有 NVIDIA GPU 時裝 CUDA 版（ARM64 如 DGX Spark 裝 cu128），沒有時裝 CPU 版（避免下載數 GB 的 CUDA 套件） |
+| CTranslate2（ARM64 + NVIDIA） | PyPI 的 ARM64 版不含 CUDA，安裝程式會在本機從原始碼編譯 CUDA 版（約 20～40 分鐘）。函式庫裝在 `.ct2-local/`（不動系統的 `/usr/local`，同一台主機上的 GPU 辨識服務不受影響），wheel 存在 `.ct2-wheels/`，之後重裝直接使用 |
+| Python venv | 虛擬環境 + ctranslate2、faster-whisper、resemblyzer、spectralcluster、noisereduce、WebUI 套件；桌面版另含 PyQt6 |
+| Moonshine ASR | 英文串流語音辨識引擎（桌面版） |
+| NLLB 600M 翻譯模型 | 離線翻譯模型，中日英互譯 (~600MB) |
+| Argos 翻譯模型 | 離線英→中翻譯模型（桌面版） |
+| faster-whisper 模型 | base.en / base / small.en / small / large-v3-turbo |
+| 應用程式選單捷徑 | 桌面版：`~/.local/share/applications/jt-live-whisper.desktop`（開啟 WebUI） |
+| systemd 服務 | 伺服器版：`jt-live-whisper-webui.service` |
+
+> **Linux 相依套件的處理：** 安裝程式可以重複執行，已裝好的項目會略過，只補缺少的部分。以非互動方式執行（例如透過 SSH 自動部署）時，可設定 `SUDO_ASKPASS` 讓 `sudo` 取得密碼。
+>
+> **Linux 全部裝在 GPU 伺服器上：** jt-live-whisper 可以直接裝在 GPU 伺服器（x86_64 或 ARM64 的 DGX Spark 皆可）。ARM64 會自動編譯 CUDA 版 CTranslate2；伺服器繁忙時建議改用「Linux 伺服器 + GPU 伺服器」分開安裝，以免辨識與 LLM 搶資源。
+
+> **Linux 不需要：** whisper.cpp、BlackHole、虛擬音效卡。Linux 的即時辨識一律使用 faster-whisper，系統音訊從 PipeWire / PulseAudio 的 monitor 來源擷取。從 Mac 複製過來的 `config.json` 若含有 `/Users/...` 的 SSH Key 路徑，安裝程式會自動改成 `~/.ssh/` 底下的同名檔案。
+
 > **Windows 不需要：** Homebrew、cmake、sdl2、BlackHole。Windows 的 whisper.cpp 使用預編譯版本，不需要從原始碼編譯。音訊擷取使用 WASAPI Loopback，不需要虛擬音訊驅動。
 
 **GPU 語音辨識伺服器（選填）：**
@@ -434,25 +503,27 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 全部通過後會顯示：
 
 ```
-  全部就緒！可以執行 ./start.sh 啟動系統。        ← macOS
+  全部就緒！可以執行 ./start.sh 啟動系統。        ← macOS / Linux
   全部就緒！可以執行 .\start.ps1 啟動系統。       ← Windows
 ```
 
 ### 3-2. 升級至最新版本
 
 ```bash
-# macOS
+# macOS / Linux
 ./install.sh --upgrade
 
 # Windows (PowerShell)
 .\install.ps1 -Upgrade
 ```
 
-自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。升級後建議重新執行安裝腳本（macOS: `./install.sh`、Windows: `.\install.ps1`）確認相依套件完整。
+自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。升級後建議重新執行安裝腳本（macOS / Linux: `./install.sh`、Windows: `.\install.ps1`）確認相依套件完整。
+
+Linux 的 `--upgrade` 下載完新檔案後會自動重新執行安裝檢查，補齊新版本需要的相依套件；伺服器版若程式版本有變更，會一併重新啟動 `jt-live-whisper-webui` 服務。不想在升級時檢查相依套件，可設定 `JTLW_SKIP_DEP_CHECK=1`。
 
 ### 3-3. 搬遷資料夾後
 
-如果將資料夾搬到其他位置，只需重新執行安裝腳本（macOS: `./install.sh`、Windows: `.\install.ps1`），它會自動偵測並修復損壞的 venv 和 whisper.cpp。
+如果將資料夾搬到其他位置，只需重新執行安裝腳本（macOS / Linux: `./install.sh`、Windows: `.\install.ps1`），它會自動偵測並修復損壞的 venv 和 whisper.cpp。
 
 ---
 
@@ -463,7 +534,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 先切換到安裝目錄：
 
 ```bash
-# macOS
+# macOS / Linux
 cd ~/Apps/jt-live-whisper
 
 # Windows (PowerShell)
@@ -473,14 +544,14 @@ cd C:\jt-live-whisper
 啟動程式：
 
 ```bash
-# macOS
+# macOS / Linux
 ./start.sh
 
 # Windows (PowerShell)
 .\start.ps1
 ```
 
-> **Windows 使用者請注意：** 以下範例以 macOS 指令為主。Windows 使用者請將 `./start.sh` 替換為 `.\start.ps1`，`./install.sh` 替換為 `.\install.ps1`，安裝目錄為 `C:\jt-live-whisper`。其餘參數完全相同。
+> **Windows 使用者請注意：** 以下範例以 macOS / Linux 指令為主。Windows 使用者請將 `./start.sh` 替換為 `.\start.ps1`，`./install.sh` 替換為 `.\install.ps1`，安裝目錄為 `C:\jt-live-whisper`。其餘參數完全相同。
 >
 > 若出現「running scripts is disabled on this system」錯誤，請先執行以下指令（只需執行一次）：
 > ```powershell
@@ -492,7 +563,7 @@ cd C:\jt-live-whisper
 除了終端機互動選單，也可以使用瀏覽器介面操作：
 
 ```bash
-# macOS
+# macOS / Linux
 ./start.sh --webui
 
 # Windows (PowerShell)
@@ -549,7 +620,7 @@ cd C:\jt-live-whisper
 - 滑鼠穿透模式（滑鼠事件穿透到下方應用）
 - 系統匣圖示右鍵選單控制
 - 字幕切換淡入淡出動畫
-- 永遠置頂，跨桌面顯示（macOS / Windows）
+- 永遠置頂，跨桌面顯示（macOS / Windows；Linux 需在圖形桌面內執行，Wayland 的置頂行為依桌面環境而定）
 
 **設定方式：** 在 WebUI「懸浮字幕」區塊（僅本機顯示）勾選啟用，按「開始」後自動啟動覆蓋視窗。
 
@@ -603,7 +674,7 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 除了互動式選單，也可以透過命令列參數直接啟動，跳過所有選單：
 
 ```bash
-./start.sh [參數...]           # macOS
+./start.sh [參數...]           # macOS / Linux
 .\start.ps1 [參數...]          # Windows
 ```
 
@@ -621,7 +692,7 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 | `--topic TOPIC` | 會議主題（提升翻譯品質，例：`--topic 'ZFS 儲存管理'`）。僅翻譯模式有效 | |
 | `-d`, `--device ID` | 音訊裝置 ID (數字) | 自動偵測 ScreenCaptureKit 或 BlackHole (macOS) / WASAPI Loopback (Windows) |
 | `-e`, `--engine ENGINE` | 翻譯引擎 (llm / argos / nllb) | llm |
-| `--llm-model NAME` | LLM 翻譯模型名稱（建議選用不會思考的模型，見下方說明） | qwen2.5:14b |
+| `--llm-model NAME` | LLM 翻譯模型名稱（思考模式必須可關閉，見下方說明） | gemma4:26b（伺服器沒有時改用 qwen2.5:14b） |
 | `--llm-host HOST` | LLM 伺服器位址，自動偵測 Ollama 或 OpenAI 相容 (支援 host:port 格式) | 無（需設定） |
 | `--list-devices` | 列出可用音訊裝置後離開 | |
 | `--record` | 即時模式同時錄製音訊（存入 `recordings/`，預設 MP3） | 不錄製 |
@@ -728,7 +799,7 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 
 # 即時日中雙向
 ./start.sh --mode ja_zh
-./start.sh --mode ja_zh -e llm --llm-model qwen2.5:14b
+./start.sh --mode ja_zh -e llm --llm-model gemma4:26b
 
 # 對記錄檔生成摘要
 ./start.sh --summarize logs/英翻中_逐字稿_20260303_140000.txt
@@ -819,9 +890,9 @@ CLI 用法：
 
 ```bash
 ./start.sh --mode en_zh
-./start.sh --mode en_zh -m large-v3-turbo -e llm --llm-model qwen2.5:14b
+./start.sh --mode en_zh -m large-v3-turbo -e llm --llm-model gemma4:26b
 ./start.sh --mode ja_zh
-./start.sh --mode ja_zh -e llm --llm-model qwen2.5:14b
+./start.sh --mode ja_zh -e llm --llm-model gemma4:26b
 ```
 
 **麥克風轉錄模式（--mic）**
@@ -867,11 +938,11 @@ CLI 用法：
 | 選項 | 說明 |
 |---|---|
 | **Whisper**（預設） | 高準確度，完整斷句，支援中日英文 |
-| Moonshine | 真串流架構，延遲極低（~300ms），僅英文，需 ARM64（Apple Silicon / Windows） |
+| Moonshine | 真串流架構，延遲極低（~300ms），僅英文，支援 Apple Silicon / Windows / Linux（Intel Mac 不支援） |
 
 選擇 Moonshine 後會進入 Moonshine 模型選擇（不需要選場景），選擇 Whisper 則維持原有的模型和場景選單流程。
 
-> **注意：** Moonshine 需要 ARM64 原生 Python，macOS Intel 機型不支援 Moonshine，請使用 Whisper。
+> **注意：** macOS Intel 機型不支援 Moonshine，請使用 Whisper。
 
 中文模式（中文轉錄、中翻英字幕）固定使用 Whisper 引擎。如果 Moonshine 未安裝，會自動使用 Whisper。
 
@@ -967,9 +1038,9 @@ Moonshine 使用內建 VAD（語音活動偵測）自動斷句，不需要設定
 | 音訊緩衝累積 | 3~8 秒 | 依場景設定，越長句子越完整 |
 | 處理間隔等待 | 0~3 秒 | 程式每隔 2~3 秒觸發一次辨識 |
 | 模型推理 | ~2.5 秒 | large-v3-turbo 在 Apple M2 上的處理時間 |
-| LLM 翻譯 | ~0.3-0.8 秒 | qwen2.5:14b 的翻譯時間 |
+| LLM 翻譯 | ~0.3-0.8 秒 | gemma4:26b 在 GPU 伺服器（DGX Spark）上的翻譯時間 |
 
-> **翻譯模型請選用不會思考的模型。** 具思考能力的模型（qwen3 / gemma4 / deepseek-r1 等）在翻譯每一句前都會先產生大量推理內容，即時字幕會慢到無法使用。程式已會自動對 Ollama 關閉思考模式（v2.16.8 起），但 **gpt-oss 系列架構上必定推理、關不掉**，僅適合用於不吃即時性的摘要，不要拿來做即時翻譯。
+> **翻譯模型的思考模式必須能關閉。** 具思考能力的模型（qwen3 / gemma4 / deepseek-r1 等）在翻譯每一句前會先產生大量推理內容，即時字幕會慢到無法使用。程式會自動關閉思考模式：Ollama 送 `think:false`（v2.16.8 起），OpenAI 相容伺服器送 `reasoning_effort: "none"` 與 `enable_thinking: false`（v2.19.0 起）。預設的 gemma4:26b 關閉思考後，GPU 伺服器上每句約 0.4～0.8 秒。但 **gpt-oss 系列架構上必定推理、關不掉**，僅適合用於不吃即時性的摘要，不要拿來做即時翻譯。
 
 各場景的預估總延遲（以 large-v3-turbo + LLM 翻譯為例）：
 
@@ -1004,7 +1075,8 @@ Ollama 伺服器的翻譯模型使用作者篩選過的預設清單，下方以�
 
 | 選項 | 說明 |
 |---|---|
-| **qwen2.5:14b**（預設） | 品質好，速度快（推薦） |
+| **gemma4:26b**（預設） | 速度快、品質好（推薦，約需 17GB 顯示記憶體） |
+| qwen2.5:14b | 品質好，較省記憶體（約需 9GB）；伺服器沒有 gemma4:26b 時的預設 |
 | qwen2.5:32b | 品質很好，中日文翻譯推薦 |
 | phi4:14b | Microsoft，品質不錯 |
 | qwen2.5:7b | 品質普通，速度最快 |
@@ -1336,6 +1408,20 @@ ja_zh 模式輸出：
 
 用 `-m` 指定其他模型時會顯示提示並忽略——台語只有這個模型可用。
 
+#### 華語模式選用 Breeze-ASR-26
+
+本模型訓練時也包含台語與華語混用的語料。台灣的會議常是「華語為主、偶爾夾台語或英文」，可以在華語輸入模式改用它，與 large-v3 比較哪個適合自己的錄音：
+
+```bash
+./start.sh --input 會議.mp3 --mode zh -m breeze-asr-26      # 中文逐字稿
+./start.sh --input 會議.mp3 --mode zh2en -m breeze-asr-26   # 中翻英
+```
+
+- 適用模式：`zh`（中文轉錄）、`zh2en`（中翻英）、`zh2ja`（中翻日）；互動式選單與 WebUI 的模型清單在這些模式會多出 `breeze-asr-26`
+- 選用後自動套用本模型專屬的辨識參數、自行切段與即時步進下限，並固定在本機辨識——與台語模式相同，不會誤用一般模型的參數組而大幅劣化
+- 其他模式（英文、日文、雙向）不支援，指定時會改用該模式的推薦模型並提示
+- 速度與已知限制同台語模式（見下方）
+
 #### 速度與硬體建議
 
 本模型是 Whisper large-v2 的微調版，decoder 層數約為 large-v3-turbo 的 8 倍，先天較慢：
@@ -1492,10 +1578,11 @@ ja_zh 模式輸出：
       [音訊裝置]
           macOS: SDL2（whisper.cpp）
           Windows: 若 SDL2 不可用則自動切換 WASAPI + faster-whisper
+          Linux: PipeWire / PulseAudio monitor + faster-whisper
           |
           v
       run_stream()（macOS）
-      run_stream_local_whisper()（Windows WASAPI）
+      run_stream_local_whisper()（Windows WASAPI / Linux）
 
 
   路線 B - Moonshine:
@@ -1580,17 +1667,19 @@ ja_zh 模式輸出：
 - **macOS（ScreenCaptureKit）：** 確認已授權「螢幕錄製」（macOS 15 為「螢幕與系統音訊錄製」）給你的終端機程式，且授權後已完全結束該程式（Cmd+Q）再重新開啟。可執行 `./start.sh --sck-permission` 重新授權。另請確認系統音量未設為靜音——靜音時只會收到無聲訊號。
 - **macOS（BlackHole）：** 確認 BlackHole 2ch 已安裝且電腦已重新啟動。執行 `./install.sh` 檢查。
 - **Windows：** 確認 WASAPI Loopback 裝置可用，或已啟用 Stereo Mix。執行 `.\start.ps1 --list-devices` 檢查可用裝置。
+- **Linux：** 執行 `./install.sh --doctor`。常見原因：沒有安裝 `pulseaudio-utils`（`sudo apt install pulseaudio-utils`）、透過 SSH 連線而連不到桌面的音訊伺服器、或系統沒有任何輸出裝置。
 
 ### Q: 偵測到音訊裝置但沒有辨識到任何語音？
 - **macOS：** 確認系統音訊輸出已切換到「多重輸出裝置」，而不是直接輸出到喇叭/耳機。
 - **Windows：** 確認應用程式音訊有正常輸出，且使用的是正確的 loopback 裝置。
+- **Linux：** 程式擷取的是「預設喇叭」，請確認聲音是從預設輸出裝置播放（`pactl get-default-sink`），且該裝置沒有靜音。會議軟體若指定了其他輸出裝置，可用 `JTLW_MONITOR_SOURCE` 指定對應的 monitor 來源。
 
 ### Q: 應用程式沒有提供音訊輸出裝置的選項，怎麼讓它走多重輸出裝置？（macOS）
 到 **系統設定 → 聲音 → 輸出** 選擇「多重輸出裝置」。大多數應用程式（如 YouTube、Podcast、串流影片等）會直接使用系統預設的音訊輸出，只要系統層級切過去就行，不需要在個別應用程式內設定。只有 Zoom、Teams 等視訊會議軟體會有自己的音訊輸出選項，才需要另外在軟體內手動選。
 
 ### Q: 翻譯品質不好？
 - 確認使用 LLM 翻譯引擎（而非 Argos 離線翻譯）
-- 推薦使用更好的大語言模型，至少要 `phi4:14b`、`qwen2.5:14b` 或更高參數的語言模型
+- 推薦使用更好的大語言模型，如 `gemma4:26b`（預設），至少要 `phi4:14b`、`qwen2.5:14b` 或更高參數的語言模型
 
 ### Q: 辨識速度太慢？
 - 改用 Moonshine 引擎（`--asr moonshine`），延遲從 8-14 秒降至 1-3 秒
@@ -1681,18 +1770,25 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ---
 
+### Q: Linux 上懸浮字幕沒有出現？（Linux）
+懸浮字幕需要圖形桌面。請確認在桌面工作階段內執行（`echo $DISPLAY` 有值），並已安裝 `libxcb-cursor0`（缺少時 PyQt6 會直接結束）。重新執行 `./install.sh` 會自動補齊。Wayland 桌面上視窗置頂的行為依桌面環境而定。
+
+### Q: Linux 上用 NVIDIA GPU 辨識出現找不到 cuBLAS / cuDNN？（Linux）
+請用 `./start.sh` 啟動（不要直接執行 `python3 translate_meeting.py`），啟動腳本會把 venv 內 PyTorch 附帶的 cuBLAS / cuDNN 加入函式庫路徑。ARM64 主機（如 DGX Spark）的 CTranslate2 預建套件不含 CUDA，`install.sh` 會自動在本機編譯 CUDA 版；若是先前用舊版安裝的，重新執行 `./install.sh` 即可補上。
+
 ## 七、檔案說明
 
 | 檔案 | 說明 |
 |---|---|
-| `install.sh` | 安裝腳本（macOS），檢查並安裝所有依賴（含 GPU 伺服器部署） |
+| `install.sh` | 安裝腳本（macOS），檢查並安裝所有依賴（含 GPU 伺服器部署）；在 Linux 上自動轉交 `install-linux.sh` |
+| `install-linux.sh` | 安裝腳本（Linux），支援 `--server` / `--upgrade` / `--doctor` / `--uninstall` |
 | `install.ps1` | 安裝腳本（Windows） |
-| `start.sh` | 啟動腳本（macOS） |
+| `start.sh` | 啟動腳本（macOS / Linux） |
 | `start.ps1` | 啟動腳本（Windows） |
-| `translate_meeting.py` | 主程式（跨平台，macOS / Windows 共用） |
+| `translate_meeting.py` | 主程式（跨平台，macOS / Windows / Linux 共用） |
 | `subtitle_overlay.py` | 懸浮字幕覆蓋視窗（PyQt6，啟用時由主程式自動啟動） |
 | `remote_whisper_server.py` | GPU 伺服器程式（FastAPI，由 install.sh 自動部署到伺服器） |
-| `whisper.cpp/` | Whisper 語音辨識引擎（macOS 自動編譯，Windows 下載預編譯版本） |
+| `whisper.cpp/` | Whisper 語音辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用） |
 | `venv/` | Python 虛擬環境（自動建立） |
 | `config.json` | 使用者設定檔（自動產生，含 LLM 伺服器位址、GPU 伺服器設定、錄音格式等） |
 | `{模式}_逐字稿_*.txt` | 翻譯/轉錄記錄檔（自動產生），模式：英翻中/中翻英/日翻中/中翻日/英文/中文/日文/英中雙向/日中雙向 |
@@ -1739,6 +1835,14 @@ Windows 搭配 NVIDIA GPU（CUDA）可大幅加速 faster-whisper 語音辨識�
 
 **CUDA 版本注意事項：** faster-whisper 使用的 CTranslate2 引擎需要 CUDA 12.x 的程式庫（`cublas64_12.dll`）。若系統安裝的是 CUDA Toolkit 13.x，安裝腳本會自動偵測並安裝 `nvidia-cublas-cu12` 套件提供相容程式庫。若仍出現「Library cublas64_12.dll is not found」錯誤，可另外安裝 [CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive)（可與 13.x 並存）。
 
+### Linux 建議配置
+
+| 配置 | 說明 |
+|------|------|
+| 純 CPU | 即時模式建議 base.en / small 模型（程式會依此自動推薦），或搭配 GPU 伺服器；離線處理可用但較慢 |
+| NVIDIA GPU（6 GB VRAM 以上） | 安裝程式自動安裝 CUDA 版 PyTorch，faster-whisper 走 CUDA 加速，建議 large-v3-turbo |
+| 無桌面伺服器 | `./install.sh --server`：離線處理 + WebUI 常駐服務，供區域網路其他電腦使用 |
+
 ### GPU 伺服器建議（選配，語音辨識加速用）
 
 區域網路內的 GPU 伺服器可為本機提供遠端語音辨識，適合沒有獨顯或需要更快處理速度的情境：
@@ -1753,14 +1857,14 @@ Windows 搭配 NVIDIA GPU（CUDA）可大幅加速 faster-whisper 語音辨識�
 
 | 用途 | 建議模型大小 | 記憶體/VRAM 需求 | 說明 |
 |------|-------------|-----------------|------|
-| 翻譯 | 14B 以上 | ~12 GB | 如 qwen2.5:14b，品質與速度兼顧 |
+| 翻譯 | 14B 以上 | ~12 GB（gemma4:26b 約 17 GB） | 如 gemma4:26b（預設）或 qwen2.5:14b，品質與速度兼顧 |
 | 摘要 | 120B 以上 | ~80 GB | 如 gpt-oss:120b，需要大記憶體主機 |
 
 LLM 伺服器可安裝在本機或區域網路內的任何主機。推薦使用 [NVIDIA DGX Spark](https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/)（128 GB 統一記憶體），可同時執行翻譯模型與摘要模型。沒有 LLM 伺服器時，程式可切換為 NLLB/Argos 離線翻譯引擎（但摘要功能仍需 LLM）。
 
 ## 移除本工具
 
-本工具不會修改系統登錄檔或安裝系統服務，移除只需刪除相關目錄。Python 本身不是本工具安裝的，不需移除。
+本工具不會修改系統登錄檔；除了 Linux 伺服器版的 WebUI 服務外，不安裝系統服務，移除只需刪除相關目錄。Python 本身不是本工具安裝的，不需移除。
 
 ### Windows 移除
 
@@ -1800,6 +1904,20 @@ rm -rf ~/.cache/whisper-cpp
 
 # 5. 清理 pip 下載快取（選擇性）
 pip cache purge
+```
+
+### Linux 移除
+
+```bash
+# 1. 移除虛擬環境、WebUI 服務與應用程式選單捷徑
+./install.sh --uninstall
+
+# 2. 刪除程式目錄（含設定、log、錄音）
+rm -rf ~/Apps/jt-live-whisper   # 或實際安裝路徑
+
+# 3. 刪除離線翻譯模型與 Whisper 模型快取（其他程式若有用到 HuggingFace 模型，請斟酌）
+rm -rf ~/.local/share/jt-live-whisper ~/.local/share/argos-translate
+rm -rf ~/.cache/huggingface/hub/models--*--faster-whisper-*
 ```
 
 > 以上指令會永久刪除所有記錄檔、錄音檔和設定檔。如需保留，請先備份 `logs/`、`recordings/` 和 `config.json`。

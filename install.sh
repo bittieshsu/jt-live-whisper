@@ -34,7 +34,12 @@ if [ ! -f "$SCRIPT_DIR/translate_meeting.py" ] && [ "$_is_upgrade" = false ]; th
             echo -e "\033[38;2;255;80;80m[錯誤] 下載失敗，請檢查網路連線\033[0m"
             exit 1
         fi
-        unzip -q "$tmp_zip" -d "$tmp_extract"
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -q "$tmp_zip" -d "$tmp_extract"
+        else
+            # 部分 Linux 發行版預設沒有 unzip
+            python3 -m zipfile -e "$tmp_zip" "$tmp_extract"
+        fi
         mkdir -p "$INSTALL_DIR"
         cp -R "$tmp_extract"/jt-live-whisper-main/* "$INSTALL_DIR/"
         rm -rf "$tmp_zip" "$tmp_extract"
@@ -42,9 +47,22 @@ if [ ! -f "$SCRIPT_DIR/translate_meeting.py" ] && [ "$_is_upgrade" = false ]; th
     fi
 
     chmod +x install.sh start.sh
+    chmod +x install-linux.sh 2>/dev/null || true
     exec ./install.sh "$@"
 fi
 # ─── Bootstrap 結束 ──────────────────────────────────────
+
+# ─── Linux：改由 install-linux.sh 安裝（本檔以下為 macOS 流程）───
+# install-linux.sh 會以 JTLW_INSTALL_LIB=1 載入本檔，沿用平台無關的函式
+if [ "$(uname -s)" = "Linux" ] && [ -z "${JTLW_INSTALL_LIB:-}" ]; then
+    if [ ! -f "$SCRIPT_DIR/install-linux.sh" ]; then
+        # 由舊版升級上來時可能還沒有這支腳本
+        echo "正在下載 install-linux.sh ..."
+        curl -fsSL "$GITHUB_RAW/install-linux.sh" -o "$SCRIPT_DIR/install-linux.sh" || {
+            echo "[錯誤] 無法下載 install-linux.sh，請檢查網路連線"; exit 1; }
+    fi
+    exec bash "$SCRIPT_DIR/install-linux.sh" "$@"
+fi
 
 VENV_DIR="$SCRIPT_DIR/venv"
 WHISPER_DIR="$SCRIPT_DIR/whisper.cpp"
@@ -196,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.18.2 - 100% 全地端 AI 語音工具集 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.19.0 - 100% 全地端 AI 語音工具集 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -250,6 +268,22 @@ check_xcode_clt() {
     section "Xcode Command Line Tools"
     if xcode-select -p &>/dev/null; then
         check_ok "Xcode CLT 已安裝（$(xcode-select -p)）"
+        # macOS 大版本升級後常見：SDK 換新了，但編譯器還是舊的 → 編譯與連結都會失敗
+        # （實測 macOS 26：MacOSX27.0.sdk 由 Swift 6.4 建置，swiftc 卻是 6.3.3）
+        local _sdk_ver _clang_ok
+        _sdk_ver=$(xcrun --show-sdk-version 2>/dev/null)
+        _clang_ok=1
+        printf 'int main(void){return 0;}\n' > /tmp/jt-clt-check.c 2>/dev/null
+        clang -o /tmp/jt-clt-check.out /tmp/jt-clt-check.c >/tmp/jt-clt-check.log 2>&1 || _clang_ok=0
+        rm -f /tmp/jt-clt-check.c /tmp/jt-clt-check.out
+        if [ "$_clang_ok" -eq 0 ]; then
+            check_fail "命令列工具無法編譯（SDK ${_sdk_ver:-未知} 與編譯器版本不符）"
+            echo -e "  ${C_DIM}  $(tail -2 /tmp/jt-clt-check.log | head -1)${NC}"
+            echo -e "  ${C_WHITE}  請更新命令列工具後重跑安裝：${NC}"
+            echo -e "  ${C_DIM}    sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install${NC}"
+            echo -e "  ${C_DIM}  （已安裝 Xcode 的話：sudo xcode-select -s /Applications/Xcode.app）${NC}"
+            echo -e "  ${C_DIM}  安裝會繼續，但 whisper.cpp 與 ScreenCaptureKit 元件無法編譯${NC}"
+        fi
     else
         check_install "Xcode Command Line Tools 未安裝，正在觸發安裝..."
         xcode-select --install 2>/dev/null || true
@@ -1267,10 +1301,12 @@ build_sck_helper() {
     fi
 
     mkdir -p "$SCRIPT_DIR/bin"
+    SCK_BUILD_LOG="$SCRIPT_DIR/logs/sck_build.log"
+    mkdir -p "$SCRIPT_DIR/logs"
     if swiftc -O -target "$(uname -m)-apple-macos13.0" \
             -o "$bin" "$SCRIPT_DIR/sck_audio_capture.swift" \
             -framework ScreenCaptureKit -framework AVFoundation \
-            -framework CoreMedia -framework CoreGraphics >/dev/null 2>&1; then
+            -framework CoreMedia -framework CoreGraphics > "$SCK_BUILD_LOG" 2>&1; then
         echo "$src_hash" > "$stamp"
         return 0
     fi
@@ -1285,21 +1321,32 @@ check_sck() {
         return 0
     fi
     if ! command -v swiftc >/dev/null 2>&1; then
-        check_fail "找不到 swiftc（需要 Xcode Command Line Tools）"
-        echo -e "  ${C_DIM}執行 xcode-select --install 後重跑本安裝程式${NC}"
-        return 1
+        check_fail "找不到 swiftc（需要 Xcode Command Line Tools），系統音訊改用 BlackHole"
+        echo -e "  ${C_DIM}  執行 xcode-select --install 後重跑本安裝程式即可改用 ScreenCaptureKit${NC}"
+        return 0
     fi
 
     local bin="$SCRIPT_DIR/bin/jt-sck-audio"
+    # 這個元件是選配（失敗可退回 BlackHole），編譯失敗不可讓整個安裝中止（本檔有 set -e）
     if [ -f "$bin" ] && [ -f "$SCRIPT_DIR/bin/.jt-sck-audio.hash" ]; then
-        run_spinner "檢查 ScreenCaptureKit 元件" build_sck_helper
+        run_spinner "檢查 ScreenCaptureKit 元件" build_sck_helper || true
     else
         echo -e "  ${C_DIM}編譯 ScreenCaptureKit 音訊元件（約 1 分鐘）...${NC}"
-        run_spinner "編譯 ScreenCaptureKit 元件" build_sck_helper
+        run_spinner "編譯 ScreenCaptureKit 元件" build_sck_helper || true
     fi
     if [ ! -f "$bin" ]; then
-        check_fail "ScreenCaptureKit 元件編譯失敗，將改用 BlackHole"
-        return 1
+        check_fail "ScreenCaptureKit 元件編譯失敗，改用 BlackHole 擷取系統音訊"
+        # 常見原因：Xcode Command Line Tools 的 SDK 比 swiftc 新（macOS 升級後只更新了 SDK）
+        if grep -q "this SDK is not supported by the compiler" "$SCRIPT_DIR/logs/sck_build.log" 2>/dev/null; then
+            echo -e "  ${C_WARN}  原因：Xcode Command Line Tools 的 SDK 與 swiftc 版本不符${NC}"
+            echo -e "  ${C_DIM}  請更新命令列工具後重跑安裝：${NC}"
+            echo -e "  ${C_DIM}    sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install${NC}"
+            echo -e "  ${C_DIM}  （已安裝 Xcode 的話：sudo xcode-select -s /Applications/Xcode.app）${NC}"
+        else
+            echo -e "  ${C_DIM}  錯誤訊息：$SCRIPT_DIR/logs/sck_build.log${NC}"
+        fi
+        echo -e "  ${C_DIM}  安裝會繼續，系統音訊改用 BlackHole：brew install --cask blackhole-2ch${NC}"
+        return 0
     fi
     check_ok "ScreenCaptureKit 元件已就緒"
 
@@ -1353,12 +1400,12 @@ do_upgrade() {
     if [ "$local_version" = "$remote_version" ]; then
         # 版本相同但檢查是否缺少檔案
         _missing=""
-        for _chk in webui.py webui.html sck_audio_capture.swift; do
+        for _chk in webui.py webui.html sck_audio_capture.swift install-linux.sh; do
             [ ! -f "$SCRIPT_DIR/$_chk" ] && _missing="$_missing $_chk"
         done
         if [ -n "$_missing" ]; then
             echo -e "  ${C_WARN}版本相同但缺少檔案，補充安裝中...${NC}"
-            for _uf in translate_meeting.py start.sh start.ps1 install.sh install.ps1 SOP.md webui.py webui.html sck_audio_capture.swift; do
+            for _uf in translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh SOP.md webui.py webui.html sck_audio_capture.swift; do
                 [ -f "$repo_dir/$_uf" ] && cp "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"
             done
             build_sck_helper
@@ -1381,7 +1428,7 @@ do_upgrade() {
 
     # 更新主要程式檔案
     local files_updated=0
-    for fname in translate_meeting.py start.sh install.sh SOP.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift; do
+    for fname in translate_meeting.py start.sh install.sh install-linux.sh SOP.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift; do
         if [ -f "$repo_dir/$fname" ]; then
             cp "$repo_dir/$fname" "$SCRIPT_DIR/$fname"
             ((files_updated++)) || true
@@ -1390,6 +1437,7 @@ do_upgrade() {
 
     # 確保腳本可執行
     chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/install.sh" 2>/dev/null
+    chmod +x "$SCRIPT_DIR/install-linux.sh" 2>/dev/null || true
 
     # ScreenCaptureKit helper 原始碼可能一併更新，重新編譯
     build_sck_helper
@@ -1401,14 +1449,20 @@ do_upgrade() {
 }
 
 # ─── 從原始碼編譯 CTranslate2（aarch64 CUDA）──────────────
-# 用法：_build_ctranslate2_from_source "$ssh_opts" "$rw_user" "$rw_host"
+# 用法：_build_ctranslate2_from_source "$ssh_opts" "$rw_user" "$rw_host" [venv 目錄] [wheel 快取目錄] [安裝前綴]
+# 安裝前綴預設 /usr/local（GPU 伺服器部署）；指定其他目錄時不跑 ldconfig，執行時靠 LD_LIBRARY_PATH 載入，
+# 不會覆蓋系統上其他程式正在使用的 libctranslate2
+# 後兩個參數省略時沿用 GPU 伺服器的路徑；install-linux.sh 在本機編譯時會指定
 # 回傳：0=成功  1=失敗（呼叫端應降級 openai-whisper）
 _build_ctranslate2_from_source() {
     local ssh_opts="$1" rw_user="$2" rw_host="$3"
-    local REMOTE_PIP="~/jt-whisper-server/venv/bin/pip"
-    local REMOTE_PY="~/jt-whisper-server/venv/bin/python3"
-    local WHEEL_CACHE="~/jt-whisper-server/.ct2-wheels"
+    local _venv="${4:-~/jt-whisper-server/venv}"
+    local REMOTE_PIP="${_venv}/bin/pip"
+    local REMOTE_PY="${_venv}/bin/python3"
+    local WHEEL_CACHE="${5:-~/jt-whisper-server/.ct2-wheels}"
+    local CT2_PREFIX="${6:-/usr/local}"
     local BUILD_DIR="/tmp/ctranslate2-build"
+    [ "$CT2_PREFIX" != "/usr/local" ] && BUILD_DIR="/tmp/ctranslate2-build-$(id -un)-$$"
 
     echo ""
     echo -e "  ${C_WHITE}[CTranslate2] aarch64 偵測到，嘗試從原始碼編譯 CUDA 版...${NC}"
@@ -1424,7 +1478,7 @@ _build_ctranslate2_from_source() {
             echo ""
             # 驗證
             local ct2_cuda
-            ct2_cuda=$(ssh $ssh_opts "$rw_user@$rw_host" "LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH ${REMOTE_PY} -c \"
+            ct2_cuda=$(ssh $ssh_opts "$rw_user@$rw_host" "LD_LIBRARY_PATH=${CT2_PREFIX}/lib:\$LD_LIBRARY_PATH ${REMOTE_PY} -c \"
 import ctranslate2
 types = ctranslate2.get_supported_compute_types('cuda')
 print('ok' if types else 'no')
@@ -1528,7 +1582,7 @@ print('ok' if types else 'no')
     # gpu_arch="12.1" → cmake_arch="121"（移除小數點）
     local cmake_arch="${gpu_arch//.}"
     # 所有編譯步驟共用的環境變數開頭（確保 nvcc 在 PATH、libctranslate2 可被找到）
-    local CUDA_ENV="export PATH=${cuda_bin_dir}:\$PATH && export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH"
+    local CUDA_ENV="export PATH=${cuda_bin_dir}:\$PATH && export LD_LIBRARY_PATH=${CT2_PREFIX}/lib:\$LD_LIBRARY_PATH && export CTRANSLATE2_ROOT=${CT2_PREFIX}"
     echo -e "  ${C_WHITE}  開始編譯 CTranslate2（預計 10-20 分鐘）...${NC}"
 
     # 清理舊的暫存目錄
@@ -1574,7 +1628,7 @@ print('ok' if types else 'no')
             -DCMAKE_CUDA_ARCHITECTURES=${cmake_arch} \
             -DCUDA_NVCC_FLAGS='-gencode=arch=compute_${cmake_arch},code=sm_${cmake_arch}' \
             -DOPENMP_RUNTIME=NONE \
-            -DCMAKE_INSTALL_PREFIX=/usr/local \
+            -DCMAKE_INSTALL_PREFIX=${CT2_PREFIX} \
             2>&1
     "; then
         _build_fail "cmake 設定失敗"
@@ -1595,10 +1649,16 @@ print('ok' if types else 'no')
     fi
     echo ""
 
-    # 4d. make install + ldconfig
-    if ! run_spinner "  [4/7] 安裝系統函式庫（make install + ldconfig）..." ssh $ssh_opts "$rw_user@$rw_host" "
+    # 4d. make install + ldconfig（非系統前綴只 make install）
+    local _install_cmd="make install 2>&1 && ldconfig 2>&1"
+    local _install_label="安裝系統函式庫（make install + ldconfig）"
+    if [ "$CT2_PREFIX" != "/usr/local" ]; then
+        _install_cmd="mkdir -p ${CT2_PREFIX} && make install 2>&1"
+        _install_label="安裝函式庫到 ${CT2_PREFIX}"
+    fi
+    if ! run_spinner "  [4/7] ${_install_label}..." ssh $ssh_opts "$rw_user@$rw_host" "
         ${CUDA_ENV} && \
-        cd ${BUILD_DIR}/src/build && make install 2>&1 && ldconfig 2>&1
+        cd ${BUILD_DIR}/src/build && ${_install_cmd}
     "; then
         _build_fail "make install 失敗"
         return 1
@@ -1653,10 +1713,12 @@ print(','.join(types) if types else 'no')
     fi
     check_ok "CTranslate2 CUDA 支援: ${ct2_verify}"
 
-    # ── 6. 確認 libctranslate2.so 已註冊 ──
+    # ── 6. 確認 libctranslate2.so 已註冊（非系統前綴不進 ldconfig，由 LD_LIBRARY_PATH 載入）──
     local lib_check
     lib_check=$(ssh $ssh_opts "$rw_user@$rw_host" "ldconfig -p 2>/dev/null | grep -c libctranslate2" 2>/dev/null)
-    if [ "$lib_check" -gt 0 ] 2>/dev/null; then
+    if [ "$CT2_PREFIX" != "/usr/local" ]; then
+        check_ok "libctranslate2.so 位於 ${CT2_PREFIX}/lib（不影響系統上其他程式）"
+    elif [ "$lib_check" -gt 0 ] 2>/dev/null; then
         check_ok "libctranslate2.so 已註冊（ldconfig）"
     else
         echo -e "  ${C_DIM}  libctranslate2.so 未在 ldconfig 中（透過 LD_LIBRARY_PATH 載入）${NC}"
@@ -2686,6 +2748,11 @@ check_disk_space() {
     fi
 }
 
+# 被 install-linux.sh 當函式庫載入時到此為止
+if [ -n "${JTLW_INSTALL_LIB:-}" ]; then
+    return 0
+fi
+
 # ─── 主流程 ──────────────────────────────────────
 print_title
 
@@ -2704,7 +2771,10 @@ check_homebrew || exit 1
 check_brew_deps
 check_sck
 check_python || exit 1
-check_whisper_cpp
+check_whisper_cpp || {
+    # whisper.cpp 只影響 whisper.cpp 即時辨識；mlx-whisper 與 faster-whisper 仍可用，不中止安裝
+    echo -e "  ${C_DIM}即時辨識可改用 mlx-whisper（Apple Silicon）或 faster-whisper${NC}"
+}
 check_whisper_models
 check_venv
 check_moonshine
