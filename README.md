@@ -292,11 +292,20 @@ bash install.sh
 
 打開終端機，貼上以下指令（安裝過程會用 `sudo` 補齊系統套件）：
 
+**桌機（有圖形桌面）：**
+
 ```bash
 mkdir -p ~/Apps/jt-live-whisper && cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
-bash install.sh              # 桌面版
-bash install.sh --server     # 伺服器版（無桌面，WebUI 以 systemd 服務常駐）
+bash install.sh
+```
+
+**無桌面伺服器（WebUI 以 systemd 服務常駐，供區域網路其他電腦使用）：**
+
+```bash
+mkdir -p ~/Apps/jt-live-whisper && cd ~/Apps/jt-live-whisper
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
+bash install.sh --server
 ```
 
 `install.sh` 偵測到 Linux 會自動改用 `install-linux.sh`。安裝完成後可執行 `./install.sh --doctor` 檢查音訊、套件、GPU 與伺服器連線是否正常。

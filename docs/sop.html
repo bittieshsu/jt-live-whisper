@@ -581,10 +581,15 @@ bash install.sh
 </code></pre>
 <p><strong>Linux（Ubuntu / Debian）：</strong></p>
 <p>打開終端機，貼上以下指令（安裝過程會用 <code>sudo</code> 補齊系統套件）：</p>
+<p><strong>桌機版</strong>（即時字幕、WebUI、懸浮字幕）：</p>
 <pre><code class="language-bash">mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
-bash install.sh              # 桌面版（即時字幕、WebUI、懸浮字幕）
-bash install.sh --server     # 伺服器版（無桌面，WebUI 以 systemd 服務常駐）
+bash install.sh
+</code></pre>
+<p><strong>伺服器版</strong>（無桌面主機；不裝桌面套件，WebUI 以 systemd 服務常駐、開機自動啟動）：</p>
+<pre><code class="language-bash">mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
+curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
+bash install.sh --server
 </code></pre>
 <p><code>install.sh</code> 偵測到 Linux 時會自動改用 <code>install-linux.sh</code>，也可以直接執行它。可用參數：</p>
 <table>
