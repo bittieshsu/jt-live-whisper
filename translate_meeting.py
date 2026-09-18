@@ -135,6 +135,26 @@ def _looks_simplified(text):
     return _T2S.convert(text) == text and _S2T.convert(text) != text
 
 
+# s2twp 對「已經是繁體」的輸入會誤轉：「干擾」→「幹擾」、「干預」→「幹預」
+# （干 既是繁體字、也是幹／乾的簡體形，字級轉換無法分辨）。
+# 但對簡體輸入它是對的（「干扰」→「干擾」），而 _to_traditional() 的整段偵測
+# 又會漏掉繁簡混雜的行。解法：照常轉換，然後把**原文裡本來就有的正確寫法**還原。
+# 只還原原文字面上存在的詞，所以不會把真正該轉的簡體留下來。
+_S2TWP_PROTECT = ("干擾", "干涉", "干預", "干戈", "干支", "干係", "干犯",
+                  "若干", "相干", "干政", "干練", "干雲")
+
+
+def _s2twp_safe(text):
+    """簡繁轉換，並保護那些會被 s2twp 誤轉的正確繁體詞"""
+    out = S2TWP.convert(text)
+    for w in _S2TWP_PROTECT:
+        if w in text:
+            wrong = S2TWP.convert(w)
+            if wrong != w:
+                out = out.replace(wrong, w)
+    return out
+
+
 def _to_traditional(text):
     """確保輸出為台灣繁體：偵測到簡體才轉換。
 
@@ -143,7 +163,7 @@ def _to_traditional(text):
     - 已是繁體 → 原樣返回，避免 OpenCC 把正確的「干擾」誤轉成「幹擾」
     - 確認是簡體 → 套 s2twp，同時取得台灣用語轉換（内存→記憶體、程序→程式）"""
     if _looks_simplified(text):
-        return S2TWP.convert(text)
+        return _s2twp_safe(text)
     return text
 
 # Moonshine ASR（選用，未安裝時自動降級為 Whisper only）
@@ -1544,7 +1564,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.20.3"
+APP_VERSION = "2.20.4"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3528,7 +3548,7 @@ class ArgosTranslator:
                         translated_parts.append(p)
             else:
                 translated_parts.append(part)
-        return S2TWP.convert(" ".join(translated_parts))
+        return _s2twp_safe(" ".join(translated_parts))
 
 
 class NllbTranslator:
@@ -3630,7 +3650,7 @@ class NllbTranslator:
                 translated_parts.append(part)
         result = " ".join(translated_parts)
         if self.direction in ("en2zh", "ja2zh"):
-            return S2TWP.convert(result)
+            return _s2twp_safe(result)
         return result
 
 
@@ -3755,8 +3775,19 @@ def _colorize_summary_line(line):
 
 
 def _live_output_line(line, write_lock):
-    """著色並輸出一行摘要文字"""
-    colored = _colorize_summary_line(line)
+    """著色並輸出一行摘要文字。
+
+    即時顯示也要過簡繁轉換：轉換原本只在存檔前做，畫面印的是模型的原始輸出，
+    所以使用者會看著簡體字一行行閃過、最後檔案才是繁體。
+    qwen 系列比 gpt-oss 更常吐簡體，換預設摘要模型之後這個落差變得明顯。
+
+    這裡用無條件 S2TWP，與摘要存檔那一步相同——**畫面與檔案必須是同一套規則**，
+    否則又變成「看到的和存下來的不一樣」。不用 _to_traditional() 是因為它整段偵測，
+    對繁簡混雜的行會漏掉（摘要的輸出正是這種形狀）。
+    代價是 s2twp 會把已經正確的「干擾」轉成「幹擾」，這是存檔路徑本來就有的
+    已知限制，不在這裡另外處理，以免畫面與檔案再度分歧。
+    """
+    colored = _colorize_summary_line(_s2twp_safe(line))
     if write_lock:
         with write_lock:
             sys.stdout.write(colored + "\n")
@@ -5682,7 +5713,7 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
         result = translator.translate(src_text)
         elapsed = time.monotonic() - t0
         if result:
-            result = S2TWP.convert(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
+            result = _s2twp_safe(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
         with _trans_lock:
             _trans_pending[seq] = (src_text, result, elapsed, asr_elapsed)
         _drain_translations(log_path)
@@ -5822,7 +5853,7 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
                         stripped_zh = re.sub(r"[^\u4e00-\u9fff]", "", line)
                         if len(stripped_zh) < 2:
                             continue
-                        line = S2TWP.convert(line)
+                        line = _s2twp_safe(line)
                         if line == last_translated:
                             continue
                         # 過濾中文幻覺
@@ -5849,7 +5880,7 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
                         stripped_zh = re.sub(r"[^\u4e00-\u9fff]", "", line)
                         if len(stripped_zh) < 2:
                             continue
-                        line = S2TWP.convert(line)
+                        line = _s2twp_safe(line)
                         if line == last_translated:
                             continue
                         if any(kw in line for kw in (
@@ -6015,7 +6046,7 @@ def run_stream_moonshine(capture_id: int, translator, moonshine_model_name: str,
         result = translator.translate(src_text)
         elapsed = time.monotonic() - t0
         if result:
-            result = S2TWP.convert(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
+            result = _s2twp_safe(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
         with _trans_lock:
             _trans_pending[seq] = (src_text, result, elapsed, asr_elapsed)
         _drain_translations(log_path)
@@ -6611,7 +6642,7 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
         result = translator.translate(src_text)
         elapsed = time.monotonic() - t0
         if result:
-            result = S2TWP.convert(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
+            result = _s2twp_safe(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
         with _trans_lock:
             _trans_pending[seq] = (src_text, result, elapsed, asr_elapsed)
         _drain_translations(_log_path)
@@ -6685,7 +6716,7 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
                     continue
                 # 簡繁轉換（中文模式）
                 if mode in _ZH_INPUT_MODES:
-                    line = S2TWP.convert(line)
+                    line = _s2twp_safe(line)
                 # 幻覺過濾
                 if hallucination_check(line):
                     continue
@@ -7277,7 +7308,7 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
         result = translator.translate(src_text)
         elapsed = time.monotonic() - t0
         if result:
-            result = S2TWP.convert(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
+            result = _s2twp_safe(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
         with _trans_lock:
             _trans_pending[seq] = (src_text, result, elapsed, asr_elapsed)
         _drain_translations(_log_path)
@@ -7374,7 +7405,7 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
                 if not line:
                     continue
                 if mode in _ZH_INPUT_MODES:
-                    line = S2TWP.convert(line)
+                    line = _s2twp_safe(line)
                 if hallucination_check(line):
                     continue
                 if is_duplicate(line):
@@ -8343,7 +8374,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
             result = translator.translate(src_text)
             elapsed = time.monotonic() - t0
             if result and not isinstance(translator, OllamaTranslator):
-                result = S2TWP.convert(result)
+                result = _s2twp_safe(result)
             with lock:
                 pending[seq] = (src_text, result, elapsed, asr_elapsed)
             _drain_translations(pending, next_seq, lock, source)
@@ -8510,7 +8541,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                     continue
                 # 中文輸入做 S2TWP 轉換（語言預偵測時根據 detected_lang 判斷）
                 if _effective_lang == "zh":
-                    line = S2TWP.convert(line)
+                    line = _s2twp_safe(line)
                 if _hallu_fn(line):
                     continue
                 if is_duplicate(line, recent):
@@ -10449,7 +10480,7 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
                 orig_si, orig_li, orig_text = all_lines[global_idx]
                 # 只在有變化、且通過把關時推送（簡繁轉換只套用在中文行）
                 if not _KANA_RE.search(orig_text):
-                    corrected_text = S2TWP.convert(corrected_text)
+                    corrected_text = _s2twp_safe(corrected_text)
                 corrected_text = _normalize_correction(corrected_text)
                 if (corrected_text != orig_text and corrected_text != "[雜音]"
                         and _accept_correction(orig_text, corrected_text, protected)):
@@ -10499,7 +10530,7 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
                         orig_text = all_lines[global_idx][2]
                         # 簡繁轉換只套用在中文行（日文的漢字不可轉；英文行轉了也沒作用）
                         if not _KANA_RE.search(orig_text):
-                            corrected_text = S2TWP.convert(corrected_text)
+                            corrected_text = _s2twp_safe(corrected_text)
                         corrected_text = _normalize_correction(corrected_text)
                         if _accept_correction(orig_text, corrected_text, protected):
                             corrected[global_idx] = corrected_text
@@ -11454,7 +11485,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             if hallucination_check(text):
                 continue
             if mode in _ZH_INPUT_MODES:
-                text = S2TWP.convert(text)
+                text = _s2twp_safe(text)
             valid_segments.append({
                 "start": seg_raw["start"],
                 "end": seg_raw["end"],
@@ -11549,7 +11580,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
                     elapsed = time.monotonic() - t0
 
                     if result:
-                        result = S2TWP.convert(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
+                        result = _s2twp_safe(result) if not isinstance(translator, OllamaTranslator) else _to_traditional(result)
                         _print_with_badge(
                             f"{dst_color}{BOLD}{ts_tag} {spk_tag_term}[{dst_label}] {result}{RESET}",
                             _speed_badge_color(elapsed), elapsed, "譯")
@@ -11928,7 +11959,7 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
             if hall_check(text):
                 continue
             if lang == "zh":
-                text = S2TWP.convert(text)
+                text = _s2twp_safe(text)
             valid.append({"start": seg["start"], "end": seg["end"], "text": text})
         return valid
 
@@ -12448,7 +12479,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
                                   server_type=server_type)
             seg = re.sub(r'<think>[\s\S]*?</think>', '', seg).strip()
             seg = re.sub(r'<think>[\s\S]*', '', seg).strip()
-            seg = S2TWP.convert(seg)
+            seg = _s2twp_safe(seg)
             _warn_if_transcript_truncated(chunk, seg, f"第 {i+1}/{len(chunks)} 段")
             segment_summaries.append(seg)
             print(f"  {C_OK}第 {i+1}/{len(chunks)} 段完成{RESET}", flush=True)
@@ -12539,7 +12570,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
         sbar_retry.stop()
         _retry_result = re.sub(r'<think>[\s\S]*?</think>', '', _retry_result).strip()
         _retry_result = re.sub(r'<think>[\s\S]*', '', _retry_result).strip()
-        _retry_result = S2TWP.convert(_retry_result)
+        _retry_result = _s2twp_safe(_retry_result)
         # 將重點摘要放在前面，校正逐字稿放在後面
         summary = _retry_result.rstrip() + "\n\n" + summary.lstrip()
         print(f"  {C_OK}重點摘要已補上{RESET}")
@@ -12571,7 +12602,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
         sbar_tc.stop()
         _tc_result = re.sub(r'<think>[\s\S]*?</think>', '', _tc_result).strip()
         _tc_result = re.sub(r'<think>[\s\S]*', '', _tc_result).strip()
-        _tc_result = S2TWP.convert(_tc_result)
+        _tc_result = _s2twp_safe(_tc_result)
         summary = summary.rstrip() + "\n\n" + _tc_result.lstrip()
         print(f"  {C_OK}校正逐字稿已補上{RESET}")
 
@@ -12596,7 +12627,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
                                              live_output=False, server_type=server_type)
                     _r_seg = re.sub(r'<think>[\s\S]*?</think>', '', _r_seg).strip()
                     _r_seg = re.sub(r'<think>[\s\S]*', '', _r_seg).strip()
-                    _r_segs.append(S2TWP.convert(_r_seg))
+                    _r_segs.append(_s2twp_safe(_r_seg))
                 sbar_r.set_task(f"第 {ri} 次 - 合併")
                 _r_combined = "\n\n---\n\n".join(
                     f"### 第 {i+1} 段\n{s}" for i, s in enumerate(_r_segs))
@@ -12605,7 +12636,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
                                             live_output=False, server_type=server_type)
             sbar_r.freeze()
             sbar_r.stop()
-            round_results.append(S2TWP.convert(_r_result))
+            round_results.append(_s2twp_safe(_r_result))
         # 整合多次結果
         print(f"\n  {C_WHITE}整合 {len(round_results)} 次摘要結果...{RESET}")
         _webui_send({"type": "progress", "stage": f"生成摘要（{model}）",
@@ -12641,7 +12672,7 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
     summary = re.sub(r'<think>[\s\S]*?</think>', '', summary).strip()
     summary = re.sub(r'<think>[\s\S]*', '', summary).strip()
 
-    summary = S2TWP.convert(summary)
+    summary = _s2twp_safe(summary)
 
     # 校正逐字稿：LLM 漏掉的 Speaker 標籤，自動補上（與 HTML 邏輯對齊）
     summary = _fix_speaker_labels_in_text(summary)
@@ -14856,7 +14887,7 @@ def main():
                                              summary_mode=_batch_summary_mode)
                     seg = call_ollama_raw(prompt, model, host, port, spinner=sbar, live_output=True,
                                           server_type=server_type)
-                    seg = S2TWP.convert(seg)
+                    seg = _s2twp_safe(seg)
                     segment_summaries.append(seg)
                     print(f"  {C_OK}第 {i+1}/{len(chunks)} 段完成{RESET}", flush=True)
 
@@ -14922,7 +14953,7 @@ def main():
                 _retry_result = call_ollama_raw(_retry_prompt, model, host, port, spinner=sbar_retry,
                                                 live_output=True, server_type=server_type)
                 sbar_retry.stop()
-                _retry_result = S2TWP.convert(_retry_result)
+                _retry_result = _s2twp_safe(_retry_result)
                 summary = _retry_result.rstrip() + "\n\n" + summary.lstrip()
                 print(f"  {C_OK}重點摘要已補上{RESET}")
 
@@ -14930,7 +14961,7 @@ def main():
             summary = re.sub(r'#{2,4}\s*(?:最終)?(?:重點)?摘要', '## 重點摘要', summary)
             summary = re.sub(r'#{2,4}\s*(?:校正)?逐字稿', '## 校正逐字稿', summary)
 
-            summary = S2TWP.convert(summary)
+            summary = _s2twp_safe(summary)
 
             # 組裝 metadata（批次摘要只有摘要模型資訊）
             _batch_meta = {
