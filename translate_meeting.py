@@ -1564,7 +1564,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.20.7"
+APP_VERSION = "2.21.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2500,8 +2500,70 @@ def _script_profile(text):
 
 
 _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'’]*")
+# 「這個詞是某個保護詞的誤聽」的相似度門檻，見 _accept_correction
+_GARBLED_TERM_RATIO = 0.6
 # 校正不可憑空插入的字元（括號、引號、數學與排版符號）
 _BRACKET_CHARS = set("[]{}()（）［］｛｝【】〔〕《》〈〉「」『』<>〈〉|/\\@#$%^*_~`«»‹›")
+
+# ── 中日文「姓＋職稱」保護 ────────────────────────────
+# _protected_terms() 只認得拉丁字母（靠大寫當專有名詞訊號），中日文人名完全沒有保護。
+# 語料實測：日文「換掉人名或產品名」7 件、中文 2 件、英文 0 件，最嚴重的兩件是
+#   超マネージャー → 上長マネージャー（換成「上司」這個普通名詞）
+#   相撲主任       → SRE主任（換成職務縮寫）
+# 兩者都讀得通，所以比亂碼更難發現——引用這段的結論會指向不存在的人。
+_NAME_TITLE_TITLES = (r"(?:マネージャー|主任|課長|部長|係長|氏|様"
+                      r"|經理|经理|副理|工程師|工程师|小姐|先生|總監|总监|組長|组长)")
+_NAME_TITLE_RE = re.compile(r"([一-鿿]{1,3}|[A-Za-z]{1,6})?(" + _NAME_TITLE_TITLES + r")")
+# 常見姓氏。不追求完整——用途是「把明顯不是姓的東西擋下來」，
+# 漏收的姓只會少擋一件，不會誤擋（比對不到就當作不是姓＋職稱，規則不觸發）。
+_SURNAMES = set("陳林黃張李王吳劉蔡楊許鄭謝郭洪曾邱廖賴徐周葉蘇莊呂江何蕭羅高潘簡朱鍾"
+                "游詹胡施沈余趙盧梁顏柯孫魏翁戴范宋方鄧杜傅侯曹薛丁卓阮馬董唐溫藍石紀")
+_SURNAMES |= {"佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林",
+              "加藤", "吉田", "山田", "松本", "井上", "木村", "清水", "斎藤", "佐々木"}
+
+
+def _ends_with_surname(s):
+    """s 的結尾是不是一個姓。
+
+    要看結尾而不是整串，因為擷取名字的 `{1,3}` 是貪婪的：
+    「請程副理」會擷到「請程」而不是「程」，直接比對整串就會把
+    「請程副理→請陳副理」這種正確的姓氏修正誤擋掉。
+    """
+    return any(s[-n:] in _SURNAMES for n in (1, 2, 3) if len(s) >= n)
+
+
+def _name_title_slots(text):
+    """{職稱: [依出現順序的名字, ...]}；該位置沒有名字時放 None"""
+    slots = {}
+    for m in _NAME_TITLE_RE.finditer(text):
+        slots.setdefault(m.group(2), []).append(m.group(1))
+    return slots
+
+
+def _name_title_damaged(original, corrected):
+    """原文的「姓＋職稱」被換成不是姓的東西、或名字整個被刪掉 → 這筆校正不可採用。
+
+    判斷的是「替換上去的是不是一個姓」，不是「有沒有變動」——
+    直覺寫法（變動就擋）會連「把聽錯的姓改對」一起擋掉，
+    大マネージャー → 王マネージャー 正是我們要的修正。
+
+    同一行可能有多個相同職稱（「張マネージャーと王マネージャーは別の人です」），
+    所以必須**依出現順序配對**；只找第一個職稱會拿第二個名字去比第一個位置，
+    連「原文與校正完全相同」都會被判成損壞。
+    """
+    corr = _name_title_slots(corrected)
+    for title, names in _name_title_slots(original).items():
+        new_names = corr.get(title, [])
+        if len(new_names) < len(names):
+            return True                       # 這個職稱整個不見了
+        for old, new in zip(names, new_names):
+            if old is None:
+                continue                      # 原文該處本來就沒有名字，不保護
+            if new is None:
+                return True                   # 名字被刪掉，只剩職稱
+            if new != old and not _ends_with_surname(new):
+                return True                   # 換成「上長」「SRE」這種不是姓的詞
+    return False
 # 模型偶爾輸出的特殊空白與連字號，換回一般字元
 _PUNCT_NORMALIZE = str.maketrans({"\u00a0": " ", "\u202f": " ", "\u2007": " ",
                                   "\u2010": "-", "\u2011": "-"})
@@ -2554,6 +2616,26 @@ def _accept_correction(original, corrected, protected=None):
         for w in removed:
             if not any(protected[a] > protected[w] for a in added):
                 return False
+        # 辨識聽壞的專有名詞，被換成「別的」詞。
+        # 上面那條看不到它：聽壞的詞（Groxmoxity）不在保護清單裡，交集是空的——
+        # 我們保護了辨識聽對的專有名詞，對聽壞的卻一條規則都沒有，
+        # 而那正是模型最會拿另一個真實產品名去填的時候（實測 Groxmoxity → Ceph、
+        # DGBX Spark → Databricks）。
+        # 判斷方式：消失的詞如果明顯是某個保護詞的誤聽，校正後就必須出現那個保護詞。
+        # 門檻 0.6 是量出來的——誤聽版本落在 0.62～0.86，
+        # 而該放行的同音修正（safe → Ceph）最高只有 0.44。
+        # 長度下限是必要的：實測「I」對保護詞「AI」的相似度是 0.667，
+        # 短 token 光靠相似度一定會誤判（第一版就把一句正常的校正擋掉了）。
+        for w in orig_words - new_words:
+            if len(w) < 4 or w in protected or w in _COMMON_WORDS:
+                continue
+            for p in protected:
+                if len(p) >= 3 and p not in new_words and \
+                        difflib.SequenceMatcher(None, w, p).ratio() >= _GARBLED_TERM_RATIO:
+                    return False
+    # 中日文人名：_protected_terms 只看得到拉丁字母，姓＋職稱要另外擋
+    if _name_title_damaged(original, corrected):
+        return False
     # 行內插入的雜音標記（整行雜音只能是 "[雜音]"）
     if "[雜音]" in corrected:
         return False
