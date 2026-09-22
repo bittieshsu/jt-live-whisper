@@ -140,6 +140,57 @@ def _load_allowed_ips(cfg):
     _allowed_nets = nets
 
 
+# 反向代理：**預設完全不信任 `X-Forwarded-For`**。
+# `_is_local()` 只看連線來源，放到代理後面時每一個請求看起來都來自代理本身
+# ＝本機，那四個「僅限本機」的設定頁就等於對全世界開放。
+# 要用代理就必須把代理的位址明確列進 `webui.trusted_proxies`，
+# 只有來自清單內的連線才會去看 XFF，而且取的是**最右邊那個非信任的跳點**
+# （最左邊是客戶端自己填的，可以偽造）。
+_trusted_proxies = []
+_tls_cfg = {"enabled": False, "cert": "", "key": "", "hosts": []}
+
+
+def _load_proxy_and_tls(cfg):
+    import ipaddress
+    global _trusted_proxies
+    w = cfg.get("webui") or {}
+    nets = []
+    for item in (w.get("trusted_proxies") or []):
+        try:
+            nets.append(ipaddress.ip_network(str(item).strip(), strict=False))
+        except ValueError:
+            print(f"[WebUI] 略過無法解析的 trusted_proxies 項目：{item}", flush=True)
+    _trusted_proxies = nets
+    _tls_cfg["enabled"] = bool(w.get("tls", False))
+    if os.environ.get("JTLW_WEBUI_TLS", "") in ("1", "on", "true"):
+        _tls_cfg["enabled"] = True
+    _tls_cfg["cert"] = w.get("tls_cert") or str(BASE_DIR / "webui_tls" / "server.crt")
+    _tls_cfg["key"] = w.get("tls_key") or str(BASE_DIR / "webui_tls" / "server.key")
+    _tls_cfg["hosts"] = w.get("tls_hosts") or []
+
+
+def _client_ip(request) -> str:
+    """真正的客戶端位址。只有連線來自信任的代理時才看 X-Forwarded-For。"""
+    peer = request.client.host if request.client else ""
+    if not _trusted_proxies or not peer:
+        return peer
+    import ipaddress
+    try:
+        if not any(ipaddress.ip_address(peer) in n for n in _trusted_proxies):
+            return peer          # 不是從信任的代理來的，XFF 一律不採信
+    except ValueError:
+        return peer
+    xff = request.headers.get("x-forwarded-for", "")
+    # 由右往左找第一個不是信任代理的位址——左邊的可以被客戶端偽造
+    for part in reversed([x.strip() for x in xff.split(",") if x.strip()]):
+        try:
+            if not any(ipaddress.ip_address(part) in n for n in _trusted_proxies):
+                return part
+        except ValueError:
+            continue
+    return peer
+
+
 def _ip_allowed(client) -> bool:
     """來源 IP 是否在允許清單內；清單為空時不限制"""
     if not _allowed_nets:
@@ -185,6 +236,7 @@ def _load_passwords():
                 _webui_passwords[role] = (wp.get(f"{role}_sha256")
                                           or _pw_hash(wp.get(role, "")))
             _load_allowed_ips(cfg)
+            _load_proxy_and_tls(cfg)
         except Exception as e:
             # **不可以靜默吞掉**：設定讀失敗時「密碼是空的」與「允許清單是空的」
             # 都代表安全設定沒有生效，而兩者的預設都是比較寬鬆的那一邊。
@@ -195,8 +247,13 @@ def _load_passwords():
 _load_passwords()
 
 def _is_local(request) -> bool:
-    """判斷是否為本機連線"""
-    client = request.client.host if request.client else ""
+    """判斷是否為本機連線。
+
+    **走 `_client_ip()` 而不是直接讀 `request.client.host`**：
+    放到反向代理後面時，每個請求的來源都會是代理本身＝看起來像本機，
+    那四個「僅限本機」的設定頁（裡面有密碼與轉發 token）就等於對外開放。
+    """
+    client = _client_ip(request)
     return client in ("127.0.0.1", "::1", "localhost", "0.0.0.0")
 
 def _check_auth(request, level="read") -> str:
@@ -245,7 +302,7 @@ async def _ip_allowlist(request, call_next):
     """來源 IP 限制。**擋在所有路由之前**——逐個端點加檢查一定會漏，
     而漏掉的那個就是出事的那個（2026-09-22 盤點時發現四個端點沒有任何防護）。
     """
-    client = request.client.host if request.client else ""
+    client = _client_ip(request)
     if not _ip_allowed(client):
         return JSONResponse({"ok": False, "error": "來源位址不在允許清單內"},
                             status_code=403)
@@ -618,7 +675,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.21.3",
+        "last": last, "version": "2.21.4",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1255,11 +1312,35 @@ async def websocket_endpoint(ws: WebSocket):
             connected_clients.remove(ws)
 
 
+def _tls_hosts_default():
+    """沒指定 tls_hosts 時，把本機能對外的位址都寫進憑證的 SAN。
+
+    少了這些，別人用 IP 連進來會驗不過憑證（憑證裡沒有那個 IP），
+    症狀是「連得上但一直說憑證無效」——jtlw_api 那邊踩過同一個坑。
+    """
+    import socket as _s
+    hosts = {"localhost", "127.0.0.1"}
+    try:
+        hosts.add(_s.gethostname())
+    except Exception:
+        pass
+    try:
+        sk = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        sk.connect(("192.0.2.1", 1))     # 不會真的送封包，只問核心用哪個 IP 出去
+        hosts.add(sk.getsockname()[0])
+        sk.close()
+    except Exception:
+        pass
+    return sorted(hosts)
+
+
 # ─── 主程式 ──────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="jt-live-whisper WebUI")
     parser.add_argument("--port", type=int, default=WEB_PORT, help=f"HTTP port (預設 {WEB_PORT})")
     parser.add_argument("--no-browser", action="store_true", help="不自動開啟瀏覽器")
+    parser.add_argument("--no-tls", action="store_true",
+                        help="即使設定開了 TLS 也強制用 HTTP（排除憑證問題時用）")
     args = parser.parse_args()
 
     # 檢查 port 是否被佔用
@@ -1307,15 +1388,46 @@ def main():
         else:
             _s.close()
 
+    # ── TLS ──
+    # **預設關閉**：既有部署升級上來時網址不會從 http 變成 https，
+    # 書籤、內部連結、別人寫好的腳本都不會壞。要加密必須明確打開。
+    ssl_kw, scheme = {}, "http"
+    if _tls_cfg["enabled"] and not args.no_tls:
+        try:
+            sys.path.insert(0, str(BASE_DIR))
+            import jtlw_tls
+            hosts = list(_tls_cfg["hosts"]) or _tls_hosts_default()
+            created = jtlw_tls.ensure_self_signed(_tls_cfg["cert"], _tls_cfg["key"],
+                                                  hosts, subject="/CN=jt-live-whisper WebUI")
+            ssl_kw = {"ssl_certfile": _tls_cfg["cert"], "ssl_keyfile": _tls_cfg["key"]}
+            scheme = "https"
+            print(f"\n  TLS：{'自簽（本次新產生）' if created else '沿用既有憑證'}"
+                  f"　{_tls_cfg['cert']}")
+            print(f"    有效期限：{jtlw_tls.not_after(_tls_cfg['cert'])}")
+            print(f"    SHA-256 指紋：{jtlw_tls.fingerprint(_tls_cfg['cert'])}")
+            if created:
+                print(f"    憑證中的位址：{', '.join(hosts)}")
+                print("    （自簽憑證，瀏覽器第一次會跳警告，確認指紋後再繼續）")
+        except Exception as e:
+            # **產不出憑證就退回 HTTP，不要讓服務起不來。**
+            # 這是常駐服務，起不來等於整個功能消失；而使用者原本就是 HTTP。
+            print(f"\n  [TLS] 啟用失敗，改用 HTTP：{e}")
+            ssl_kw, scheme = {}, "http"
+
     print(f"\n  jt-live-whisper WebUI")
-    print(f"  http://localhost:{args.port}")
+    print(f"  {scheme}://localhost:{args.port}")
     print(f"  請在瀏覽器中操作\n")
+    # **一定要 flush**：systemd 下 stdout 是區塊緩衝，不 flush 的話上面這段
+    # （包含憑證指紋）會卡在緩衝區，要等之後的輸出把它填滿才一起吐出來。
+    # 管理者重啟後馬上看 journalctl 會看到「什麼都沒有」，而指紋正是那時
+    # 最需要的東西。jtlw_api 那邊踩過同一個坑（2026-09-22 修）。
+    sys.stdout.flush()
 
     # Linux 沒有圖形桌面（SSH / 伺服器）時不自動開瀏覽器，避免開出文字模式瀏覽器佔住終端機
     _headless = (sys.platform.startswith("linux")
                  and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
     if not args.no_browser and not _headless:
-        threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{args.port}")).start()
+        threading.Timer(1.0, lambda: webbrowser.open(f"{scheme}://localhost:{args.port}")).start()
 
     # Ctrl+C 強制退出（uvicorn 可能攔截 SIGINT）
     def _sigint_handler(sig, frame):
@@ -1326,7 +1438,7 @@ def main():
     signal.signal(signal.SIGINT, _sigint_handler)
 
     try:
-        uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning")
+        uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning", **ssl_kw)
     except KeyboardInterrupt:
         pass
     finally:
