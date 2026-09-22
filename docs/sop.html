@@ -59,6 +59,11 @@
       <a class="lv3" href="#4-8---input-音訊檔離線處理">4-8. --input 音訊檔離線處理</a>
       <a class="lv3" href="#4-8-台語台灣閩南語辨識">4-8. 台語（台灣閩南語）辨識</a>
       <a class="lv3" href="#4-9---diarize-講者辨識">4-9. --diarize 講者辨識</a>
+      <a class="" href="#四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</a>
+      <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
+      <a class="lv3" href="#api-key">API Key</a>
+      <a class="lv3" href="#憑證tls">憑證（TLS）</a>
+      <a class="lv3" href="#允許的來源主機">允許的來源主機</a>
       <a class="" href="#五使用流程總結">五、使用流程總結</a>
       <a class="lv3" href="#互動選單流程圖">互動選單流程圖</a>
       <a class="" href="#六常見問題">六、常見問題</a>
@@ -2284,6 +2289,85 @@ cd C:\jt-live-whisper
 <li>GPU 伺服器執行需先透過安裝腳本（<code>install.sh</code>）在伺服器安裝 resemblyzer + spectralcluster</li>
 </ul>
 <hr>
+<h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
+<p>伺服器版另外提供一組 REST API，讓別的系統送音檔進來、取回逐字稿與講者標記。</p>
+<blockquote>
+<p><strong>這個模組（<code>jtlw_api/</code>）不包含在本專案的公開發行內容裡</strong>，
+是與特定系統串接時另外部署的元件。這一節寫給已經拿到它的管理者，
+說明金鑰與憑證放在哪裡、怎麼查、怎麼換。</p>
+</blockquote>
+<p>啟動方式：</p>
+<pre><code class="language-bash">venv/bin/python -m jtlw_api --host 0.0.0.0 --port 8790
+</code></pre>
+<h3 id="金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</h3>
+<p><strong>一行指令把所有設定的位置印出來</strong>（不會啟動伺服器）：</p>
+<pre><code class="language-bash">venv/bin/python -m jtlw_api --info
+</code></pre>
+<p>會印出：設定檔路徑、資料目錄、<strong>有哪幾組金鑰</strong>（名稱、權限、雜湊前綴）、
+<strong>憑證的路徑／有效期限／SHA-256 指紋／憑證中的位址</strong>、允許的來源主機、使用的模型。</p>
+<blockquote>
+<p>服務以 systemd 常駐時，<code>ExecStart</code> 可能用 <code>--port</code> 覆蓋設定檔的埠。
+<code>--info</code> 會提醒這件事；實際在跑的埠用
+<code>systemctl cat &lt;服務名&gt; | grep ExecStart</code> 確認。</p>
+</blockquote>
+<h3 id="api-key">API Key</h3>
+<ul>
+<li>設定位置：<code>config.json</code> 的 <code>api.api_keys</code> 陣列</li>
+<li><strong>只存 sha256 雜湊，不存明文</strong> —— 伺服器被看到也還原不出金鑰，
+相對地<strong>金鑰遺失無法救回</strong>，只能重新產生</li>
+<li>格式 <code>jtlw_&lt;名稱&gt;_&lt;隨機字串&gt;</code></li>
+</ul>
+<p>產生一組新的：</p>
+<pre><code class="language-bash">venv/bin/python -m jtlw_api --new-key &lt;對方的名稱&gt;
+</code></pre>
+<p>明文<strong>只會印這一次</strong>，同時會印出要貼進 <code>config.json</code> 的片段：</p>
+<pre><code class="language-json">{&quot;client&quot;: &quot;對方的名稱&quot;, &quot;key_sha256&quot;: &quot;……&quot;}
+</code></pre>
+<p>貼進 <code>api.api_keys</code> 後重啟服務即生效。</p>
+<blockquote>
+<p><strong>交付時要講清楚「欄位裡只貼金鑰本身」</strong>。對方照文件複製
+<code>Authorization: Bearer &lt;金鑰&gt;</code> 整串貼進設定欄位是最自然的動作，
+而那會變成 <code>Bearer Bearer &lt;金鑰&gt;</code> → 401。
+這種情況我們的 401 會多回一個
+<code>details.reason = key_has_bearer_prefix</code>，指出錯的是前綴不是金鑰本身。</p>
+</blockquote>
+<h3 id="憑證tls">憑證（TLS）</h3>
+<p>API <strong>預設開啟 TLS 並自動自簽</strong>（這條連線會帶著金鑰與會議逐字稿在區網上跑）。</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody><tr>
+<td>憑證</td>
+<td><code>&lt;資料目錄&gt;/tls/server.crt</code></td>
+</tr>
+<tr>
+<td>私鑰</td>
+<td><code>&lt;資料目錄&gt;/tls/server.key</code>（權限 600，<strong>不可外流</strong>）</td>
+</tr>
+<tr>
+<td>指紋</td>
+<td><code>--info</code> 會印；或 <code>openssl x509 -in &lt;憑證&gt; -noout -fingerprint -sha256</code></td>
+</tr>
+</tbody></table>
+<ul>
+<li><strong>要交給對方的是 <code>.crt</code></strong>（公開憑證，不是密鑰）。自簽憑證對方必須主動信任，
+所以要把這個檔案與<strong>指紋</strong>一起給，讓對方核對</li>
+<li><strong>憑證裡的位址（SAN）決定能用什麼位址連</strong>。SAN 裡的 IP 必須寫成 <code>IP:</code> 而不是
+<code>DNS:</code>，寫錯的症狀是「連得上但對方一直說憑證無效」。
+要指定寫進 SAN 的位址用 <code>config.json</code> 的 <code>api.tls_hosts</code>；沒設就自動偵測本機 IP</li>
+<li><strong>已存在的憑證不會被覆蓋</strong>。要換成正式憑證，把 <code>api.tls_cert</code> / <code>api.tls_key</code>
+指到自己的檔案即可</li>
+<li><strong>換憑證之後指紋會變</strong>，必須重新交付並通知對方，否則對方會突然連不上。
+到期日用 <code>--info</code> 查得到，建議提前安排</li>
+</ul>
+<p>關閉 TLS 用 <code>--no-tls</code>（<strong>只建議本機測試</strong>）。</p>
+<h3 id="允許的來源主機">允許的來源主機</h3>
+<p><code>config.json</code> 的 <code>api.allowed_hosts</code>：只有清單內的主機能當音檔來源（防 SSRF）。
+<strong>沒設定的話送件一律被拒</strong>。</p>
 <h2 id="五使用流程總結">五、使用流程總結</h2>
 <p><strong>即時轉錄：</strong></p>
 <ol>
