@@ -104,6 +104,9 @@ class SubtitleOverlay(QWidget):
         self._tcp = None
         self._tcp_buf = b""
         self._connected = False
+        # 使用者在 CLI / 設定檔明確給了 TCP 參數時，直接走 TCP
+        self._prefer_tcp = bool(cfg.get("prefer_tcp"))
+        self._ws_fallback_done = False
         self._ws_url = cfg.get("ws_url", DEFAULT_WS_URL)
         self._tcp_host = cfg.get("tcp_host", DEFAULT_TCP_HOST)
         self._tcp_port = cfg.get("tcp_port", DEFAULT_TCP_PORT)
@@ -267,7 +270,13 @@ class SubtitleOverlay(QWidget):
         """嘗試 WebSocket 連線，失敗則回退 TCP"""
         self._reconnect_timer.stop()
 
-        if HAS_WEBSOCKET:
+        # **使用者明確指定 TCP 時就走 TCP**，不要還去試 WebSocket。
+        # 原本無條件優先 WS，而退回 TCP 的邏輯掛在 `_on_tcp_error` 上——
+        # 但 TCP 從來沒被嘗試過，那段永遠不會執行：WS 失敗走的是
+        # `_on_disconnected` → 重連計時器 → 再試 WS，無限循環。
+        # 結果是 `--tcp-host` / `--tcp-port` 在裝了 PyQt6-WebSockets 時完全無效
+        # （2026-09-23 在 macOS 實測發現；這支程式先前一直沒有實機驗過）。
+        if HAS_WEBSOCKET and not self._prefer_tcp:
             self._connect_ws()
         else:
             self._connect_tcp()
@@ -279,7 +288,10 @@ class SubtitleOverlay(QWidget):
         self._ws = QWebSocket()
         self._ws.textMessageReceived.connect(self._on_ws_message)
         self._ws.connected.connect(self._on_ws_connected)
-        self._ws.disconnected.connect(self._on_disconnected)
+        self._ws.disconnected.connect(self._on_ws_closed)
+        # **錯誤要單獨接**：只接 disconnected 的話，「連不上」與「連上後斷線」
+        # 會走同一條路，而前者應該退回 TCP、後者應該重連。
+        self._ws.errorOccurred.connect(self._on_ws_error)
         self._ws.open(QUrl(self._ws_url))
 
     def _connect_tcp(self):
@@ -305,6 +317,20 @@ class SubtitleOverlay(QWidget):
         self._reconnect_timer.stop()
         self._dst_label.setText("")
         self._src_label.setText("")
+
+    def _on_ws_closed(self):
+        """WS 斷線：連上過就重連，從來沒連上過就換 TCP 試一次"""
+        if self._connected or self._ws_fallback_done:
+            self._on_disconnected()
+            return
+        self._ws_fallback_done = True
+        if self._ws is not None:
+            self._ws.deleteLater()
+            self._ws = None
+        self._connect_tcp()
+
+    def _on_ws_error(self, _err):
+        self._on_ws_closed()
 
     def _on_disconnected(self):
         self._connected = False
@@ -770,8 +796,10 @@ def main():
         cfg["ws_url"] = args.ws_url
     if args.tcp_host:
         cfg["tcp_host"] = args.tcp_host
+        cfg["prefer_tcp"] = True
     if args.tcp_port:
         cfg["tcp_port"] = args.tcp_port
+        cfg["prefer_tcp"] = True
 
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)

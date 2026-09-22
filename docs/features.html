@@ -175,6 +175,27 @@
         <img class="shot shot-hero" src="shots/subtitle-overlay.png" loading="lazy" alt="懸浮字幕效果" />
       </div>
       <div class="feat-block">
+        <h3><span class="zh">讓別的系統把語音變成可引用的逐字稿</span><span class="en">Let other systems turn speech into citable transcripts</span></h3>
+        <p><span class="zh">jt-live-whisper 可以當成<b>語音處理的後端</b>：別的系統把錄音丟進來，拿回帶時間、帶發言者、校正過的逐字稿，再拿去做自己的事——例如產生會議摘要、決議與待辦，而每一條都指得回「誰在第幾分鐘說的」。辨識、講者分離與校正都在你自己的機器上跑，錄音與逐字稿不會離開內網。</span><span class="en">jt-live-whisper can act as a <b>speech backend</b>: another system submits a recording and gets back a timed, speaker-tagged, corrected transcript to build on — meeting summaries, decisions and action items, each traceable to who said it and when. Recognition, diarization and correction all run on your own hardware; nothing leaves your network.</span></p>
+
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th><span class="zh">拿到什麼</span><span class="en">What you get</span></th><th><span class="zh">用途</span><span class="en">Why it matters</span></th></tr></thead>
+            <tbody>
+              <tr><td><span class="zh"><b>原始辨識</b>（每段含開始 / 結束時間、語言、信心值）</span><span class="en"><b>Raw ASR</b> — per-segment start/end time, language, confidence</span></td><td><span class="zh">時間軸不會變，用來當「指回原音」的錨點</span><span class="en">A stable anchor back to the original audio</span></td></tr>
+              <tr><td><span class="zh"><b>校正後文字</b>（含「這段有沒有被改過」）</span><span class="en"><b>Corrected text</b> — with an "edited" flag per segment</span></td><td><span class="zh">簡繁、標點、專有名詞修對；改動幅度異常時自動保留原文</span><span class="en">Fixes script, punctuation and proper nouns; abnormal edits are rejected and the original kept</span></td></tr>
+              <tr><td><span class="zh"><b>發言者對應</b>（S1、S2… 代號）</span><span class="en"><b>Speaker mapping</b> — S1, S2 … labels</span></td><td><span class="zh">把每一句掛到人身上，姓名由你那邊對應</span><span class="en">Attribute every line to a person; you supply the real names</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p><span class="zh"><b>為什麼分三層而不是一份合併好的結果：</b>校正後的文字<b>會變</b>（換校正等級、更新詞彙庫重跑），而原始辨識的段號與時間<b>不會變</b>。把引用綁在段號上，重跑校正之後已經產生的決議與待辦仍然指得回同一段原音——時間若複製到校正層去，就會多一份可能不一致的資料。</span><span class="en"><b>Why three layers instead of one merged result:</b> corrected text <b>changes</b> (different correction level, updated glossary, re-runs) while the raw segment numbers and timings <b>do not</b>. Bind citations to the segment number and your decisions survive a re-correction — copying timings into the corrected layer would create a second source of truth that can drift.</span></p>
+
+        <p><span class="zh"><b>實測</b>（GPU 伺服器、28.3 分鐘的真實會議）：辨識 37 秒、講者分離 2 秒、校正 67 秒，<b>總共 1 分 52 秒跑完</b>，約為即時的 15 倍速。送件當下就開始拉檔，輪到處理時音訊已經在本機（預抓耗時 0 毫秒）。</span><span class="en"><b>Measured</b> on a real 28.3-minute meeting with a GPU server: 37 s recognition, 2 s diarization, 67 s correction — <b>1 min 52 s end to end</b>, about 15× faster than real time. Audio is pre-fetched at submission, so the fetch stage costs 0 ms.</span></p>
+
+        <p class="note"><span class="zh">整合介面（REST）是<b>另行提供的元件</b>，不包含在本專案的公開發行內容裡。已實際串接的案例：<a href="https://doc.jason.tools/" target="_blank" rel="noopener">Jason Tools 文件工具箱</a>的「會議錄音轉逐字稿」，轉好之後可一鍵交給「會議摘要」。有整合需求請透過 GitHub Issues 聯繫。</span><span class="en">The REST integration layer is a <b>separate component</b>, not part of this repository's public release. It is already in production with <a href="https://doc.jason.tools/" target="_blank" rel="noopener">Jason Tools Document Toolkit</a>, whose "meeting recording → transcript" feature hands off directly to its summarizer. Get in touch via GitHub Issues if you need it.</span></p>
+      </div>
+      <div class="feat-block">
         <h3><span class="zh">字幕轉發</span><span class="en">Subtitle forwarding</span></h3>
         <p><span class="zh">即時字幕自動轉發到通訊平台（Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / 通用 API），可同時啟用多個平台、自訂發送間隔與內容（含時間 / 原文 / 譯文）。通用 API 支援 Body 範本（<code>{{text}}</code> 變數）搭配自訂 Headers。</span><span class="en">Forwards live subtitles to Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / a custom API — multiple at once, with custom intervals and content. The custom API supports a body template (<code>{{text}}</code>) with custom headers.</span></p>
         <img class="shot shot-hero" src="shots/forward-telegram-result.png" loading="lazy" alt="Telegram 轉發效果" />
