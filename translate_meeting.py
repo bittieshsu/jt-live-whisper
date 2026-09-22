@@ -1599,7 +1599,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.21.1"
+APP_VERSION = "2.21.2"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2555,6 +2555,45 @@ _DIAR_MIN_CLUSTER_SEC = 1.6
 # 夠長的段落少於這個數量時不套用上面的門檻——短訪談可能整場都沒幾段夠長，
 # 那時寧可收下不可靠的聲紋，也不要沒有東西可以分群。
 _DIAR_MIN_CLUSTER_UNITS = 8
+
+# 講者辨識：判斷「現場幾個人」的門檻。
+# 做法是數「正規化 Laplacian 的特徵值低於這個值的個數」——近似連通塊數。
+# 取代原本的 eigengap（相鄰特徵值差最大處），因為 eigengap 取的是**全域最大**
+# 間隙，而前面幾個間隙天生就比較大（2 群 vs 3 群的差異本來就比 5 群 vs 6 群明顯），
+# 於是系統性地低估。2026-09-22 在 AMI 保留集 16 場實測：
+#   eigengap NormalizedDiff  混 13.99%（5/16 場判太少）
+#   特徵值 < 0.5             混 11.81%
+# 0.45 / 0.5 / 0.55 是平滑的平台不是尖峰（dev 10.06 / 8.57 / 8.30、
+# test 11.62 / 11.81 / 12.00），取中間值。
+#
+# **這個規則只有在短段落被排除之後才成立**：同一個方法在含短段落的聲紋上
+# 反而把中文那場從 30.51% 惡化到 48.10%（見 _diar_cluster_floor）。
+_DIAR_EIGENVALUE_TAU = 0.5
+
+
+def _diar_estimate_speakers(embeddings, refinement_opts, laplacian_type,
+                            lo=2, hi=8):
+    """估計講者人數：數 Laplacian 特徵值低於門檻的個數。
+
+    這裡要自己把 affinity → refinement → Laplacian → 特徵值再算一次，
+    因為 spectralcluster 沒有提供這個規則（它只支援 eigengap 的兩種變體），
+    而它內部那段是私有的。算兩次的成本是一次特徵分解，可接受。
+    失敗時回傳 None，呼叫端退回函式庫自己的估計。
+    """
+    try:
+        from spectralcluster import laplacian as _lap
+        from spectralcluster import utils as _u
+        import numpy as _np
+        aff = _u.compute_affinity_matrix(embeddings)
+        for name in (refinement_opts.refinement_sequence or []):
+            aff = refinement_opts.get_refinement_operator(name).refine(aff)
+        lap = _lap.compute_laplacian(aff, laplacian_type=laplacian_type)
+        ev, _vec = _u.compute_sorted_eigenvectors(lap, descend=False)
+        n = int(_np.sum(_np.asarray(ev) < _DIAR_EIGENVALUE_TAU))
+        return int(max(lo, min(hi, n)))
+    except Exception:
+        return None
+
 
 
 def _diar_cluster_floor(segments):
@@ -11431,6 +11470,14 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None):
             refinement.RefinementName.RowWiseNormalize,
         ],
     )
+
+    # 使用者沒指定人數時，用特徵值門檻自己估一個（見 _diar_estimate_speakers）。
+    # 估不出來就把 min/max 交給函式庫自己的 eigengap，行為與先前相同。
+    if num_speakers is None:
+        _est = _diar_estimate_speakers(valid_embeddings, refinement_opts,
+                                       laplacian.LaplacianType.GraphCut)
+        if _est:
+            min_clusters = max_clusters = _est
 
     try:
         clusterer = SpectralClusterer(
