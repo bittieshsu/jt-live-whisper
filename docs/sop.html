@@ -106,7 +106,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.3 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.21.4 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -2331,6 +2331,27 @@ cd C:\jt-live-whisper
 <strong>空的或沒設＝不限制</strong>（既有部署升級後行為不變）。
 <strong>本機一律放行</strong>——設錯清單不會把自己鎖在門外，因為改設定的那一頁
 本身就只有本機能開。改完要重啟服務。</p>
+<h4 id="加密連線tls">加密連線（TLS）</h4>
+<p><strong>預設關閉</strong>，升級上來的部署網址不會從 <code>http</code> 變成 <code>https</code>。要開：</p>
+<pre><code class="language-json">&quot;webui&quot;: { &quot;tls&quot;: true }
+</code></pre>
+<p>或環境變數 <code>JTLW_WEBUI_TLS=1</code>。憑證預設自簽到 <code>webui_tls/server.crt</code>
+（私鑰 600），要換成正式憑證就把 <code>tls_cert</code> / <code>tls_key</code> 指到自己的檔案，
+<strong>已存在的憑證不會被覆蓋</strong>。啟動時會印出憑證路徑、有效期限與 SHA-256 指紋。</p>
+<ul>
+<li>自簽憑證瀏覽器第一次會跳警告，<strong>確認指紋後再繼續</strong></li>
+<li>憑證裡的位址（SAN）決定能用什麼位址連，沒指定 <code>tls_hosts</code> 時自動偵測本機 IP</li>
+<li><strong>憑證產不出來時會自動退回 HTTP</strong>，不會讓服務起不來</li>
+<li>排除憑證問題時可用 <code>./start.sh --webui --no-tls</code> 強制走 HTTP</li>
+</ul>
+<h4 id="放在反向代理nginx-caddy後面">放在反向代理（nginx / Caddy）後面</h4>
+<p><strong>預設完全不信任 <code>X-Forwarded-For</code>。</strong> 不設定的話，代理後面的每個請求
+看起來都來自代理本身＝本機，那四個「僅限本機」的設定頁就等於對全世界開放。</p>
+<p>要用代理必須明確指定代理的位址：</p>
+<pre><code class="language-json">&quot;webui&quot;: { &quot;trusted_proxies&quot;: [&quot;127.0.0.1&quot;, &quot;10.0.0.5&quot;] }
+</code></pre>
+<p>只有來自清單內的連線才會去看 <code>X-Forwarded-For</code>，而且取的是<strong>最右邊那個
+非信任的跳點</strong>——最左邊是客戶端自己填的，可以偽造。</p>
 <blockquote>
 <p>⚠ <strong><code>webui.allowed_ips</code> 與 <code>api.allowed_hosts</code> 是兩件不同的事</strong>，名字很像但意思相反：</p>
 <table>
