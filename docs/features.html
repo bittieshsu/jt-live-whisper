@@ -193,7 +193,23 @@
 
         <p><span class="zh"><b>實測</b>（GPU 伺服器、28.3 分鐘的真實會議）：辨識 37 秒、講者分離 2 秒、校正 67 秒，<b>總共 1 分 52 秒跑完</b>，約為即時的 15 倍速。送件當下就開始拉檔，輪到處理時音訊已經在本機（預抓耗時 0 毫秒）。</span><span class="en"><b>Measured</b> on a real 28.3-minute meeting with a GPU server: 37 s recognition, 2 s diarization, 67 s correction — <b>1 min 52 s end to end</b>, about 15× faster than real time. Audio is pre-fetched at submission, so the fetch stage costs 0 ms.</span></p>
 
-        <p class="note"><span class="zh">整合介面（REST）是<b>另行提供的元件</b>，不包含在本專案的公開發行內容裡。已實際串接的案例：<a href="https://doc.jason.tools/" target="_blank" rel="noopener">Jason Tools 文件工具箱</a>的「會議錄音轉逐字稿」，轉好之後可一鍵交給「會議摘要」。有整合需求請透過 GitHub Issues 聯繫。</span><span class="en">The REST integration layer is a <b>separate component</b>, not part of this repository's public release. It is already in production with <a href="https://doc.jason.tools/" target="_blank" rel="noopener">Jason Tools Document Toolkit</a>, whose "meeting recording → transcript" feature hands off directly to its summarizer. Get in touch via GitHub Issues if you need it.</span></p>
+        <h3 style="margin-top:30px"><span class="zh">已上線的整合：Jason Tools 文件工具箱</span><span class="en">In production: Jason Tools Document Toolkit</span></h3>
+        <p><span class="zh"><a href="https://doc.jason.tools/" target="_blank" rel="noopener">Jason Tools 文件工具箱</a>已經接上 jt-live-whisper。使用者在工具箱裡上傳一段會議錄音，整個流程是這樣走的：</span><span class="en"><a href="https://doc.jason.tools/" target="_blank" rel="noopener">Jason Tools Document Toolkit</a> is already wired to jt-live-whisper. A user uploads a meeting recording there, and this is what happens:</span></p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th style="width:8%"></th><th><span class="zh">做什麼</span><span class="en">Step</span></th><th><span class="zh">誰做</span><span class="en">Where</span></th></tr></thead>
+            <tbody>
+              <tr><td><b>1</b></td><td><span class="zh">在「<b>會議錄音轉逐字稿</b>」上傳錄音或錄影（m4a / mp3 / wav / mp4 / mkv…）</span><span class="en">Upload audio or video to <b>Meeting recording → transcript</b></span></td><td><span class="zh">文件工具箱</span><span class="en">Toolkit</span></td></tr>
+              <tr><td><b>2</b></td><td><span class="zh">辨識、講者分離、逐字稿校正</span><span class="en">Recognition, diarization and transcript correction</span></td><td><b>jt-live-whisper</b></td></tr>
+              <tr><td><b>3</b></td><td><span class="zh">逐字稿可<b>邊聽邊看</b>：波形圖、點波形跳播、播到哪段就亮起來、每位發言者一個顏色、點代號直接改成人名</span><span class="en">Play along with the transcript: waveform, click-to-seek, the current line highlights, a colour per speaker, click a label to rename it</span></td><td><span class="zh">文件工具箱</span><span class="en">Toolkit</span></td></tr>
+              <tr><td><b>4</b></td><td><span class="zh">一鍵轉交「<b>會議摘要</b>」，產出摘要、決議、待辦、風險與章節</span><span class="en">One click to <b>Meeting summary</b> — key points, decisions, action items, risks and chapters</span></td><td><span class="zh">文件工具箱</span><span class="en">Toolkit</span></td></tr>
+              <tr><td><b>5</b></td><td><span class="zh"><b>每一條決議與待辦都指得回原文的第幾段、誰在第幾分鐘講的</b></span><span class="en"><b>Every decision and action item cites the exact segment — who said it, at what time</b></span></td><td><span class="zh">兩邊共同</span><span class="en">Both</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><span class="zh">第 5 點是整個整合的重點，也是為什麼要分三層：<b>摘要可以被驗證</b>。使用者看到一條「決議：下週前完成 A」時，點下去就能聽到當時是誰說的——而不是只能相信 LLM 沒有捏造。</span><span class="en">Step 5 is the whole point, and the reason for the three layers: <b>summaries are verifiable</b>. When a user sees "Decision: finish A by next week", they can click through and hear who actually said it — instead of having to trust that the LLM didn't invent it.</span></p>
+
+        <p class="note"><span class="zh">整合介面（REST）是<b>另行提供的元件</b>，不包含在本專案的公開發行內容裡。有整合需求請透過 GitHub Issues 聯繫。</span><span class="en">The REST integration layer is a <b>separate component</b>, not part of this repository's public release. Get in touch via GitHub Issues if you need it.</span></p>
       </div>
       <div class="feat-block">
         <h3><span class="zh">字幕轉發</span><span class="en">Subtitle forwarding</span></h3>
