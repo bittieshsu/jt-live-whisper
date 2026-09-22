@@ -185,13 +185,43 @@ cd C:\jt-live-whisper
 ./start.sh --input meeting.mp3 --summarize
 <span class="c"># 講者辨識</span>
 ./start.sh --input meeting.mp3 --diarize
-<span class="c"># 指定講者人數 + 摘要</span>
+<span class="c"># 指定講者人數（填「發言量足以辨認的人數」，不確定就不要填）</span>
 ./start.sh --input meeting.mp3 --diarize --num-speakers 3 --summarize</pre>
+    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh"><b>不確定就不要填 <code>--num-speakers</code></b>。實測 7 人會議填「7」反而最差（講者搞錯 30.15%），不填是 22.90%——發言太短的人聲紋不足以成群，硬湊一群給他會把主要講者拆散。</span><span class="en"><b>When unsure, omit <code>--num-speakers</code>.</b> On a real 7-speaker meeting, passing "7" was the worst result (30.15% speaker confusion) versus 22.90% when omitted — people who barely speak can't form a reliable voiceprint, and forcing a cluster for them fragments the main speakers.</span></p>
 
     <div class="cmd-label"><span class="zh">批次摘要</span><span class="en">Batch summary</span></div>
 <pre>./start.sh --summarize logs/英翻中_逐字稿_20260101_120000.txt</pre>
 
     <p class="note" style="margin-top:16px"><span class="zh"><strong>即時模式快捷鍵：</strong><code>Ctrl+C</code> 停止轉錄 · <code>Ctrl+P</code> 暫停 / 繼續。</span><span class="en"><strong>Live-mode shortcuts:</strong> <code>Ctrl+C</code> stop · <code>Ctrl+P</code> pause / resume.</span></p>
+
+    <div class="cmd-label" style="margin-top:28px"><span class="zh">伺服器模式（無桌面主機，Linux）</span><span class="en">Server mode (headless Linux)</span></div>
+<pre><span class="c"># 安裝：不裝桌面套件，WebUI 以 systemd 服務常駐、開機自動啟動</span>
+./install.sh --server
+
+<span class="c"># 服務管理</span>
+sudo systemctl status jt-live-whisper-webui
+sudo systemctl restart jt-live-whisper-webui
+journalctl -u jt-live-whisper-webui -f
+
+<span class="c"># 環境診斷（相依套件、音訊、GPU 伺服器連線）</span>
+./install.sh --doctor
+<span class="c"># 升級（從 GitHub 拉最新版，會自動重啟服務）</span>
+./install.sh --upgrade</pre>
+    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh">安裝完成時會<b>產生一組遠端管理密碼並顯示一次</b>，請當下記下來——設定檔裡只存 sha256 雜湊，遺失只能重設。</span><span class="en">The installer <b>prints a generated admin password once</b> — write it down. Only its SHA-256 hash is stored; if lost it must be reset.</span></p>
+
+    <div class="cmd-label" style="margin-top:22px"><span class="zh">伺服器模式的安全設定</span><span class="en">Hardening server mode</span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th><span class="zh">設定（config.json）</span><span class="en">Setting (config.json)</span></th><th><span class="zh">作用</span><span class="en">Effect</span></th></tr></thead>
+        <tbody>
+          <tr><td><code>webui.allowed_ips</code></td><td><span class="zh">只允許清單內的來源連進來，支援 CIDR（如 <code>["192.168.0.0/24"]</code>）。<b>空的＝不限制</b>，本機一律放行。</span><span class="en">Only listed sources may connect; CIDR supported. <b>Empty = unrestricted</b>; localhost always allowed.</span></td></tr>
+          <tr><td><code>webui.tls</code></td><td><span class="zh">加密連線，憑證預設自簽，可用 <code>tls_cert</code> / <code>tls_key</code> 換成正式憑證。<b>預設關閉</b>，升級不會把既有網址從 http 變成 https。</span><span class="en">Encrypts the connection with a self-signed cert by default; swap in your own via <code>tls_cert</code> / <code>tls_key</code>. <b>Off by default</b> so upgrades never change your URL.</span></td></tr>
+          <tr><td><code>webui.trusted_proxies</code></td><td><span class="zh">放在 nginx / Caddy 後面時必填。<b>不設定就完全不信任 <code>X-Forwarded-For</code></b>——否則代理後面的每個請求都會被當成本機。</span><span class="en">Required behind nginx / Caddy. <b>Without it <code>X-Forwarded-For</code> is ignored entirely</b>, otherwise every proxied request would look local.</span></td></tr>
+          <tr><td><code>webui_passwords</code></td><td><span class="zh">遠端唯讀 / 管理密碼，只存 sha256 雜湊。安全設定、關鍵字、懸浮字幕、字幕轉發四頁<b>一律只有本機能改</b>。</span><span class="en">Remote read / admin passwords, stored as SHA-256 only. The four settings pages are <b>local-only, always</b>.</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:13.5px;color:var(--muted);margin:8px 0 0"><span class="zh">要從別台電腦改那四頁設定，用 SSH 通道即可，不必把管理介面暴露在網路上：<code>ssh -L 19781:127.0.0.1:19781 帳號@伺服器</code>，然後瀏覽器開 <code>http://127.0.0.1:19781</code>。</span><span class="en">To reach the local-only pages from another machine, tunnel instead of exposing the UI: <code>ssh -L 19781:127.0.0.1:19781 user@server</code>, then open <code>http://127.0.0.1:19781</code>.</span></p>
   </div>
 </section>
 
