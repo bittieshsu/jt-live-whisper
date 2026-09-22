@@ -307,8 +307,8 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
   <div class="sec" id="rSecurity" style="display:none">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-linecap="round"/></svg>安全設定</div>
     <div class="sec-hint">設定遠端存取密碼。本機（localhost）存取不需密碼。</div>
-    <div class="fg"><label>唯讀密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwRead" placeholder="空白 = 不需密碼即可觀看字幕" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwRead',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">遠端觀看即時字幕用，不能操作設定</div></div>
-    <div class="fg"><label>管理密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwAdmin" placeholder="空白 = 不啟用遠端管理" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwAdmin',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="pwAdminHint">未設定 = 遠端無法啟動/停止/切換裝置</div></div>
+    <div class="fg"><label>唯讀密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwRead" placeholder="空白 = 不需密碼即可觀看字幕" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwRead',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button><button type="button" class="test-btn" id="pwClearRead" onclick="clearPw('read')" style="flex-shrink:0;display:none" title="清除已設定的密碼">清除</button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">遠端觀看即時字幕用，不能操作設定</div></div>
+    <div class="fg"><label>管理密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwAdmin" placeholder="空白 = 不啟用遠端管理" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwAdmin',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button><button type="button" class="test-btn" id="pwClearAdmin" onclick="clearPw('admin')" style="flex-shrink:0;display:none" title="清除已設定的密碼">清除</button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="pwAdminHint">未設定 = 遠端無法啟動/停止/切換裝置</div></div>
     <div style="margin-top:8px"><button class="test-btn" onclick="savePw()" style="display:inline-flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>儲存密碼</button><span id="pwResult" style="margin-left:8px;font-size:12px"></span></div>
   </div>
   <!-- 關鍵字通知（僅本機顯示）-->
@@ -578,7 +578,14 @@ async function loadCfg(){
   if(c.is_local){
     _cfgStep('載入安全設定...');
     $('rSecurity').style.display='';
-    try{const pr=await fetch('/api/passwords');if(pr.ok){const pw=await pr.json();$('iPwRead').value=pw.read||'';$('iPwAdmin').value=pw.admin||''}}catch(e){}
+    // 密碼只存雜湊、不回傳，所以欄位一律留白，用 placeholder 表達目前狀態
+    try{const pr=await fetch('/api/passwords');if(pr.ok){const pw=await pr.json();
+      $('iPwRead').value='';$('iPwAdmin').value='';
+      $('iPwRead').placeholder=pw.read_set?'已設定（輸入新密碼以變更）':'空白 = 不需密碼即可觀看字幕';
+      $('iPwAdmin').placeholder=pw.admin_set?'已設定（輸入新密碼以變更）':'空白 = 不啟用遠端管理';
+      $('pwClearRead').style.display=pw.read_set?'':'none';
+      $('pwClearAdmin').style.display=pw.admin_set?'':'none';
+    }}catch(e){}
     _cfgStep('載入關鍵字通知設定...');
     $('rKeyword').style.display='';
     try{const kr=await fetch('/api/keyword-config',{headers:_authHeaders()});if(kr.ok){const kc=await kr.json();_loadKwConfig(kc)}}catch(e){}
@@ -1186,9 +1193,24 @@ async function testFwd(){
   const allOk=results.every(r=>r.includes('✓'));
   $('fwdResult').innerHTML='<span style="color:var('+(allOk?'--green':'--red')+')">'+esc(results.join('、'))+'</span>';
 }
+// 清除密碼：**明確送空字串**。畫面上的欄位一律是空的（我們不回傳密碼），
+// 所以「留空」不能當成清除——那會讓「只改其中一個」把另一個一起清掉。
+async function clearPw(role){
+  if(!confirm('確定要清除這組密碼嗎？清除後遠端將'+(role==='admin'?'無法操作':'不需密碼即可觀看')+'。'))return;
+  const body={};body[role]='';
+  try{const res=await fetch('/api/save-passwords',{method:'POST',headers:_authHeaders(),body:JSON.stringify(body)});
+    const d=await res.json();
+    $('pwResult').innerHTML=d.ok?'<span style="color:var(--green)">已清除</span>':'<span style="color:var(--red)">'+esc(d.error)+'</span>';
+    if(d.ok){$('pwClear'+(role==='read'?'Read':'Admin')).style.display='none';
+      $(role==='read'?'iPwRead':'iPwAdmin').placeholder=role==='read'?'空白 = 不需密碼即可觀看字幕':'空白 = 不啟用遠端管理'}
+  }catch(e){$('pwResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
+}
 async function savePw(){
+  // 只送有填的欄位。空白＝不更動（要清除請按旁邊的「清除」）
   const r=$('iPwRead').value.trim(),a=$('iPwAdmin').value.trim();
-  try{const res=await fetch('/api/save-passwords',{method:'POST',headers:_authHeaders(),body:JSON.stringify({read:r,admin:a})});const d=await res.json();$('pwResult').innerHTML=d.ok?'<span style="color:var(--green)">已儲存</span>':'<span style="color:var(--red)">'+esc(d.error)+'</span>'}catch(e){$('pwResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
+  const payload={};if(r)payload.read=r;if(a)payload.admin=a;
+  if(!r&&!a){$('pwResult').innerHTML='<span style="color:var(--text-dim)">沒有變更</span>';return}
+  try{const res=await fetch('/api/save-passwords',{method:'POST',headers:_authHeaders(),body:JSON.stringify(payload)});const d=await res.json();$('pwResult').innerHTML=d.ok?'<span style="color:var(--green)">已儲存</span>':'<span style="color:var(--red)">'+esc(d.error)+'</span>'}catch(e){$('pwResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
 }
 async function _tryAuth(){
   try{
