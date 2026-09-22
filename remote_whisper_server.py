@@ -19,6 +19,7 @@ Author: Jason Cheng (Jason Tools)
 import argparse
 import asyncio
 import json
+import math
 import os
 import queue
 import re
@@ -40,6 +41,76 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
+
+# ── 版本 ──
+# **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
+# 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
+# v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
+SERVER_VERSION = "2.21.1"
+
+# 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
+# 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
+_DIAR_MIN_CLUSTER_SEC = 1.6
+_DIAR_MIN_CLUSTER_UNITS = 8
+
+
+def _diar_cluster_floor(segments):
+    """講者辨識：決定多長的段落才進分群，回傳秒數門檻。
+
+    抽成獨立函式是為了測得到——判斷埋在 _diarize_segments 裡面時只能比對
+    原始碼字串，而那種斷言會被註解騙過（2026-09-21 踩過，見 test_refinement_alive）。
+
+    < 1.6s 的段落聲紋是 resemblyzer 補零算出來的，實測標錯率 63~67%；
+    1.6~4.0s 只有 0~15%。但夠長的段落太少時（短訪談、幾句話的錄音）
+    一律套門檻會變成沒東西可以分群，那時寧可全收。
+    """
+    long_n = sum(1 for s in segments
+                 if s["end"] - s["start"] >= _DIAR_MIN_CLUSTER_SEC)
+    return _DIAR_MIN_CLUSTER_SEC if long_n >= _DIAR_MIN_CLUSTER_UNITS else 0.3
+
+
+# 更新用的共用密鑰。**沒有設定就完全不開放更新端點**（預設關閉不是預設開啟）：
+# 這個端點本質上是遠端程式碼執行，內網不是空的。
+UPDATE_TOKEN = os.environ.get("JT_WHISPER_UPDATE_TOKEN", "").strip()
+# 更新用的 body 上限。`await request.body()` 會把整包讀進記憶體，
+# 沒有上限的話一個大 POST 就能把這台機器的記憶體吃光。
+UPDATE_MAX_BYTES = 8 * 1024 * 1024
+UPDATE_KEEP_BACKUPS = 5
+
+
+def _version_tuple(v):
+    """'2.21.1' → (2, 21, 1)；解析不動的部分當 0，未知版本視為最舊"""
+    out = []
+    for part in str(v or "0").split("."):
+        digits = "".join(c for c in part if c.isdigit())
+        out.append(int(digits) if digits else 0)
+    while len(out) < 3:
+        out.append(0)
+    return tuple(out[:3])
+
+
+def _parse_server_version(path):
+    """從一份 server.py 原始碼裡讀出 SERVER_VERSION"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("SERVER_VERSION"):
+                    return line.split("=", 1)[1].strip().strip('"\'')
+    except Exception:
+        pass
+    return "0"
+
+
+def _prune_backups(me, keep=UPDATE_KEEP_BACKUPS):
+    """只留最近幾份備份，避免長年累積把磁碟吃掉"""
+    import glob
+    try:
+        old = sorted(glob.glob(me + ".bak-*"))
+        for f in old[:-keep]:
+            os.remove(f)
+    except OSError:
+        pass
+
 
 app = FastAPI(title="jt-whisper-server")
 
@@ -116,7 +187,7 @@ try:
         _w.filterwarnings("ignore", message="pkg_resources is deprecated")
         from resemblyzer import VoiceEncoder, preprocess_wav  # noqa: F401
     from spectralcluster import SpectralClusterer  # noqa: F401
-    from spectralcluster import refinement  # noqa: F401
+    from spectralcluster import refinement, laplacian  # noqa: F401
     _HAS_DIARIZE = True
     print(f"[講者辨識] resemblyzer + spectralcluster 可用 (device={_torch_device})")
 except ImportError:
@@ -130,77 +201,63 @@ def _diarize(wav_path, segments, num_speakers=None):
     segments: list of dict，每個含 start, end, text
     回傳: list of int（講者編號 0-based），失敗回傳 None
     """
-    from collections import Counter
     from resemblyzer import VoiceEncoder, preprocess_wav
-    from spectralcluster import SpectralClusterer, refinement
+    from spectralcluster import SpectralClusterer, refinement, laplacian
+    from spectralcluster import utils as sc_utils
 
     if not segments:
         return None
 
-    # 載入音訊
-    wav = preprocess_wav(wav_path)
-    sr = 16000  # resemblyzer preprocess_wav 輸出 16kHz
+    # 載入音訊。
+    # **不可以用 preprocess_wav(wav_path) 整檔載入**：它除了重取樣還會做 VAD 靜音
+    # 修剪並「刪掉」那些樣本（安裝的版本連 trim_silence 參數都沒有，一定會修），
+    # 但下面是用**原始時間軸**去切段落——實測 AMI 一場 18.5 分鐘的會議被刪掉
+    # 31.9%，檔尾偏移將近 6 分鐘，等於拿會議別處的聲音去比對。
+    # 用戶端 v2.20.0 已修，但伺服器這份是獨立副本，2026-09-21 才發現沒跟到
+    # （有 GPU 伺服器時預設就走這條路徑，等於多數使用者一直拿到壞的結果）。
+    sr = 16000
+    try:
+        import librosa
+        wav, _ = librosa.load(wav_path, sr=sr, mono=True)
+        _per_segment_trim = True
+    except Exception:
+        wav = preprocess_wav(wav_path)      # 退而求其次，維持舊行為
+        _per_segment_trim = False
 
     # 初始化聲紋編碼器（有 GPU 就用 GPU）
     encoder = VoiceEncoder(_torch_device)
     print(f"[diarize] 提取聲紋（{len(segments)} 段, device={_torch_device}）")
 
-    # ── 合併連續短段落（< 0.8s）再提取 embedding ──
-    merge_groups = []
-    i = 0
-    while i < len(segments):
-        duration = segments[i]["end"] - segments[i]["start"]
-        if duration < 0.8:
-            group = [i]
-            j = i + 1
-            while j < len(segments) and (segments[j]["end"] - segments[j]["start"]) < 0.8:
-                group.append(j)
-                j += 1
-            if len(group) > 1:
-                merge_groups.append(group)
-                i = j
-                continue
-        i += 1
-    merged_set = set()
-    merged_emb_map = {}
-    for group in merge_groups:
-        combined_audio = np.concatenate([
-            wav[int(segments[idx]["start"] * sr):int(segments[idx]["end"] * sr)]
-            for idx in group
-        ])
-        if len(combined_audio) >= int(0.3 * sr):
-            try:
-                emb = encoder.embed_utterance(combined_audio)
-                for idx in group:
-                    merged_emb_map[idx] = emb
-                    merged_set.add(idx)
-            except Exception:
-                pass
+    # ── 只有夠長的段落才進分群 ──
+    # 1.6 秒是 resemblyzer 的 partial utterance 長度：短於它時 embed_utterance
+    # 會把音訊補零到 1.6s 再算，那個聲紋不可靠。2026-09-22 用有標準答案的中文
+    # 會議量到——標錯率 <1.0s 63.6%、1.0~1.6s 66.9%，而 1.6~2.5s 只有 14.8%、
+    # 2.5~4.0s 是 0.0%。短段落只佔 24% 的秒數卻貢獻 64% 的「講者搞錯」，
+    # 而且它們一起進 affinity 矩陣，把長段落的分群也一起帶壞。
+    # 原本的兩個補救（<0.5s 撐成 0.5s 視窗、連續 <0.8s 合併共用一個 embedding）
+    # 方向是反的：合併等於強迫相鄰短段落同一個講者，搶話時它們多半不是。
+    cluster_floor = _diar_cluster_floor(segments)
 
     # 逐段提取聲紋
     embeddings = []
     valid_indices = []
 
     for i, seg in enumerate(segments):
-        if i in merged_emb_map:
-            embeddings.append(merged_emb_map[i])
-            valid_indices.append(i)
+        duration = seg["end"] - seg["start"]
+        if duration < cluster_floor:
+            embeddings.append(None)
             continue
 
-        start_sample = int(seg["start"] * sr)
-        end_sample = int(seg["end"] * sr)
-
-        duration = seg["end"] - seg["start"]
-        if duration < 0.5:
-            mid = (seg["start"] + seg["end"]) / 2
-            start_sample = max(0, int((mid - 0.25) * sr))
-            end_sample = min(len(wav), int((mid + 0.25) * sr))
-
-        audio_slice = wav[start_sample:end_sample]
+        audio_slice = wav[int(seg["start"] * sr):int(seg["end"] * sr)]
 
         if len(audio_slice) < int(0.3 * sr):
             embeddings.append(None)
             continue
+        if _per_segment_trim:
+            audio_slice = preprocess_wav(audio_slice, source_sr=sr)
+            if len(audio_slice) < int(0.3 * sr):
+                embeddings.append(None)
+                continue
 
         try:
             if duration >= 1.6:
@@ -230,11 +287,23 @@ def _diarize(wav_path, segments, num_speakers=None):
     max_clusters = 8 if num_speakers is None else num_speakers
 
     refinement_opts = refinement.RefinementOptions(
-        gaussian_blur_sigma=1,
-        p_percentile=0.95,
+        # gaussian_blur_sigma=0：不要模糊。高斯模糊假設相鄰列是時間上連續的等寬
+        # 視窗，但我們送的是「已合併的講者連續發言」，模糊會抹掉講者交界。
+        # 18 場 AMI 實測：blur=1 → DER 43.60%、blur=0 → 16.25%
+        gaussian_blur_sigma=0,
+        p_percentile=0.98,
         thresholding_soft_multiplier=0.01,
         thresholding_type=refinement.ThresholdType.RowMax,
         symmetrize_type=refinement.SymmetrizeType.Max,
+        # 沒有這個參數，上面五個全是死的：預設 None 時整組 refinement 一步都不跑
+        refinement_sequence=[
+            refinement.RefinementName.CropDiagonal,
+            refinement.RefinementName.GaussianBlur,
+            refinement.RefinementName.RowWiseThreshold,
+            refinement.RefinementName.Symmetrize,
+            refinement.RefinementName.Diffuse,
+            refinement.RefinementName.RowWiseNormalize,
+        ],
     )
 
     try:
@@ -242,6 +311,16 @@ def _diarize(wav_path, segments, num_speakers=None):
             min_clusters=min_clusters,
             max_clusters=max_clusters,
             refinement_options=refinement_opts,
+            # 不指定時用 affinity 直接分解，特徵值間隙幾乎總是落在 k=2
+            laplacian_type=laplacian.LaplacianType.GraphCut,
+            # NormalizedDiff：預設的 Ratio 是「後一個特徵值 / 前一個」，分母很靠近
+            # 0 時比值爆大，於是永遠挑最小的 k。會議越長段落越多、譜越平滑，偏誤
+            # 越嚴重——中文 37 分鐘那場 1043 段一律吐 k=2（實際 7 人），混淆 40.20%；
+            # 改用 NormalizedDiff 後判 3 群、22.90%。
+            # **兩個改動必須一起上**（見上面 cluster_floor）。真實 ASR 切段實測：
+            # 只換 eigengap 幾乎沒有作用；只換門檻會讓英文 ES2011a 的混淆率
+            # 由 12.44% 惡化到 23.29%。一起上才是 12.44% → 9.47%。
+            eigengap_type=sc_utils.EigenGapType.NormalizedDiff,
         )
         cluster_labels = clusterer.predict(valid_embeddings)
     except Exception as e:
@@ -284,20 +363,12 @@ def _diarize(wav_path, segments, num_speakers=None):
         else:
             speaker_labels[i] = last_valid
 
-    # 多數決平滑（窗口 5）
-    changed = 0
-    smoothed = list(speaker_labels)
-    for i in range(len(smoothed)):
-        start = max(0, i - 2)
-        end = min(len(smoothed), i + 3)
-        window = speaker_labels[start:end]
-        majority = Counter(window).most_common(1)[0][0]
-        if speaker_labels[i] != majority:
-            smoothed[i] = majority
-            changed += 1
-    speaker_labels = smoothed
-    if changed > 0:
-        print(f"[diarize] 平滑修正 {changed} 段")
+    # 多數決平滑已移除（2026-09-21）。
+    # 它強制每段採用前後窗口內的多數講者，是當年分群壞掉（未知人數時一律吐 2 群）
+    # 時加的補丁。分群修好之後，它變成純粹的傷害，而且**窗口越大越差**：
+    #   真實 ASR 段落、AMI 3 場平均 DER —— 不平滑 16.76%、窗口3 25.05%、
+    #   窗口5（原設定）30.38%、窗口7 35.12%
+    # 單調惡化代表問題出在這個啟發式本身，不是窗口大小沒調好。
 
     # 按首次出現順序重新編號
     seen = {}
@@ -377,8 +448,18 @@ _FW_KW_LOOSE = dict(
     condition_on_previous_text=False,
     temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
     compression_ratio_threshold=2.4,
-    log_prob_threshold=None,
-    no_speech_threshold=0.3,
+    # **這兩個一定要一起看**（2026-09-22 修）：faster-whisper 的判斷是
+    #     should_skip = no_speech_prob > no_speech_threshold
+    #     if log_prob_threshold is not None and avg_logprob > log_prob_threshold:
+    #         should_skip = False        ← 唯一的救援
+    #     if should_skip: 整個 30 秒視窗直接丟掉
+    # **門檻調低是「更容易跳過」，方向與「寬鬆」相反**；原本又把 log_prob_threshold
+    # 設成 None 關掉救援，於是它變成唯一且嚴苛的閘門。large-v3 因此吐 0 段
+    # （turbo 的 no_speech_prob 剛好低一點才躲過，所以 v2.16.3 至今沒被發現）。
+    # 實測同一份低音量中文會議：0.3/None → 0 段、0.6/-2.0 → 100 段；
+    # turbo 兩者皆 92 段（無回歸）。-2.0 比嚴格模式的 -1.0 寬，低信心的字仍留得住。
+    log_prob_threshold=-2.0,
+    no_speech_threshold=0.6,
     repetition_penalty=1.05,
     word_timestamps=False,
 )
@@ -408,7 +489,12 @@ def _transcribe_faster_stream(wav_path, model_size, language, noisy=False):
     for seg in segments_iter:
         text = seg.text.strip()
         if text:
-            yield {"start": round(seg.start, 3), "end": round(seg.end, 3), "text": text}, info.duration
+            out = {"start": round(seg.start, 3), "end": round(seg.end, 3), "text": text,
+                   "language": info.language}
+            # 平均對數機率換算成 0～1，供用戶端（REST API 的 confidence）相對比較用
+            if getattr(seg, "avg_logprob", None) is not None:
+                out["confidence"] = round(min(1.0, max(0.0, math.exp(seg.avg_logprob))), 4)
+            yield out, info.duration
 
 
 class _ProgressCapture:
@@ -473,8 +559,10 @@ def _transcribe_openai(wav_path, model_size, language, progress_q=None, noisy=Fa
             condition_on_previous_text=False,
             temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
             compression_ratio_threshold=2.4,
-            logprob_threshold=None,
-            no_speech_threshold=0.3,
+            # 與 _FW_KW_LOOSE 同一個修正：門檻調低＝更容易整段跳過，
+            # 而 logprob_threshold=None 會關掉唯一的救援（openai-whisper 同邏輯）
+            logprob_threshold=-2.0,
+            no_speech_threshold=0.6,
         )
     else:
         _ow_kw = dict(
@@ -516,11 +604,153 @@ def health():
     """健康檢查"""
     return {
         "status": "ok",
+        "version": SERVER_VERSION,
         "gpu": _device == "cuda",
         "device": _device,
         "backend": _backend,
         "diarize": _HAS_DIARIZE,
+        # 用戶端用這個判斷「能不能自動更新」，不必試了才知道
+        "can_update": bool(UPDATE_TOKEN),
     }
+
+
+@app.post("/v1/admin/update")
+async def admin_update(request: Request):
+    """用新版的 server.py 取代自己，驗證通過後重啟。
+
+    **這個端點會執行對方送來的程式碼。** 下面的把關分成兩類，不要混為一談：
+
+      「誰可以更新」——只有簽章這一關。沒有密鑰就完全不開放。
+      「更新的東西會不會把服務弄死」——校驗碼、語法、selftest、忙碌檢查。
+        這些擋的是**壞掉的**更新，**擋不住惡意的**更新（selftest 本身就會
+        執行上傳的程式碼）。密鑰是唯一的安全邊界，請當成密碼保管。
+
+    簽章用 HMAC 而不是直接送密鑰：這條連線是 HTTP 不是 HTTPS，
+    直接送 Bearer token 的話，任何能側錄封包的人都拿得到可重複使用的憑證，
+    等於拿到這台機器的任意程式碼執行權。HMAC 讓側錄者只能重放
+    「同一份內容」（無害——那就是同一支程式），無法偽造新的 payload。
+    做法與 jtlw_api 的 webhook 簽章一致：HMAC-SHA256 over "{timestamp}.{body}"。
+    """
+    import hashlib
+    import hmac as _hmac
+    import subprocess
+
+    client_ip = request.client.host if request.client else "?"
+
+    def _deny(code, status, **extra):
+        print(f"[更新] 拒絕 {code} 來自 {client_ip}", flush=True)
+        return JSONResponse({"error": code, **extra}, status_code=status)
+
+    if not UPDATE_TOKEN:
+        return _deny("update_disabled", 403,
+                     detail="伺服器未設定 JT_WHISPER_UPDATE_TOKEN")
+
+    # 先看 Content-Length 再決定要不要讀。await request.body() 會把整包讀進
+    # 記憶體，沒有上限的話一個大 POST 就能把這台機器的記憶體吃光。
+    try:
+        clen = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        clen = 0
+    if clen > UPDATE_MAX_BYTES:
+        return _deny("payload_too_large", 413,
+                     detail=f"上限 {UPDATE_MAX_BYTES} bytes，收到 {clen}")
+
+    ts = (request.headers.get("x-jtw-timestamp") or "").strip()
+    sig = (request.headers.get("x-jtw-signature") or "").strip()
+    if not ts or not sig:
+        return _deny("unauthorized", 401, detail="缺少簽章標頭")
+    try:
+        skew = abs(time.time() - float(ts))
+    except ValueError:
+        return _deny("unauthorized", 401, detail="時間戳格式錯誤")
+    if skew > 300:
+        # 限制重放窗口；兩邊時鐘差太多也會落在這裡
+        return _deny("unauthorized", 401, detail=f"時間戳超出容許範圍（差 {int(skew)}s）")
+
+    body = await request.body()
+    if len(body) > UPDATE_MAX_BYTES:
+        return _deny("payload_too_large", 413, detail=f"上限 {UPDATE_MAX_BYTES} bytes")
+
+    expect = "v1=" + _hmac.new(UPDATE_TOKEN.encode("utf-8"),
+                               f"{ts}.".encode("utf-8") + body,
+                               hashlib.sha256).hexdigest()
+    if not _hmac.compare_digest(sig, expect):
+        return _deny("unauthorized", 401, detail="簽章不符")
+
+    want_sha = (request.headers.get("x-content-sha256") or "").strip().lower()
+    got_sha = hashlib.sha256(body).hexdigest()
+    if want_sha and want_sha != got_sha:
+        return _deny("checksum_mismatch", 400, expected=want_sha, actual=got_sha)
+
+    if _get_active_task() is not None:
+        return _deny("busy", 409, detail="有作業進行中，稍後再試")
+
+    me = os.path.abspath(__file__)
+    new_path = me + ".new"
+    with open(new_path, "wb") as f:
+        f.write(body)
+
+    def _cleanup():
+        try:
+            os.remove(new_path)
+        except OSError:
+            pass
+
+    # 驗證一：語法
+    try:
+        import ast
+        ast.parse(open(new_path, encoding="utf-8").read())
+    except SyntaxError as e:
+        _cleanup()
+        return _deny("invalid_syntax", 400, detail=str(e)[:200])
+
+    new_ver = _parse_server_version(new_path)
+
+    # **不接受降版**。多個用戶端共用同一台伺服器是常見情況；只比對「版本不同」
+    # 的話，舊用戶端會把伺服器降回舊版，接著新用戶端又推回去——兩邊無限來回，
+    # 而每次重啟都會中斷別人正在跑的辨識。
+    if _version_tuple(new_ver) < _version_tuple(SERVER_VERSION):
+        _cleanup()
+        return _deny("downgrade_refused", 409,
+                     detail=f"伺服器 {SERVER_VERSION} 比送來的 {new_ver} 新",
+                     server_version=SERVER_VERSION, offered=new_ver)
+    if _version_tuple(new_ver) == _version_tuple(SERVER_VERSION):
+        _cleanup()
+        return JSONResponse({"status": "already_current", "version": SERVER_VERSION},
+                            status_code=200)
+
+    # 驗證二：真的能啟動（import 得起來、設定沒寫壞）
+    try:
+        r = subprocess.run([sys.executable, new_path, "--selftest"],
+                           capture_output=True, text=True, timeout=180)
+        if r.returncode != 0:
+            _cleanup()
+            return _deny("selftest_failed", 400, detail=(r.stderr or r.stdout)[-500:])
+    except subprocess.TimeoutExpired:
+        _cleanup()
+        return _deny("selftest_timeout", 400)
+
+    # selftest 期間可能有新作業進來（它要跑十幾秒），換檔前再確認一次。
+    if _get_active_task() is not None:
+        _cleanup()
+        return _deny("busy", 409, detail="selftest 期間有作業開始，已取消更新")
+
+    backup = f"{me}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+    shutil.copy2(me, backup)
+    os.replace(new_path, me)
+    _prune_backups(me)
+    print(f"[更新] {SERVER_VERSION} → {new_ver}，來自 {client_ip}，"
+          f"備份 {os.path.basename(backup)}，即將重啟", flush=True)
+
+    def _restart():
+        # 等回應送出去再換掉自己。os.execv 直接替換行程映像，
+        # 保留同一個 PID 與 detached session，不需要 systemd 之類的看門狗。
+        time.sleep(1.0)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    threading.Thread(target=_restart, daemon=True).start()
+    return {"status": "updating", "from": SERVER_VERSION, "to": new_ver,
+            "backup": os.path.basename(backup), "restart_in_sec": 1}
 
 
 @app.get("/v1/status")
@@ -620,6 +850,8 @@ async def transcribe(
                                 "type": "segment", "index": count - 1,
                                 "start": seg["start"], "end": seg["end"],
                                 "text": seg["text"], "duration": round(dur, 1),
+                                "confidence": seg.get("confidence"),
+                                "language": seg.get("language"),
                             }) + "\n"
                         proc_time = round(time.monotonic() - t0, 1)
                         yield json.dumps({
@@ -841,7 +1073,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="jt-whisper-server")
     parser.add_argument("--port", type=int, default=8978)
     parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--selftest", action="store_true",
+                        help="只檢查這份程式能不能正常啟動，然後離開（自動更新前的把關）")
     args = parser.parse_args()
 
-    print(f"[jt-whisper-server] 啟動 {args.host}:{args.port} (backend={_backend}, device={_device})")
+    if args.selftest:
+        # 走到這裡代表模組層級的 import 與後端偵測都已經跑完沒有出錯。
+        # 再確認幾個實際會被呼叫到的東西存在，避免「import 得起來但端點壞掉」。
+        missing = [n for n in ("health", "status", "admin_update", "_diarize")
+                   if n not in globals()]
+        if missing:
+            print(f"[selftest] 失敗：缺少 {missing}", file=sys.stderr)
+            sys.exit(1)
+        if _HAS_DIARIZE:
+            # 講者辨識的設定最容易在改版時寫壞，直接把它建起來看看
+            from spectralcluster import refinement as _r, laplacian as _l
+            _r.RefinementOptions(
+                gaussian_blur_sigma=0, p_percentile=0.98,
+                thresholding_soft_multiplier=0.01,
+                thresholding_type=_r.ThresholdType.RowMax,
+                symmetrize_type=_r.SymmetrizeType.Max,
+                refinement_sequence=[_r.RefinementName.CropDiagonal])
+            _ = _l.LaplacianType.GraphCut
+        print(f"[selftest] OK version={SERVER_VERSION} backend={_backend} device={_device}")
+        sys.exit(0)
+
+    print(f"[jt-whisper-server] v{SERVER_VERSION} 啟動 {args.host}:{args.port} "
+          f"(backend={_backend}, device={_device}"
+          f"{', 可遠端更新' if UPDATE_TOKEN else ''})")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

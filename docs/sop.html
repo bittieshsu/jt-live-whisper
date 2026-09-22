@@ -41,6 +41,7 @@
       <a class="lv3" href="#linux-音訊設定">Linux 音訊設定</a>
       <a class="" href="#三安裝程式">三、安裝程式</a>
       <a class="lv3" href="#3-1-一鍵安裝">3-1. 一鍵安裝</a>
+      <a class="lv3" href="#gpu-伺服器的版本檢查與更新v2211-起">GPU 伺服器的版本檢查與更新（v2.21.1 起）</a>
       <a class="lv3" href="#3-2-升級至最新版本">3-2. 升級至最新版本</a>
       <a class="lv3" href="#3-3-搬遷資料夾後">3-3. 搬遷資料夾後</a>
       <a class="" href="#四啟動與使用">四、啟動與使用</a>
@@ -98,7 +99,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.21.1 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -160,7 +161,7 @@
 </tr>
 <tr>
 <td><code>時間逐字稿_*.html</code></td>
-<td>互動式逐字稿（可點擊時間戳播放對應音訊片段）</td>
+<td>互動式逐字稿（可點按時間戳播放對應音訊片段）</td>
 <td>校正需要</td>
 </tr>
 <tr>
@@ -840,6 +841,99 @@ bash install.sh --server
 <p>安裝前若偵測到 jt-live-whisper 相關程序正在執行，可選擇 K 強制結束程序後繼續安裝，避免檔案鎖定衝突（尤其 Windows）。</p>
 <p><strong>磁碟空間需求（本機）：</strong> 最小安裝約 3 GB（venv + 1 個 Whisper 模型 + 基本套件），推薦 8 GB 以上（含 HuggingFace 快取供離線處理用），完整安裝約 14 GB（全部模型 + Moonshine）。macOS 額外需要 Homebrew 套件約 140 MB（cmake + sdl2 + ffmpeg）。安裝腳本會在安裝前自動檢查可用空間。</p>
 <p><strong>磁碟空間需求（GPU 伺服器）：</strong> 最小安裝約 5 GB（PyTorch + 1 個模型），完整安裝約 12 GB（PyTorch + 全部 5 個模型 + 講者辨識套件）。</p>
+<h3 id="gpu-伺服器的版本檢查與更新v2211-起">GPU 伺服器的版本檢查與更新（v2.21.1 起）</h3>
+<p>GPU 伺服器上跑的 <code>remote_whisper_server.py</code> 是一支獨立的服務，<strong>不會跟著本機一起升級</strong>。本機 <code>./install.sh --upgrade</code> 更新的是本機程式；伺服器上的服務還是舊的。</p>
+<p>這在 v2.21.1 之前沒有任何提示，曾經造成伺服器停留在舊版好幾天沒人發現——而且<strong>有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器</strong>，等於一直拿到舊版的結果。</p>
+<p><strong>現在每次連上伺服器都會比對版本：</strong></p>
+<pre><code>  [版本不一致] GPU 伺服器 v2.20.9，本機 v2.21.1
+  辨識與講者辨識仍會使用伺服器上的舊版；伺服器未開放遠端更新
+  手動更新：scp remote_whisper_server.py 192.168.1.40:~/jt-whisper-server/server.py 後重啟服務
+</code></pre>
+<p><strong>版本不一致不會中斷作業</strong>——伺服器舊一點通常仍可使用，只是你會知道結果來自哪個版本。若伺服器連 <code>version</code> 都沒回報（v2.21.1 以前的版本），會顯示「未知版本」。</p>
+<h4 id="自動更新選填預設關閉">自動更新（選填，預設關閉）</h4>
+<p>設定之後，本機發現伺服器版本較舊時會自動把新版推上去，由伺服器自行驗證並重啟，過程中顯示狀態列：</p>
+<pre><code>  ⠹ 更新 GPU 伺服器 [192.168.1.40] │ 上傳新版（38 KB）...
+  ⠼ 更新 GPU 伺服器 [192.168.1.40] │ 伺服器驗證通過（2.20.9 → 2.21.1），重啟中...
+  [完成] 已更新到 v2.21.1
+</code></pre>
+<p><strong>這個功能預設是關閉的，必須兩邊都設定才會啟用：</strong></p>
+<p><strong>1. GPU 伺服器端</strong> — 啟動服務時設定密鑰：</p>
+<pre><code class="language-bash">JT_WHISPER_UPDATE_TOKEN=&#39;自訂一組夠長的隨機字串&#39; ~/jt-whisper-server/start.sh 8978
+</code></pre>
+<p>沒有設定這個環境變數時，更新端點<strong>完全不存在</strong>，任何請求都會被拒絕。</p>
+<p><strong>2. 本機</strong> — 在 <code>config.json</code> 的 <code>remote_whisper</code> 區塊填入<strong>同一組</strong>密鑰：</p>
+<pre><code class="language-json">&quot;remote_whisper&quot;: {
+  &quot;host&quot;: &quot;192.168.1.40&quot;,
+  &quot;whisper_port&quot;: 8978,
+  &quot;update_token&quot;: &quot;自訂一組夠長的隨機字串&quot;
+}
+</code></pre>
+<blockquote>
+<p>⚠️ <strong>這個功能本質上是「讓遠端主機執行你送過去的程式」。</strong> 區域網路不等於安全網路，所以預設關閉，而且只有在你自己兩邊都設定同一組密鑰時才會生效。不確定是否需要時，<strong>維持關閉、手動更新即可</strong>——版本提示照樣會出現。</p>
+</blockquote>
+<p>更新前伺服器會依序做完這些檢查，任何一項不過就保留舊版、服務不受影響：</p>
+<table>
+<thead>
+<tr>
+<th>檢查</th>
+<th>不通過時</th>
+<th>擋的是什麼</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>HMAC 簽章是否相符</td>
+<td><code>unauthorized</code></td>
+<td><strong>未經授權的更新</strong></td>
+</tr>
+<tr>
+<td>時間戳是否在 5 分鐘內</td>
+<td><code>unauthorized</code></td>
+<td>重放舊請求</td>
+</tr>
+<tr>
+<td>大小是否超過 8 MB</td>
+<td><code>payload_too_large</code></td>
+<td>惡意灌爆記憶體</td>
+</tr>
+<tr>
+<td>內容 SHA-256 是否相符</td>
+<td><code>checksum_mismatch</code></td>
+<td>傳輸損壞</td>
+</tr>
+<tr>
+<td>語法是否正確</td>
+<td><code>invalid_syntax</code></td>
+<td>壞掉的更新</td>
+</tr>
+<tr>
+<td><strong>送來的版本是否比較新</strong></td>
+<td><code>downgrade_refused</code></td>
+<td>舊用戶端把伺服器降版</td>
+</tr>
+<tr>
+<td><strong>實際啟動一次是否成功</strong>（<code>--selftest</code>）</td>
+<td><code>selftest_failed</code></td>
+<td>壞掉的更新</td>
+</tr>
+<tr>
+<td>是否有作業正在執行</td>
+<td><code>busy</code></td>
+<td>中斷你或別人正在跑的辨識</td>
+</tr>
+</tbody></table>
+<p>舊版會備份成 <code>server.py.bak-&lt;時間&gt;</code>，只保留最近 5 份。</p>
+<blockquote>
+<p><strong>這些檢查分兩類，不要混為一談。</strong> 只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它<strong>擋得住壞掉的更新、擋不住惡意的更新</strong>。<strong>密鑰是唯一的安全邊界，請當成密碼保管。</strong></p>
+</blockquote>
+<blockquote>
+<p><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP 不是 HTTPS。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證，等於取得那台機器的任意程式碼執行權。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害——那就是同一支程式），無法偽造新的 payload。</p>
+</blockquote>
+<blockquote>
+<p><strong>為什麼不接受降版</strong>：多個用戶端共用同一台 GPU 伺服器是常見情況。若只比對「版本不同」，舊的用戶端會把伺服器降回舊版、新的用戶端又推回去，<strong>兩邊無限來回，而每次重啟都會中斷別人正在跑的辨識</strong>。所以伺服器只接受比自己新的版本，用戶端在發現伺服器較新時也會主動退讓。</p>
+</blockquote>
+<blockquote>
+<p><strong>為什麼一定要「實際啟動一次」才換檔</strong>：GPU 伺服器上的服務沒有 systemd 之類的看門狗，換上去如果起不來，服務就直接消失、不會自動復原。所以寧可多花十幾秒驗證。</p>
+</blockquote>
 <p>全部通過後會顯示：</p>
 <pre><code>  全部就緒！可以執行 ./start.sh 啟動系統。        ← macOS / Linux
   全部就緒！可以執行 .\start.ps1 啟動系統。       ← Windows
@@ -2396,7 +2490,40 @@ cd C:\jt-live-whisper
 <p>這個問題與本程式無關，是 macOS 藍牙音訊的已知問題。</p>
 </blockquote>
 <h3 id="q---diarize-辨識出的講者數不正確">Q: --diarize 辨識出的講者數不正確？</h3>
-<p>使用 <code>--num-speakers N</code> 指定正確的講者人數，例如 <code>--diarize --num-speakers 2</code>。自動偵測適用於大多數情況，但講者聲音相似或音訊品質不佳時可能需要手動指定。</p>
+<p>可以用 <code>--num-speakers N</code> 指定，但<strong>不要填「現場有幾個人」，要填「發言量足以辨認的人數」</strong>。</p>
+<p>2026-09-22 用有標準答案的 7 人會議（37 分鐘）實測，指定不同人數時的「講者搞錯」比例：</p>
+<table>
+<thead>
+<tr>
+<th align="right">指定人數</th>
+<th align="right">講者搞錯</th>
+<th align="right">有對應到的講者</th>
+</tr>
+</thead>
+<tbody><tr>
+<td align="right">不指定（自動判 3）</td>
+<td align="right">22.90%</td>
+<td align="right">3/7</td>
+</tr>
+<tr>
+<td align="right">5</td>
+<td align="right"><strong>17.91%</strong></td>
+<td align="right">5/7</td>
+</tr>
+<tr>
+<td align="right">6</td>
+<td align="right"><strong>17.83%</strong></td>
+<td align="right">6/7</td>
+</tr>
+<tr>
+<td align="right">7（現場真的 7 人）</td>
+<td align="right">30.15%</td>
+<td align="right">7/7</td>
+</tr>
+</tbody></table>
+<p><strong>填真正的人數反而最差。</strong> 那場會議裡有兩位只講了 28 秒與 56 秒——
+發言太短的人聲紋不足以成群，硬湊一群給他，代價是把主要講者拆散。</p>
+<p>實務上這個數字很難估準，所以：<strong>不確定就不要填</strong>，讓它自己判斷。</p>
 <h3 id="q-為什麼講者辨識不用-pyannoteaudio">Q: 為什麼講者辨識不用 pyannote.audio？</h3>
 <p>pyannote.audio 是目前最知名的講者辨識框架，準確度確實較高，但有以下限制：</p>
 <ul>
@@ -2505,7 +2632,7 @@ cd C:\jt-live-whisper
 <ul>
 <li><strong>語音辨識品質</strong>取決於所選用的 ASR 模型（Whisper 模型大小）、音訊品質（背景噪音、麥克風距離、多人交談重疊等）以及語言種類。較大的模型通常有更好的辨識準確度，但需要更多運算資源。</li>
 <li><strong>翻譯品質</strong>取決於所選用的翻譯引擎與模型。LLM 翻譯（如 phi4、qwen2.5）品質最佳但需要 LLM 伺服器（本機或區域網路）；NLLB 離線翻譯品質中等；Argos 品質較基本。不同模型對專業術語、口語表達的處理能力各有差異。</li>
-<li><strong>講者辨識</strong>使用 resemblyzer + spectralcluster 進行聲紋分群，準確度受限於音訊品質、講者數量、講者聲紋相似度等因素。在多人交談、遠場收音、或講者聲紋相近的情境下，辨識結果可能不準確，建議搭配 <code>--num-speakers</code> 參數指定講者人數以提升效果。</li>
+<li><strong>講者辨識</strong>使用 resemblyzer + spectralcluster 進行聲紋分群，準確度受限於音訊品質、講者數量、講者聲紋相似度等因素。在多人交談、遠場收音、或講者聲紋相近的情境下，辨識結果可能不準確。<strong><code>--num-speakers</code> 不是萬用解</strong>——實測填入真正的與會人數反而可能更差（見常見問題），不確定時不要填。</li>
 <li><strong>處理速度</strong>取決於硬體算力（CPU/GPU）、模型大小、音訊長度。使用 GPU 伺服器可大幅加速辨識與翻譯；純 CPU 環境下處理速度會顯著較慢。</li>
 <li><strong>LLM 文字校正</strong>品質取決於校正模型的語言理解能力，對於嚴重的 ASR 幻覺（如背景噪音被辨識為無意義文字）會標記為雜音移除，但無法保證所有錯誤都能被正確修正。</li>
 </ul>

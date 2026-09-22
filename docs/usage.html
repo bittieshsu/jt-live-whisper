@@ -311,9 +311,61 @@ cd C:\jt-live-whisper
 <span class="c"># WebUI（--webui）</span>
 webui.py (FastAPI + WebSocket)
   → <span class="g">瀏覽器設定頁</span>
-  → 啟動 translate_meeting.py 子程序
+  → 啟動 translate_meeting.py 子行程
   → TCP localhost:19780 收事件
   → WebSocket 推送到瀏覽器</pre>
+      </div>
+    </div>
+
+    <div style="margin-top:34px">
+      <div class="feat-block">
+        <h3><span class="zh">GPU 伺服器的版本檢查與更新</span><span class="en">GPU server version check &amp; update</span></h3>
+        <p><span class="zh">GPU 伺服器上跑的 <code>remote_whisper_server.py</code> 是一支獨立的服務，<strong>不會跟著本機升級一起更新</strong>。本機執行 <code>./install.sh --upgrade</code> 更新的是本機程式，伺服器上的服務還是舊的——而有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器。</span><span class="en">The <code>remote_whisper_server.py</code> running on your GPU box is a separate service that <strong>does not upgrade with the client</strong>. <code>./install.sh --upgrade</code> updates the local program only — and when a GPU server is configured, recognition and diarization go there by default.</span></p>
+        <p><span class="zh">v2.21.1 起，本機每次連上伺服器都會比對版本，不一致時提示並說明如何更新：</span><span class="en">Since v2.21.1 the client compares versions on every connect and tells you how to update:</span></p>
+<pre>  [版本不一致] GPU 伺服器 v2.20.9，本機 v2.21.1
+  辨識與講者辨識仍會使用伺服器上的舊版；伺服器未開放遠端更新
+  手動更新：scp remote_whisper_server.py <span class="g">主機</span>:~/jt-whisper-server/server.py 後重啟服務</pre>
+        <p><span class="zh"><strong>版本不一致不會中斷作業</strong>——伺服器舊一點通常仍可使用，只是你會知道結果來自哪個版本。</span><span class="en"><strong>A mismatch never aborts the job</strong> — an older server usually still works; you just know which version produced the result.</span></p>
+      </div>
+
+      <div class="feat-block">
+        <h3><span class="zh">自動更新（選填，預設關閉）</span><span class="en">Auto-update (optional, off by default)</span></h3>
+        <p><span class="zh">兩邊都設定同一組密鑰後，本機發現伺服器版本較舊時會自動把新版推上去，由伺服器驗證通過才替換並重啟，過程中顯示狀態列。</span><span class="en">With a shared token configured on both sides, the client pushes the new version when the server is behind; the server verifies it before swapping and restarting, with a live status bar.</span></p>
+        <div class="grid g2" style="margin-top:14px">
+          <div>
+            <div class="cmd-label"><span class="zh">GPU 伺服器端</span><span class="en">On the GPU server</span></div>
+<pre>JT_WHISPER_UPDATE_TOKEN=<span class="g">'夠長的隨機字串'</span> \
+  ~/jt-whisper-server/start.sh 8978</pre>
+            <p style="margin-top:8px"><span class="zh">沒有設定這個環境變數時，更新端點<strong>完全不存在</strong>。</span><span class="en">Without this variable the update endpoint <strong>does not exist at all</strong>.</span></p>
+          </div>
+          <div>
+            <div class="cmd-label"><span class="zh">本機 config.json</span><span class="en">Client config.json</span></div>
+<pre>"remote_whisper": {
+  "host": "192.168.1.40",
+  "whisper_port": 8978,
+  "update_token": <span class="g">"夠長的隨機字串"</span>
+}</pre>
+          </div>
+        </div>
+        <p style="margin-top:14px"><span class="zh">⚠️ <strong>這個功能本質上是「讓遠端主機執行你送過去的程式」。</strong> 區域網路不等於安全網路，所以預設關閉。不確定是否需要時，維持關閉、手動更新即可——版本提示照樣會出現。</span><span class="en">⚠️ <strong>This lets a remote host execute code you send it.</strong> A LAN is not a trusted network, so it ships disabled. If in doubt, leave it off and update manually — you still get the version warning.</span></p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th><span class="zh">更新前的檢查</span><span class="en">Pre-update check</span></th><th><span class="zh">不通過時</span><span class="en">On failure</span></th></tr></thead>
+            <tbody>
+              <tr><td><span class="zh">HMAC 簽章是否相符</span><span class="en">HMAC signature matches</span></td><td><code>unauthorized</code></td></tr>
+              <tr><td><span class="zh">時間戳是否在 5 分鐘內</span><span class="en">Timestamp within 5 min</span></td><td><code>unauthorized</code></td></tr>
+              <tr><td><span class="zh">大小是否超過 8 MB</span><span class="en">Size under 8 MB</span></td><td><code>payload_too_large</code></td></tr>
+              <tr><td><span class="zh">內容 SHA-256 是否相符</span><span class="en">SHA-256 matches</span></td><td><code>checksum_mismatch</code></td></tr>
+              <tr><td><span class="zh">語法是否正確</span><span class="en">Syntax is valid</span></td><td><code>invalid_syntax</code></td></tr>
+              <tr><td><span class="zh"><strong>送來的版本是否比較新</strong></span><span class="en"><strong>Offered version is newer</strong></span></td><td><code>downgrade_refused</code></td></tr>
+              <tr><td><span class="zh"><strong>實際啟動一次是否成功</strong>（<code>--selftest</code>）</span><span class="en"><strong>Actually starts once</strong> (<code>--selftest</code>)</span></td><td><code>selftest_failed</code></td></tr>
+              <tr><td><span class="zh">是否有作業正在執行</span><span class="en">No job in flight</span></td><td><code>busy</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><span class="zh">任何一項不過就保留舊版、服務不受影響；舊版會備份成 <code>server.py.bak-&lt;時間&gt;</code>，只保留最近 5 份。</span><span class="en">Any failure keeps the old version and leaves the service untouched; the old file is backed up as <code>server.py.bak-&lt;time&gt;</code>, last 5 kept.</span></p>
+        <p><span class="zh"><strong>這些檢查分兩類。</strong>只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它擋得住<strong>壞掉的</strong>更新、擋不住<strong>惡意的</strong>更新——<strong>密鑰是唯一的安全邊界。</strong></span><span class="en"><strong>Two different kinds of check.</strong> Only the <strong>signature</strong> governs <em>who</em> may update; the rest govern <em>whether the update breaks the service</em>. <code>--selftest</code> runs the uploaded code, so it stops <strong>broken</strong> updates, not <strong>malicious</strong> ones — <strong>the key is the only security boundary.</strong></span></p>
+        <p><span class="zh"><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害），無法偽造新的 payload。<br><strong>為什麼不接受降版</strong>：多個用戶端共用同一台伺服器時，若只比對「版本不同」，新舊用戶端會無限來回互相覆蓋，每次重啟都中斷別人的辨識。<br><strong>為什麼要先啟動一次</strong>：服務沒有 systemd 之類的看門狗，換上去起不來就直接消失、不會自動復原。</span><span class="en"><strong>Why sign instead of sending the key</strong>: this is plain HTTP — sending the key hands a reusable credential to anyone sniffing the LAN. With HMAC a sniffer can only replay the same payload (harmless), never forge a new one.<br><strong>Why downgrades are refused</strong>: with several clients sharing one server, matching on "different version" alone makes old and new clients overwrite each other forever, each restart killing someone's job.<br><strong>Why it must boot once first</strong>: there is no systemd-style watchdog — a build that won't start simply disappears.</span></p>
       </div>
     </div>
   </div>
