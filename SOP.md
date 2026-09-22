@@ -1673,7 +1673,7 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
 
 ### 已上線的整合：Jason Tools 文件工具箱
 
-<https://doc.jason.tools/> 已經接上 jt-live-whisper。完整流程：
+**Jason Tools 文件工具箱**（<https://jasoncheng7115.github.io/jt-doc-tools/>）已經接上 jt-live-whisper。完整流程：
 
 | | 做什麼 | 誰做 |
 |---|---|---|
