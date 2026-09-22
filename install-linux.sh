@@ -420,9 +420,48 @@ EOF
             && $SUDO systemctl "$start_verb" "$SERVICE_NAME" >/dev/null 2>&1; then
         check_ok "服務已啟用並啟動（開機自動執行）"
         echo -e "  ${C_DIM}WebUI：http://$(hostname -I 2>/dev/null | awk '{print $1}'):19781${NC}"
-        echo -e "  ${C_DIM}遠端操作需在 config.json 設定 webui_passwords（admin / read）${NC}"
+        seed_admin_password
     else
         check_fail "服務啟動失敗，請執行 journalctl -u ${SERVICE_NAME} 查看原因"
+    fi
+}
+
+
+# ─── 伺服器版：第一次安裝時產生 admin 密碼 ───────────────
+# **沒有這一段，--server 裝完是不能遠端操作的**：/api/start 需要 admin 密碼，
+# 而設定密碼的那一頁本身就只有本機能開 —— 雞生蛋。無頭伺服器正是裝 --server
+# 的理由，總不能叫人先接螢幕。
+# 只在「完全沒設過」時產生，已經有密碼就不動（升級不會蓋掉使用者設的）。
+seed_admin_password() {
+    local cfg="${SCRIPT_DIR}/config.json"
+    command -v python3 >/dev/null 2>&1 || return 0
+    local pw
+    pw=$(SCRIPT_DIR="$SCRIPT_DIR" python3 - <<'PYEOF'
+import hashlib, json, os, pathlib, secrets, sys
+p = pathlib.Path(os.environ["SCRIPT_DIR"]) / "config.json"
+try:
+    cfg = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+except Exception:
+    sys.exit(0)                       # 設定檔壞掉時不要亂動它
+wp = cfg.get("webui_passwords") or {}
+if wp.get("admin_sha256") or wp.get("admin"):
+    sys.exit(0)                       # 已經設過，不覆蓋
+pw = secrets.token_urlsafe(12)
+wp["admin_sha256"] = hashlib.sha256(pw.encode("utf-8")).hexdigest()
+cfg["webui_passwords"] = wp
+p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+print(pw)
+PYEOF
+)
+    if [ -n "$pw" ]; then
+        echo
+        echo -e "  ${C_WARN}${BOLD}遠端管理密碼（只顯示這一次，請立刻記下來）${NC}"
+        echo -e "      ${C_OK}${BOLD}${pw}${NC}"
+        echo -e "  ${C_DIM}存的是 sha256 雜湊，設定檔裡沒有明文，遺失只能重設${NC}"
+        echo -e "  ${C_DIM}要更換：在伺服器本機開 WebUI → 安全設定（那一頁只有本機能開）${NC}"
+        echo -e "  ${C_DIM}建議同時設定 webui.allowed_ips 限制來源網段${NC}"
+    else
+        echo -e "  ${C_DIM}遠端管理密碼已設定過，未變更${NC}"
     fi
 }
 

@@ -106,7 +106,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.2 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.21.3 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -2319,6 +2319,42 @@ cd C:\jt-live-whisper
 # 瀏覽器開 http://127.0.0.1:19781 → 四頁設定全部可用
 </code></pre>
 <p>這個做法不必改任何設定，也是安全性最好的一種（不必把管理介面暴露在網路上）。</p>
+<h4 id="遠端管理密碼">遠端管理密碼</h4>
+<p><code>install.sh --server</code> 第一次安裝時會<strong>自動產生一組管理密碼並印出來一次</strong>，
+請當下記下來。存的是 sha256 雜湊，設定檔裡沒有明文，<strong>遺失只能重設</strong>
+（在伺服器本機開 WebUI → 安全設定）。升級時不會覆蓋已經設好的密碼。</p>
+<h4 id="限制哪些位址可以連-webui">限制哪些位址可以連 WebUI</h4>
+<p><code>config.json</code>：</p>
+<pre><code class="language-json">&quot;webui&quot;: { &quot;allowed_ips&quot;: [&quot;192.168.1.0/24&quot;, &quot;10.0.0.5&quot;] }
+</code></pre>
+<p>支援單一 IP 與 CIDR，也可用環境變數 <code>JTLW_WEBUI_ALLOWED_IPS</code>（逗號分隔）。
+<strong>空的或沒設＝不限制</strong>（既有部署升級後行為不變）。
+<strong>本機一律放行</strong>——設錯清單不會把自己鎖在門外，因為改設定的那一頁
+本身就只有本機能開。改完要重啟服務。</p>
+<blockquote>
+<p>⚠ <strong><code>webui.allowed_ips</code> 與 <code>api.allowed_hosts</code> 是兩件不同的事</strong>，名字很像但意思相反：</p>
+<table>
+<thead>
+<tr>
+<th>設定</th>
+<th>埠</th>
+<th>管的是</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>webui.allowed_ips</code></td>
+<td>19781</td>
+<td><strong>連進來的來源 IP</strong>（誰的瀏覽器可以開 WebUI）</td>
+</tr>
+<tr>
+<td><code>api.allowed_hosts</code></td>
+<td>REST API</td>
+<td><strong>音檔網址的主機</strong>（不是呼叫端！見「允許的來源主機」）</td>
+</tr>
+</tbody></table>
+<p>送件被擋 <code>source_not_allowed</code> 時要改的是<strong>後者</strong>，而且不是把對方的伺服器 IP
+加進去，是把<strong>音檔網址的主機</strong>加進去。</p>
+</blockquote>
 <h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
 <p>伺服器版另外提供一組 REST API，讓別的系統送音檔進來、取回逐字稿與講者標記。</p>
 <blockquote>

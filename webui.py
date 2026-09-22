@@ -117,16 +117,81 @@ def _probe_local_llm():
 
 
 # ─── 安全設定 ──────────────────────────────────────────────────
-_webui_passwords = {"read": "", "admin": ""}  # 從 config.json 載入
+# 來源 IP 允許清單（`config.json` 的 `webui.allowed_ips`）。
+# **空的＝不限制**，維持既有部署的行為；要限制就明確列出來。
+# 支援單一 IP 與 CIDR（`192.168.1.0/24`）。本機一律放行，否則設錯清單
+# 會把自己鎖在門外，而設定頁本身就只有本機能改——那會變成救不回來的狀態。
+_allowed_nets = []
+
+
+def _load_allowed_ips(cfg):
+    import ipaddress
+    global _allowed_nets
+    nets = []
+    raw = (cfg.get("webui") or {}).get("allowed_ips") or []
+    env = os.environ.get("JTLW_WEBUI_ALLOWED_IPS", "")
+    if env:
+        raw = [x.strip() for x in env.split(",") if x.strip()]
+    for item in raw:
+        try:
+            nets.append(ipaddress.ip_network(str(item).strip(), strict=False))
+        except ValueError:
+            print(f"[WebUI] 略過無法解析的 allowed_ips 項目：{item}", flush=True)
+    _allowed_nets = nets
+
+
+def _ip_allowed(client) -> bool:
+    """來源 IP 是否在允許清單內；清單為空時不限制"""
+    if not _allowed_nets:
+        return True
+    if client in ("127.0.0.1", "::1", "localhost", "0.0.0.0", ""):
+        return True          # 本機永遠放行，避免把自己鎖在門外
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(client)
+    except ValueError:
+        return False
+    return any(ip in n for n in _allowed_nets)
+
+
+# 密碼**只存 sha256 雜湊**（`webui_passwords.read_sha256` / `admin_sha256`）。
+# 舊版存的是明文（`read` / `admin`），仍然讀得進來並可登入，
+# 但只要從設定頁存過一次就會改寫成雜湊。
+_webui_passwords = {"read": "", "admin": ""}   # 這裡放的是雜湊，不是明文
+
+
+def _pw_hash(raw):
+    import hashlib
+    raw = (raw or "").strip()
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest() if raw else ""
+
+
+def _pw_match(raw, stored_hash):
+    """**用 compare_digest 而不是 `==`**：字串比較會在第一個不同的字元就回傳，
+    比對時間會洩漏「猜對了幾個字元」。這條路徑是對外開放的。"""
+    import secrets as _secrets
+    if not stored_hash:
+        return False
+    return _secrets.compare_digest(_pw_hash(raw), stored_hash)
+
+
 def _load_passwords():
     if CONFIG_FILE.exists():
         try:
             cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             wp = cfg.get("webui_passwords", {})
-            _webui_passwords["read"] = wp.get("read", "")
-            _webui_passwords["admin"] = wp.get("admin", "")
-        except Exception:
-            pass
+            for role in ("read", "admin"):
+                # 新格式優先；沒有才把舊的明文欄位雜湊起來用
+                _webui_passwords[role] = (wp.get(f"{role}_sha256")
+                                          or _pw_hash(wp.get(role, "")))
+            _load_allowed_ips(cfg)
+        except Exception as e:
+            # **不可以靜默吞掉**：設定讀失敗時「密碼是空的」與「允許清單是空的」
+            # 都代表安全設定沒有生效，而兩者的預設都是比較寬鬆的那一邊。
+            # 原本這裡是 `pass`，一個 NameError 就能讓整組設定無聲失效。
+            print(f"[WebUI] 安全設定載入失敗，將以預設值執行：{e}", flush=True)
+
+
 _load_passwords()
 
 def _is_local(request) -> bool:
@@ -142,13 +207,14 @@ def _check_auth(request, level="read") -> str:
         if not _webui_passwords["admin"]:
             return "未啟用遠端管理功能"
         token = request.headers.get("X-Auth-Token", "")
-        if token != _webui_passwords["admin"]:
+        if not _pw_match(token, _webui_passwords["admin"]):
             return "需要管理密碼"
     elif level == "read":
         if not _webui_passwords["read"]:
             return None  # 唯讀密碼為空 = 不需密碼
         token = request.headers.get("X-Auth-Token", "")
-        if token != _webui_passwords["read"] and token != _webui_passwords["admin"]:
+        if not (_pw_match(token, _webui_passwords["read"])
+                or _pw_match(token, _webui_passwords["admin"])):
             return "需要密碼"
     return None
 
@@ -172,6 +238,18 @@ async def lifespan(app):
 
 
 app = FastAPI(title="jt-live-whisper WebUI", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def _ip_allowlist(request, call_next):
+    """來源 IP 限制。**擋在所有路由之前**——逐個端點加檢查一定會漏，
+    而漏掉的那個就是出事的那個（2026-09-22 盤點時發現四個端點沒有任何防護）。
+    """
+    client = request.client.host if request.client else ""
+    if not _ip_allowed(client):
+        return JSONResponse({"ok": False, "error": "來源位址不在允許清單內"},
+                            status_code=403)
+    return await call_next(request)
 
 # ─── 靜態檔案服務（logs/ 子目錄，供 WebUI 開啟逐字稿/摘要 HTML）───
 _logs_dir = BASE_DIR / "logs"
@@ -540,7 +618,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.21.2",
+        "last": last, "version": "2.21.3",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -571,9 +649,9 @@ async def api_auth(request: Request, body: dict = {}):
     token = body.get("password", "")
     if _is_local(request):
         return {"role": "admin", "is_local": True}
-    if _webui_passwords["admin"] and token == _webui_passwords["admin"]:
+    if _pw_match(token, _webui_passwords["admin"]):
         return {"role": "admin"}
-    if not _webui_passwords["read"] or token == _webui_passwords["read"]:
+    if not _webui_passwords["read"] or _pw_match(token, _webui_passwords["read"]):
         return {"role": "read"}
     return JSONResponse({"role": "denied", "error": "密碼錯誤"}, status_code=401)
 
@@ -583,7 +661,10 @@ async def api_get_passwords(request: Request):
     """取得密碼（僅本機）"""
     if not _is_local(request):
         return JSONResponse({"ok": False, "error": "僅限本機"}, status_code=403)
-    return {"read": _webui_passwords["read"], "admin": _webui_passwords["admin"]}
+    # **不回傳密碼本身**（現在存的是雜湊，回傳雜湊更糟——前端會把它當成密碼存回去）。
+    # 只說有沒有設定，畫面用 placeholder 呈現。
+    return {"read_set": bool(_webui_passwords["read"]),
+            "admin_set": bool(_webui_passwords["admin"])}
 
 
 @app.post("/api/save-passwords")
@@ -591,13 +672,18 @@ async def api_save_passwords(request: Request, body: dict = {}):
     """儲存安全設定密碼（僅本機可用）"""
     if not _is_local(request):
         return JSONResponse({"ok": False, "error": "僅限本機設定"}, status_code=403)
-    read_pw = body.get("read", "").strip()
-    admin_pw = body.get("admin", "").strip()
-    _webui_passwords["read"] = read_pw
-    _webui_passwords["admin"] = admin_pw
+    # **沒帶那個欄位＝不更動；帶空字串＝清除。**
+    # 不能用「留空＝不更動」：畫面上密碼欄一定是空的（我們不回傳密碼），
+    # 那樣就分不出「只想改其中一個」與「想清掉另一個」——
+    # 使用者只改唯讀密碼時會把管理密碼一起清掉，而且不會發現。
+    for role in ("read", "admin"):
+        if role in body:
+            _webui_passwords[role] = _pw_hash(body.get(role, ""))
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
-        cfg["webui_passwords"] = {"read": read_pw, "admin": admin_pw}
+        # 只寫雜湊，並把舊版留下的明文欄位一起清掉
+        cfg["webui_passwords"] = {"read_sha256": _webui_passwords["read"],
+                                  "admin_sha256": _webui_passwords["admin"]}
         CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
@@ -856,8 +942,11 @@ async def api_open_folder(request: Request):
 
 
 @app.get("/api/files")
-async def api_files():
+async def api_files(request: Request):
     """列出 recordings/ 目錄下的音訊/影片檔案"""
+    err = _check_auth(request, "read")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
     rec_dir = BASE_DIR / "recordings"
     files = []
     if rec_dir.is_dir():
@@ -868,18 +957,6 @@ async def api_files():
                 size_mb = round(st.st_size / 1048576, 1)
                 files.append({"name": f.name, "size": size_mb, "path": str(f)})
     return JSONResponse({"files": files, "dir": str(rec_dir)})
-
-
-@app.post("/api/upload")
-async def api_upload():
-    """上傳音訊/影片檔案到 recordings/"""
-    from starlette.requests import Request
-    # 需要 python-multipart
-    try:
-        from fastapi import UploadFile, File
-    except ImportError:
-        return JSONResponse({"ok": False, "error": "缺少 python-multipart 套件"})
-    return JSONResponse({"ok": False, "error": "請使用 /api/upload-file 端點"})
 
 
 from fastapi import UploadFile, File as FastFile
@@ -923,8 +1000,16 @@ async def api_sck_permission(request: Request):
 
 
 @app.post("/api/test-llm")
-async def api_test_llm(body: dict = {}):
-    """測試 LLM 伺服器連線"""
+async def api_test_llm(request: Request, body: dict = {}):
+    """測試 LLM 伺服器連線（需管理密碼）。
+
+    **這支會讓伺服器去連使用者指定的任意位址**，沒有授權的話等於把這台機器
+    變成探測內網的工具（回應與逾時的差別就能判斷某個主機/埠開不開）。
+    它本來就只有設定畫面在用，而設定畫面本來就需要授權。
+    """
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
     host = body.get("host", "").strip()
     if not host:
         return JSONResponse({"ok": False, "error": "未填入主機位址"})
@@ -1112,7 +1197,10 @@ async def api_stop(request: Request):
 
 
 @app.get("/api/status")
-async def api_status():
+async def api_status(request: Request):
+    err = _check_auth(request, "read")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
     with _proc_lock:
         running = _proc is not None and _proc.poll() is None
     return {"running": running}
