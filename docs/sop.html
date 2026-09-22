@@ -61,6 +61,7 @@
       <a class="lv3" href="#4-9---diarize-講者辨識">4-9. --diarize 講者辨識</a>
       <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
       <a class="" href="#四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</a>
+      <a class="lv3" href="#已上線的整合jason-tools-文件工具箱">已上線的整合：Jason Tools 文件工具箱</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
       <a class="lv3" href="#api-key">API Key</a>
       <a class="lv3" href="#憑證tls">憑證（TLS）</a>
@@ -2378,6 +2379,48 @@ cd C:\jt-live-whisper
 </blockquote>
 <h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
 <p>伺服器版另外提供一組 REST API，讓別的系統送音檔進來、取回逐字稿與講者標記。</p>
+<h3 id="已上線的整合jason-tools-文件工具箱">已上線的整合：Jason Tools 文件工具箱</h3>
+<p><a href="https://doc.jason.tools/">https://doc.jason.tools/</a> 已經接上 jt-live-whisper。完整流程：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>做什麼</th>
+<th>誰做</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>在「<strong>會議錄音轉逐字稿</strong>」上傳錄音或錄影</td>
+<td>文件工具箱</td>
+</tr>
+<tr>
+<td>2</td>
+<td>辨識、講者分離、逐字稿校正</td>
+<td><strong>jt-live-whisper</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>逐字稿邊聽邊看：波形圖、點波形跳播、播到哪段就亮起來、每位發言者一個顏色、點代號改成人名</td>
+<td>文件工具箱</td>
+</tr>
+<tr>
+<td>4</td>
+<td>一鍵轉交「<strong>會議摘要</strong>」，產出摘要、決議、待辦、風險與章節</td>
+<td>文件工具箱</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>每一條決議與待辦都指得回原文的第幾段、誰在第幾分鐘講的</strong></td>
+<td>兩邊共同</td>
+</tr>
+</tbody></table>
+<p>第 5 點是整個整合的重點，也是為什麼 API 要分三層：<strong>摘要可以被驗證</strong>。
+使用者看到一條「決議：下週前完成 A」時，點下去就能聽到當時是誰說的——
+而不是只能相信 LLM 沒有捏造。</p>
+<p>實測（28.3 分鐘的真實會議、GPU 伺服器）：辨識 37 秒、講者分離 2 秒、
+校正 67 秒，<strong>總共 1 分 52 秒</strong>，約為即時的 15 倍速。
+送件當下就開始拉檔，輪到處理時音訊已在本機（預抓耗時 0 毫秒）。</p>
 <blockquote>
 <p><strong>這個模組（<code>jtlw_api/</code>）不包含在本專案的公開發行內容裡</strong>，
 是與特定系統串接時另外部署的元件。這一節寫給已經拿到它的管理者，
