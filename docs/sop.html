@@ -59,11 +59,12 @@
       <a class="lv3" href="#4-8---input-音訊檔離線處理">4-8. --input 音訊檔離線處理</a>
       <a class="lv3" href="#4-8-台語台灣閩南語辨識">4-8. 台語（台灣閩南語）辨識</a>
       <a class="lv3" href="#4-9---diarize-講者辨識">4-9. --diarize 講者辨識</a>
+      <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
       <a class="" href="#四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
       <a class="lv3" href="#api-key">API Key</a>
       <a class="lv3" href="#憑證tls">憑證（TLS）</a>
-      <a class="lv3" href="#允許的來源主機">允許的來源主機</a>
+      <a class="lv3" href="#允許的來源主機source_not_allowed-就是這個">允許的來源主機（source_not_allowed 就是這個）</a>
       <a class="" href="#五使用流程總結">五、使用流程總結</a>
       <a class="lv3" href="#互動選單流程圖">互動選單流程圖</a>
       <a class="" href="#六常見問題">六、常見問題</a>
@@ -78,6 +79,7 @@
       <a class="lv3" href="#q---input-找不到-faster-whisper">Q: --input 找不到 faster-whisper？</a>
       <a class="lv3" href="#q---diarize-找不到-resemblyzer-或-spectralcluster">Q: --diarize 找不到 resemblyzer 或 spectralcluster？</a>
       <a class="lv3" href="#q-airpods-或藍牙耳機的麥克風消失了macos">Q: AirPods 或藍牙耳機的麥克風消失了？（macOS）</a>
+      <a class="lv3" href="#q-串接的系統送件失敗訊息是-source_not_allowed">Q: 串接的系統送件失敗，訊息是 source_not_allowed？</a>
       <a class="lv3" href="#q---diarize-辨識出的講者數不正確">Q: --diarize 辨識出的講者數不正確？</a>
       <a class="lv3" href="#q-為什麼講者辨識不用-pyannoteaudio">Q: 為什麼講者辨識不用 pyannote.audio？</a>
       <a class="lv3" href="#q-為什麼不支援-chatgptgeminiclaude-等雲端大語言模型">Q: 為什麼不支援 ChatGPT、Gemini、Claude 等雲端大語言模型？</a>
@@ -104,7 +106,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.1 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.21.2 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -2289,6 +2291,34 @@ cd C:\jt-live-whisper
 <li>GPU 伺服器執行需先透過安裝腳本（<code>install.sh</code>）在伺服器安裝 resemblyzer + spectralcluster</li>
 </ul>
 <hr>
+<h3 id="伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</h3>
+<p><code>install.sh --server</code> 會把 WebUI 裝成 systemd 服務（<code>jt-live-whisper-webui</code>，
+預設埠 <strong>19781</strong>，綁 <code>0.0.0.0</code>）。但從<strong>別台電腦的瀏覽器</strong>連進去時有兩道限制：</p>
+<table>
+<thead>
+<tr>
+<th>功能</th>
+<th>遠端</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>安全設定、關鍵字通知、懸浮字幕、字幕轉發</td>
+<td><strong>一律 403</strong></td>
+<td>這四頁<strong>寫死只有本機能用</strong>，裡面有密碼與轉發用的 token</td>
+</tr>
+<tr>
+<td>開始 / 停止作業、看狀態</td>
+<td>需要密碼</td>
+<td><code>config.json</code> 的 <code>webui_passwords.admin</code>；沒設會回「未啟用遠端管理功能」</td>
+</tr>
+</tbody></table>
+<p><strong>而設定密碼的那一頁本身也是本機限定</strong>，所以第一次一定要在伺服器本機上設，
+或用 SSH 通道讓連線看起來來自本機：</p>
+<pre><code class="language-bash">ssh -L 19781:127.0.0.1:19781 &lt;帳號&gt;@&lt;伺服器&gt;
+# 瀏覽器開 http://127.0.0.1:19781 → 四頁設定全部可用
+</code></pre>
+<p>這個做法不必改任何設定，也是安全性最好的一種（不必把管理介面暴露在網路上）。</p>
 <h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
 <p>伺服器版另外提供一組 REST API，讓別的系統送音檔進來、取回逐字稿與講者標記。</p>
 <blockquote>
@@ -2365,9 +2395,50 @@ cd C:\jt-live-whisper
 到期日用 <code>--info</code> 查得到，建議提前安排</li>
 </ul>
 <p>關閉 TLS 用 <code>--no-tls</code>（<strong>只建議本機測試</strong>）。</p>
-<h3 id="允許的來源主機">允許的來源主機</h3>
-<p><code>config.json</code> 的 <code>api.allowed_hosts</code>：只有清單內的主機能當音檔來源（防 SSRF）。
-<strong>沒設定的話送件一律被拒</strong>。</p>
+<h3 id="允許的來源主機source_not_allowed-就是這個">允許的來源主機（<code>source_not_allowed</code> 就是這個）</h3>
+<p><code>config.json</code> 的 <code>api.allowed_hosts</code>：</p>
+<pre><code class="language-json">&quot;api&quot;: { &quot;allowed_hosts&quot;: [&quot;音檔主機.example.com&quot;, &quot;10.0.0.20&quot;] }
+</code></pre>
+<p><strong>它擋的不是「誰來呼叫」，而是「音檔網址的主機」。</strong> 這是最容易誤解的一點——
+對方的伺服器 IP 在清單內、金鑰也正確，只要 <code>source.url</code> 指向清單外的主機
+就會被擋。送件會得到：</p>
+<pre><code class="language-json">{&quot;error&quot;: {&quot;code&quot;: &quot;source_not_allowed&quot;, &quot;category&quot;: &quot;source&quot;, &quot;retryable&quot;: false,
+           &quot;message&quot;: &quot;網址不在允許的主機清單內&quot;,
+           &quot;details&quot;: {&quot;field&quot;: &quot;source.url&quot;, &quot;host&quot;: &quot;被擋的主機&quot;}}}
+</code></pre>
+<p><strong><code>details.host</code> 就是要加進清單的那個主機</strong>。對方的介面不一定會把它顯示出來，
+所以伺服器也會寫一行 log：</p>
+<pre><code class="language-bash">journalctl -u &lt;服務名&gt; | grep source.rejected
+# {&quot;event&quot;: &quot;source.rejected&quot;, &quot;host&quot;: &quot;...&quot;, &quot;allowed&quot;: [...]}
+</code></pre>
+<p><code>--info</code> 也會印出目前的清單。<strong>沒設定的話送件一律被拒</strong>（不是「不限制」——
+這是刻意的，避免變成任意抓取網址的跳板 / SSRF）。</p>
+<h4 id="實際遇到時的處理步驟">實際遇到時的處理步驟</h4>
+<ol>
+<li><p><strong>查被擋的是哪個主機</strong>（不要用猜的）：</p>
+<pre><code class="language-bash">journalctl -u &lt;服務名&gt; | grep source.rejected | tail -1
+</code></pre>
+</li>
+<li><p><strong>加進清單</strong>：編輯 <code>config.json</code></p>
+<pre><code class="language-json">&quot;api&quot;: {
+  &quot;allowed_hosts&quot;: [&quot;原本就有的&quot;, &quot;剛才 log 裡的那個主機&quot;]
+}
+</code></pre>
+</li>
+<li><p><strong>重啟服務</strong>（設定是啟動時讀一次，改完不重啟不會生效）：</p>
+<pre><code class="language-bash">systemctl restart &lt;服務名&gt;
+</code></pre>
+</li>
+<li><p><strong>確認</strong>：</p>
+<pre><code class="language-bash">venv/bin/python -m jtlw_api --info | grep 允許的來源主機
+</code></pre>
+</li>
+</ol>
+<blockquote>
+<p><strong>只加真正需要的主機。</strong> 這個清單是防 SSRF 的唯一一道關卡——
+清單上的任何主機都等於允許這台機器去抓取那裡的網址。
+不要為了省事填萬用字元或把整個網段加進去。</p>
+</blockquote>
 <h2 id="五使用流程總結">五、使用流程總結</h2>
 <p><strong>即時轉錄：</strong></p>
 <ol>
@@ -2573,6 +2644,14 @@ cd C:\jt-live-whisper
 <blockquote>
 <p>這個問題與本程式無關，是 macOS 藍牙音訊的已知問題。</p>
 </blockquote>
+<h3 id="q-串接的系統送件失敗訊息是-source_not_allowed">Q: 串接的系統送件失敗，訊息是 <code>source_not_allowed</code>？</h3>
+<p>不是金鑰的問題，也不是對方的伺服器 IP 沒放行——
+<strong>擋的是「音檔網址的主機」</strong>（<code>source.url</code> 裡的那個），不是呼叫端。
+對方的伺服器在允許清單內、金鑰也正確，只要音檔網址指向清單外的主機就會被擋。</p>
+<p>回應的 <code>details.host</code> 就是要加進 <code>api.allowed_hosts</code> 的那個主機；
+對方的介面不一定會顯示它，伺服器的 log 也有：
+<code>journalctl -u &lt;服務名&gt; | grep source.rejected</code>。</p>
+<p>詳細步驟見「四之二、REST API」的「允許的來源主機」。</p>
 <h3 id="q---diarize-辨識出的講者數不正確">Q: --diarize 辨識出的講者數不正確？</h3>
 <p>可以用 <code>--num-speakers N</code> 指定，但<strong>不要填「現場有幾個人」，要填「發言量足以辨認的人數」</strong>。</p>
 <p>2026-09-22 用有標準答案的 7 人會議（37 分鐘）實測，指定不同人數時的「講者搞錯」比例：</p>
