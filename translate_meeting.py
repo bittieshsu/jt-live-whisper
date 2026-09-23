@@ -1599,7 +1599,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.21.5"
+APP_VERSION = "2.21.6"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -4241,10 +4241,14 @@ def _remote_whisper_start(rw_cfg, force_restart=False):
     except Exception:
         pass
     cmd = _ssh_cmd_parts(rw_cfg) + [
-        # setsid + </dev/null 是必要的：少了它們，ssh 連線結束時服務會被 SIGHUP 帶走
-        "cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && "
+        # setsid + </dev/null 是必要的：少了它們，ssh 連線結束時服務會被 SIGHUP 帶走。
+        # 外面那層 `( ... ) >/dev/null 2>&1` 也是必要的：只重導背景那個指令不夠，
+        # 子殼仍握著 ssh 的 stdout/stderr，ssh 等不到 EOF 就會一直掛著——
+        # 這支先前是靠下面的 timeout=30 吞掉，**每次重啟都白等 30 秒**
+        # （2026-09-23 實測：包了子殼之後 1 秒返回）。
+        "( cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && "
         f"nohup setsid venv/bin/python3 server.py --port {port} "
-        "> /tmp/jt-whisper-server.log 2>&1 < /dev/null &"
+        "> /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1"
     ]
     try:
         # 不用 capture_output，讓 SSH 密碼提示可互動
@@ -4254,9 +4258,15 @@ def _remote_whisper_start(rw_cfg, force_restart=False):
 
 
 def _remote_whisper_stop(rw_cfg):
-    """SSH pkill 停止伺服器 Whisper server，並關閉 SSH 多工連線"""
+    """停止伺服器 Whisper server，並關閉 SSH 多工連線。
+
+    **不可以用 `pkill -f 'server.py --port N'`**：這條指令自己的遠端 shell
+    命令列也含有那串字，pkill 會把自己一起殺掉。`_restart_remote_whisper()`
+    在 v2.21.1 就改掉了，這支當時漏了（2026-09-23 補）。
+    """
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
-    cmd = _ssh_cmd_parts(rw_cfg) + [f"pkill -f 'server.py --port {port}'"]
+    cmd = _ssh_cmd_parts(rw_cfg) + [
+        f"kill $(ps aux | awk '/[s]erver\\.py --port {port}/ {{print $2}}') 2>/dev/null"]
     try:
         subprocess.run(cmd, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:

@@ -1,5 +1,54 @@
 # Changelog
 
+### v2.21.6 (2026-09-23)
+
+**修正 — GPU 伺服器會被舊版用戶端降版，而且「已重啟」是假的**
+
+2026-09-21 曾發現 GPU 上的 `server.py` 從 9/18 起就少了 v2.20.0 的講者辨識
+時間軸修正、三天沒人察覺。當時補的是**版本協商**（偵測），成因沒動。
+這次 Windows 回歸時 `test_server_copy_matches` 失敗，才把整條鏈挖出來——
+而且當下 GPU 伺服器正停在 v2.21.1，**落後四個版本**。
+
+- **`remote_whisper_server.py` 不在 `_UPGRADE_FILES` 裡**，卻在 repo 與 github/ 裡
+  → **全新安裝拿到新的、`--upgrade` 拿到舊的，兩條路徑分岔**。
+  已加進升級清單（install.sh 與 install.ps1 兩邊）
+- **同步到 GPU 伺服器時只比 MD5、不比版本** → 手上那份舊的用戶端一跑安裝程式，
+  就把伺服器**蓋回舊版**。改成先比 `SERVER_VERSION`，本機較舊時明講「不覆蓋」
+- **覆蓋完只 kill、沒有任何啟動指令，畫面卻印「已重啟伺服器」** →
+  服務停在那裡而使用者以為成功。改成停止→啟動→health check，
+  **而且 health check 要比對版本號**（舊進程可能還活著，只看「通不通」
+  會把「根本沒換成功」當成更新完成）
+- **四處 `pkill -f 'server.py --port N'` 全部換掉**。CLAUDE.md 記過兩次
+  這個 pattern 會比對到執行它的遠端 shell 自己；本次實測確認：
+  `bash -c 'pkill -f "X"; echo SURVIVED'` 的 `SURVIVED` **不會印出來**，
+  shell 被自己的 pkill 帶走。改用 `ps aux | awk '/[s]erver\.py .../'`。
+  （持平說：這四個呼叫點後面都沒有其他指令，所以實際傷害是難看而非致命——
+  真正致命的是上一項「只殺不啟動」。）
+- **全新設定時的測試啟動缺 `setsid` 與 `< /dev/null`**，與 GPU 伺服器自己的
+  `start.sh` 標準不一致 → ssh 一結束服務可能被 SIGHUP 帶走。已統一
+- `translate_meeting.py` 的 `_remote_whisper_stop()` 也還用著舊 pattern
+  （v2.21.1 只修了 `_restart_remote_whisper()`，這支漏了），一併修正
+- **啟動伺服器的那條 ssh 每次都掛滿 30 秒**：只把背景那個指令重導不夠，
+  子殼仍握著 ssh 的 stdout/stderr，ssh 等不到 EOF。服務其實早就起來了，
+  `translate_meeting.py` 是用 `timeout=30` + `except: pass` 把它吞掉的——
+  **「沒報錯」再一次不等於「沒問題」**。改成整段包子殼並自行重導
+  `( ... & ) >/dev/null 2>&1`，實測 35 秒 → **1 秒**
+- 啟停與版本比較收斂成共用函式（`_rw_stop` / `_rw_start` / `_rw_wait_health` /
+  `_rw_ver_lt`，PowerShell 對應 `rw_*`）。先前兩支安裝腳本各自 inline 一份，
+  **同樣兩個坑各踩了一次**
+
+**修正 — `tools/test_*.py` 根本不能跨平台跑，而且直接執行會靜默空過**
+
+- 五支測試檔路徑寫死 `/opt/dev/jt-live-whisper/`，在 Windows 上 25 項
+  `FileNotFoundError`——**它們存在的理由就是三平台回歸，卻只能在開發機跑**
+- 它們是 pytest 形式（fixture、parametrize），直接 `python tools/test_x.py`
+  只會把函式定義完就結束：**exit 0、零輸出**，看起來像通過，
+  實際上一個測試都沒跑
+- 改法：根目錄改成往上找 `translate_meeting.py`（**不寫死路徑也不寫死層數**，
+  因為 Windows 測試機把 `diar_bench/` 的檔案平放在 `tools\`）；
+  檔尾 `__main__` 轉呼叫 pytest，沒安裝就明講而不是安靜結束；
+  `jtlw_api/`（伺服器版專用、不隨 repo 發佈）不存在時 skip 而非 fail
+
 ### v2.21.5 (2026-09-23)
 
 **修正 — 懸浮字幕的 `--tcp-host` / `--tcp-port` 完全無效**
