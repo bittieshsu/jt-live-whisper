@@ -41,6 +41,7 @@
       <a class="lv3" href="#linux-音訊設定">Linux 音訊設定</a>
       <a class="" href="#三安裝程式">三、安裝程式</a>
       <a class="lv3" href="#3-1-一鍵安裝">3-1. 一鍵安裝</a>
+      <a class="lv3" href="#gpu-伺服器的排隊與開機自動啟動v2217-起">GPU 伺服器的排隊與開機自動啟動（v2.21.7 起）</a>
       <a class="lv3" href="#gpu-伺服器的版本檢查與更新v2211-起">GPU 伺服器的版本檢查與更新（v2.21.1 起）</a>
       <a class="lv3" href="#3-2-升級至最新版本">3-2. 升級至最新版本</a>
       <a class="lv3" href="#3-3-搬遷資料夾後">3-3. 搬遷資料夾後</a>
@@ -107,7 +108,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.6 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.21.7 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -211,7 +212,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
   - LLM 翻譯 / 顯示 / 儲存                      - resemblyzer + GPU CUDA
   - SSH 啟停伺服器     --- SSH ---&gt;
 </code></pre>
-<p>有設定 GPU 伺服器時，語音辨識和講者辨識自動在伺服器執行（離線 30 分鐘音訊：本機約 3-5 分鐘，GPU 伺服器約 10-30 秒）。伺服器失敗時自動降級本機。多個用戶端可同時共用同一個伺服器。</p>
+<p>有設定 GPU 伺服器時，語音辨識和講者辨識自動在伺服器執行（離線 30 分鐘音訊：本機約 3-5 分鐘，GPU 伺服器約 10-30 秒）。伺服器失敗時自動降級本機。多個用戶端可以共用同一個伺服器：<strong>v2.21.7 起伺服器一次只跑一件，其餘自動排隊</strong>（即時字幕另走一條線，不必等離線檔），詳見下方「GPU 伺服器的排隊與開機自動啟動」。</p>
 <p>使用的 AI 模型：</p>
 <table>
 <thead>
@@ -849,6 +850,38 @@ bash install.sh --server
 <p>安裝前若偵測到 jt-live-whisper 相關程序正在執行，可選擇 K 強制結束程序後繼續安裝，避免檔案鎖定衝突（尤其 Windows）。</p>
 <p><strong>磁碟空間需求（本機）：</strong> 最小安裝約 3 GB（venv + 1 個 Whisper 模型 + 基本套件），推薦 8 GB 以上（含 HuggingFace 快取供離線處理用），完整安裝約 14 GB（全部模型 + Moonshine）。macOS 額外需要 Homebrew 套件約 140 MB（cmake + sdl2 + ffmpeg）。安裝腳本會在安裝前自動檢查可用空間。</p>
 <p><strong>磁碟空間需求（GPU 伺服器）：</strong> 最小安裝約 5 GB（PyTorch + 1 個模型），完整安裝約 12 GB（PyTorch + 全部 5 個模型 + 講者辨識套件）。</p>
+<h3 id="gpu-伺服器的排隊與開機自動啟動v2217-起">GPU 伺服器的排隊與開機自動啟動（v2.21.7 起）</h3>
+<p><strong>排隊：一次一件，先到先做。</strong> 以前多個用戶端同時送檔時，伺服器會全部同時跑：每一件都變慢，顯示記憶體也可能不夠。現在分成兩條線，各自一次只跑一件：</p>
+<table>
+<thead>
+<tr>
+<th>線</th>
+<th>跑什麼</th>
+<th>說明</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>離線線</td>
+<td>離線辨識、講者辨識</td>
+<td>先到先做；後到的會在進度列顯示「伺服器排隊中：前面還有 N 件」</td>
+</tr>
+<tr>
+<td>即時線</td>
+<td>即時字幕送來的幾秒短音訊</td>
+<td>與離線線分開，<strong>即時字幕不必等一場長會議跑完</strong>；多人同時開即時字幕時在這條線上排隊</td>
+</tr>
+</tbody></table>
+<ul>
+<li>送出前若伺服器正忙，畫面只會提示「送出後會自動排隊」，不再詢問要不要等候或強制中斷（強制中斷會砍掉別人正在跑的作業）</li>
+<li>排隊中關掉程式或斷線，那一件會自動移出隊伍，不會卡住後面的人</li>
+<li>舊版用戶端連到新版伺服器照樣能用（一樣會排隊，只是進度列不會顯示排隊位置）</li>
+</ul>
+<p><strong>開機自動啟動。</strong> 安裝程式設定 GPU 伺服器時（以 root 登入、伺服器有 systemd），會建立 systemd 服務 <code>jt-whisper-server@&lt;port&gt;</code>，主機重開後自動啟動，程式異常結束也會自動重啟。已經裝好的伺服器重新執行一次 <code>./install.sh</code>（或 Windows 的 <code>install.ps1</code>）就會補上。</p>
+<pre><code class="language-bash">systemctl status jt-whisper-server@8978     # 查看狀態
+systemctl restart jt-whisper-server@8978    # 重啟
+journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tmp/jt-whisper-server.log
+</code></pre>
+<p>非 root 帳號或沒有 systemd 的伺服器不會建立服務，沿用原本「用戶端需要時再以 SSH 啟動」的方式，主機重開後要重新啟動服務。</p>
 <h3 id="gpu-伺服器的版本檢查與更新v2211-起">GPU 伺服器的版本檢查與更新（v2.21.1 起）</h3>
 <p>GPU 伺服器上跑的 <code>remote_whisper_server.py</code> 是一支獨立的服務，<strong>不會跟著本機一起升級</strong>。本機 <code>./install.sh --upgrade</code> 更新的是本機程式；伺服器上的服務還是舊的。</p>
 <p>這在 v2.21.1 之前沒有任何提示，曾經造成伺服器停留在舊版好幾天沒人發現——而且<strong>有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器</strong>，等於一直拿到舊版的結果。</p>
@@ -865,8 +898,14 @@ bash install.sh --server
   [完成] 已更新到 v2.21.1
 </code></pre>
 <p><strong>這個功能預設是關閉的，必須兩邊都設定才會啟用：</strong></p>
-<p><strong>1. GPU 伺服器端</strong> — 啟動服務時設定密鑰：</p>
-<pre><code class="language-bash">JT_WHISPER_UPDATE_TOKEN=&#39;自訂一組夠長的隨機字串&#39; ~/jt-whisper-server/start.sh 8978
+<p><strong>1. GPU 伺服器端</strong> — 設定密鑰後重啟服務。有 systemd 服務時（v2.21.7 起），寫進 <code>~/jt-whisper-server/server.env</code>：</p>
+<pre><code class="language-bash">echo &quot;JT_WHISPER_UPDATE_TOKEN=自訂一組夠長的隨機字串&quot; &gt; ~/jt-whisper-server/server.env
+chmod 600 ~/jt-whisper-server/server.env
+systemctl restart jt-whisper-server@8978
+</code></pre>
+<p>沒有 systemd 服務時，改在啟動命令前加上環境變數：</p>
+<pre><code class="language-bash">cd ~/jt-whisper-server &amp;&amp; JT_WHISPER_UPDATE_TOKEN=&#39;自訂一組夠長的隨機字串&#39; \
+  nohup setsid venv/bin/python3 server.py --port 8978 &gt; /tmp/jt-whisper-server.log 2&gt;&amp;1 &lt; /dev/null &amp;
 </code></pre>
 <p>沒有設定這個環境變數時，更新端點<strong>完全不存在</strong>，任何請求都會被拒絕。</p>
 <p><strong>2. 本機</strong> — 在 <code>config.json</code> 的 <code>remote_whisper</code> 區塊填入<strong>同一組</strong>密鑰：</p>
@@ -940,7 +979,7 @@ bash install.sh --server
 <p><strong>為什麼不接受降版</strong>：多個用戶端共用同一台 GPU 伺服器是常見情況。若只比對「版本不同」，舊的用戶端會把伺服器降回舊版、新的用戶端又推回去，<strong>兩邊無限來回，而每次重啟都會中斷別人正在跑的辨識</strong>。所以伺服器只接受比自己新的版本，用戶端在發現伺服器較新時也會主動退讓。</p>
 </blockquote>
 <blockquote>
-<p><strong>為什麼一定要「實際啟動一次」才換檔</strong>：GPU 伺服器上的服務沒有 systemd 之類的看門狗，換上去如果起不來，服務就直接消失、不會自動復原。所以寧可多花十幾秒驗證。</p>
+<p><strong>為什麼一定要「實際啟動一次」才換檔</strong>：伺服器是把自己換成新版（同一個程序），換上去如果起不來，服務就直接消失；即使有 systemd 服務，自動重啟也只會一直重跑同一支壞掉的程式。所以寧可多花十幾秒驗證。</p>
 </blockquote>
 <p>全部通過後會顯示：</p>
 <pre><code>  全部就緒！可以執行 ./start.sh 啟動系統。        ← macOS / Linux

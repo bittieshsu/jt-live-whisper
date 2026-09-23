@@ -46,7 +46,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.21.6"
+SERVER_VERSION = "2.21.7"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -153,37 +153,119 @@ def _prune_backups(me, keep=UPDATE_KEEP_BACKUPS):
 
 app = FastAPI(title="jt-whisper-server")
 
-# ── 作業追蹤 ──
-_active_task_lock = threading.Lock()
-_active_task = None  # dict: {type, model, language, started, client_ip} or None
+# ── 作業排隊 ──
+# **GPU 一次只跑一件，其餘排隊（先到先做）。** 先前是「來幾件就同時跑幾件」，
+# 多個用戶端同時送離線檔時全部擠在 GPU 上：每一件都變慢、顯示記憶體可能不夠，
+# 而 `/v1/status` 只有一個欄位，後到的作業會把先到的蓋掉（busy 的判斷跟著錯）。
+#
+# 分兩條線，**各自一次一件、彼此不互等**（2026-09-23 使用者指定：
+# 「即時的另開一條，跟辨識分開」）：
+#   batch     離線辨識（串流）、講者辨識、大檔的非串流辨識
+#   realtime  即時字幕送來的幾秒短音訊（非串流、小檔）
+# 不分開的話，即時字幕要等一場一小時的離線檔跑完才出得了字。
+#
+# 判斷哪條線沿用既有協定，**不需要用戶端改版**：即時路徑本來就是非串流、
+# 每次約 160KB；離線路徑本來就是 stream=true。
 
-def _set_active_task(task_type, model, language, client_ip=""):
-    """登記進行中的作業，回傳代表這筆作業的 token（給 _clear_active_task 核對用）"""
-    global _active_task
-    token = object()
-    with _active_task_lock:
-        _active_task = {
-            "type": task_type,
-            "model": model,
-            "language": language,
-            "started": time.time(),
-            "client_ip": client_ip,
-            "_token": token,
-        }
-    return token
+_REALTIME_MAX_BYTES = 8 * 1024 * 1024   # 非串流且不超過這個大小 → 即時線
 
-def _clear_active_task(token=None):
-    """清除進行中的作業；有給 token 時只清自己那筆，避免誤清之後才開始的作業"""
-    global _active_task
-    with _active_task_lock:
-        if token is None or (_active_task is not None and _active_task.get("_token") is token):
-            _active_task = None
 
-def _get_active_task():
-    with _active_task_lock:
-        if _active_task is None:
-            return None
-        return {k: v for k, v in _active_task.items() if not k.startswith("_")}
+class _Ticket:
+    """隊伍裡的一件作業。比對用物件身分（不要改成 dict：dict 會以內容比對，
+    兩件參數相同的作業會被當成同一件）。"""
+    __slots__ = ("type", "model", "language", "client_ip", "enqueued", "started")
+
+    def __init__(self, task_type, model, language, client_ip):
+        self.type = task_type
+        self.model = model
+        self.language = language
+        self.client_ip = client_ip
+        self.enqueued = time.time()
+        self.started = None
+
+
+class _Lane:
+    """先到先做的單線隊伍。`_items[0]` 是正在跑的那件，其餘在等。"""
+
+    def __init__(self, name):
+        self.name = name
+        self._cv = threading.Condition()
+        self._items = []
+
+    def enter(self, task_type, model, language, client_ip=""):
+        t = _Ticket(task_type, model, language, client_ip)
+        with self._cv:
+            self._items.append(t)
+            if self._items[0] is t:
+                t.started = time.time()
+        return t
+
+    def position(self, t):
+        """0＝輪到了；n＝前面還有 n 件；-1＝已不在隊伍裡"""
+        with self._cv:
+            for i, x in enumerate(self._items):
+                if x is t:
+                    return i
+            return -1
+
+    def wait(self, t, timeout):
+        """阻塞等候輪到自己，最多 timeout 秒；回傳 position()（執行緒內使用）"""
+        with self._cv:
+            self._cv.wait_for(lambda: not self._items or self._items[0] is t
+                              or all(x is not t for x in self._items), timeout)
+        return self.position(t)
+
+    def leave(self, t):
+        """做完、出錯或用戶端放棄排隊時都要呼叫；重複呼叫無害。
+        **漏掉一次，後面的人就永遠等不到。**"""
+        with self._cv:
+            self._items = [x for x in self._items if x is not t]
+            if self._items and self._items[0].started is None:
+                self._items[0].started = time.time()
+            self._cv.notify_all()
+
+    def snapshot(self):
+        now = time.time()
+        with self._cv:
+            items = list(self._items)
+
+        def _d(x, running):
+            d = {"type": x.type, "model": x.model, "language": x.language,
+                 "client_ip": x.client_ip}
+            if running:
+                d["elapsed"] = round(now - (x.started or now), 1)
+            else:
+                d["waited"] = round(now - x.enqueued, 1)
+            return d
+        return {"running": _d(items[0], True) if items else None,
+                "waiting": [_d(x, False) for x in items[1:]]}
+
+    def busy(self):
+        with self._cv:
+            return bool(self._items)
+
+
+_LANES = {"batch": _Lane("batch"), "realtime": _Lane("realtime")}
+
+
+def _any_busy():
+    return any(l.busy() for l in _LANES.values())
+
+
+async def _wait_turn_async(lane, t, request):
+    """在 async 端點裡等輪到自己。用戶端斷線就退出隊伍，回傳 False。"""
+    while True:
+        pos = lane.position(t)
+        if pos == 0:
+            return True
+        if pos < 0:
+            return False
+        if await request.is_disconnected():
+            lane.leave(t)
+            print(f"[排隊] {t.client_ip} 在{lane.name}隊伍中斷線，已移出", flush=True)
+            return False
+        await asyncio.sleep(0.3)
+
 
 # ── 偵測最佳後端引擎 ──
 _models: dict = {}
@@ -658,6 +740,8 @@ def health():
         "diarize": _HAS_DIARIZE,
         # 用戶端用這個判斷「能不能自動更新」，不必試了才知道
         "can_update": bool(UPDATE_TOKEN),
+        # v2.21.7 起一次一件、其餘排隊；用戶端據此決定要不要問「等候／改用本機」
+        "queue": True,
     }
 
 
@@ -729,8 +813,8 @@ async def admin_update(request: Request):
     if want_sha and want_sha != got_sha:
         return _deny("checksum_mismatch", 400, expected=want_sha, actual=got_sha)
 
-    if _get_active_task() is not None:
-        return _deny("busy", 409, detail="有作業進行中，稍後再試")
+    if _any_busy():
+        return _deny("busy", 409, detail="有作業進行中或排隊中，稍後再試")
 
     me = os.path.abspath(__file__)
     new_path = me + ".new"
@@ -778,7 +862,7 @@ async def admin_update(request: Request):
         return _deny("selftest_timeout", 400)
 
     # selftest 期間可能有新作業進來（它要跑十幾秒），換檔前再確認一次。
-    if _get_active_task() is not None:
+    if _any_busy():
         _cleanup()
         return _deny("busy", 409, detail="selftest 期間有作業開始，已取消更新")
 
@@ -802,29 +886,25 @@ async def admin_update(request: Request):
 
 @app.get("/v1/status")
 def status():
-    """伺服器狀態：忙碌狀態 + 磁碟空間"""
-    task = _get_active_task()
-    busy = task is not None
-    elapsed = round(time.time() - task["started"], 1) if busy else 0
+    """伺服器狀態：忙碌、排隊狀況、磁碟空間。
+
+    `busy` / `task` 只看離線線（batch），維持舊用戶端的意思——舊用戶端看到
+    busy 會問使用者要不要等；即時線的幾秒短音訊不該觸發那個提示。
+    新用戶端看 `queue`：有這個欄位就代表伺服器會自己排隊，直接送出即可。
+    """
+    batch = _LANES["batch"].snapshot()
+    running = batch["running"]
 
     # /tmp 磁碟空間（暫存檔寫入處）
     disk = shutil.disk_usage(tempfile.gettempdir())
-    disk_free_gb = round(disk.free / (1024 ** 3), 1)
-    disk_total_gb = round(disk.total / (1024 ** 3), 1)
-
     result = {
-        "busy": busy,
-        "disk_free_gb": disk_free_gb,
-        "disk_total_gb": disk_total_gb,
+        "busy": running is not None,
+        "disk_free_gb": round(disk.free / (1024 ** 3), 1),
+        "disk_total_gb": round(disk.total / (1024 ** 3), 1),
+        "queue": {name: lane.snapshot() for name, lane in _LANES.items()},
     }
-    if busy:
-        result["task"] = {
-            "type": task["type"],
-            "model": task["model"],
-            "language": task["language"],
-            "elapsed": elapsed,
-            "client_ip": task["client_ip"],
-        }
+    if running is not None:
+        result["task"] = running
     return result
 
 
@@ -855,6 +935,13 @@ def list_models():
     return {"models": sorted(cached)}
 
 
+def _queued_event(lane, t):
+    """排隊中的 NDJSON 事件。舊用戶端不認得 type=queued，會直接略過（if/elif 沒有 else）。"""
+    pos = lane.position(t)
+    return json.dumps({"type": "queued", "position": pos, "ahead": pos,
+                       "waited": round(time.time() - t.enqueued, 1)}) + "\n"
+
+
 @app.post("/v1/audio/transcriptions")
 async def transcribe(
     request: Request,
@@ -865,13 +952,13 @@ async def transcribe(
     noisy: str = Form("false"),
 ):
     """接收音訊檔，回傳辨識結果（stream=true 時串流 NDJSON）。
-    noisy=1/true：用戶端音源分析判定為低音量錄音，套用寬鬆參數。"""
+    noisy=1/true：用戶端音源分析判定為低音量錄音，套用寬鬆參數。
+
+    排隊：串流（離線）走 batch 線，在串流裡先送 `{"type":"queued"}` 事件
+    直到輪到自己；非串流小檔（即時字幕）走 realtime 線。"""
     client_ip = request.client.host if request.client else ""
-    task_token = _set_active_task("transcribe", model, language, client_ip)
-    stream_handed_off = False   # 串流回應交出後，清理改由 background 負責
     is_noisy = str(noisy).lower() in ("1", "true", "yes")
-    if is_noisy:
-        print(f"[{client_ip}] noisy=1 → 寬鬆參數")
+    is_stream = stream.lower() == "true"
 
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
@@ -879,42 +966,69 @@ async def transcribe(
         content = await file.read()
         tmp.write(content)
         tmp.close()
+    except Exception:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise
 
+    lane = _LANES["batch"] if (is_stream or len(content) > _REALTIME_MAX_BYTES) \
+        else _LANES["realtime"]
+    ticket = lane.enter("transcribe", model, language, client_ip)
+    stream_handed_off = False   # 串流回應交出後，清理改由 background 負責
+    if is_noisy:
+        print(f"[{client_ip}] noisy=1 → 寬鬆參數")
+    ahead = lane.position(ticket)
+    if ahead > 0:
+        print(f"[排隊] {client_ip} 的辨識排入{lane.name}隊伍，前面 {ahead} 件", flush=True)
+
+    try:
         # 串流模式（NDJSON）
-        if stream.lower() == "true":
+        if is_stream:
             tmp_path = tmp.name
+
+            def _wait_turn():
+                """generator 開頭：還沒輪到就每 2 秒送一次排隊事件。
+                用戶端斷線時 yield 會丟 GeneratorExit，由外層 finally 移出隊伍。"""
+                while True:
+                    pos = lane.position(ticket)
+                    if pos <= 0:
+                        return
+                    yield _queued_event(lane, ticket)
+                    lane.wait(ticket, 2.0)
 
             if _backend == "faster-whisper":
                 def generate():
-                    t0 = time.monotonic()
-                    count = 0
-                    dur = 0
-                    cancelled = False
                     try:
-                        for seg, dur in _transcribe_faster_stream(tmp_path, model, language, noisy=is_noisy):
-                            count += 1
+                        yield from _wait_turn()
+                        t0 = time.monotonic()
+                        count = 0
+                        dur = 0
+                        try:
+                            for seg, dur in _transcribe_faster_stream(tmp_path, model, language, noisy=is_noisy):
+                                count += 1
+                                yield json.dumps({
+                                    "type": "segment", "index": count - 1,
+                                    "start": seg["start"], "end": seg["end"],
+                                    "text": seg["text"], "duration": round(dur, 1),
+                                    "confidence": seg.get("confidence"),
+                                    "language": seg.get("language"),
+                                }) + "\n"
+                            proc_time = round(time.monotonic() - t0, 1)
                             yield json.dumps({
-                                "type": "segment", "index": count - 1,
-                                "start": seg["start"], "end": seg["end"],
-                                "text": seg["text"], "duration": round(dur, 1),
-                                "confidence": seg.get("confidence"),
-                                "language": seg.get("language"),
+                                "type": "done", "total_segments": count,
+                                "duration": round(dur, 1), "processing_time": proc_time,
+                                "device": _device,
                             }) + "\n"
-                        proc_time = round(time.monotonic() - t0, 1)
-                        yield json.dumps({
-                            "type": "done", "total_segments": count,
-                            "duration": round(dur, 1), "processing_time": proc_time,
-                            "device": _device,
-                        }) + "\n"
-                    except GeneratorExit:
-                        cancelled = True
-                        elapsed = round(time.monotonic() - t0, 1)
-                        print(f"[取消] 客戶端中斷連線（{elapsed:.1f}s），faster-whisper 辨識已停止")
-                        return
-                    except Exception as e:
-                        yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
+                        except GeneratorExit:
+                            elapsed = round(time.monotonic() - t0, 1)
+                            print(f"[取消] 客戶端中斷連線（{elapsed:.1f}s），faster-whisper 辨識已停止")
+                            return
+                        except Exception as e:
+                            yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
                     finally:
-                        _clear_active_task(task_token)
+                        lane.leave(ticket)
                         try:
                             os.unlink(tmp_path)
                         except OSError:
@@ -923,72 +1037,77 @@ async def transcribe(
                 # openai-whisper：辨識中發心跳（含進度），完成後逐段回傳
                 def generate():
                     import concurrent.futures
-                    t0 = time.monotonic()
-                    progress_q = queue.Queue()
-                    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                    future = pool.submit(_transcribe_openai, tmp_path, model, language,
-                                         progress_q=progress_q, noisy=is_noisy)
+                    pool = None
                     cancelled = False
-                    audio_dur = 0
-                    last_pct = 0
-                    last_pos = 0
                     try:
-                        while not future.done():
-                            # 讀取 progress queue 中的最新進度
-                            while not progress_q.empty():
-                                try:
-                                    msg = progress_q.get_nowait()
-                                    if msg[0] == "duration":
-                                        audio_dur = msg[1]
-                                    elif msg[0] == "progress":
-                                        last_pos = msg[1]
-                                        last_pct = msg[3]
-                                except queue.Empty:
-                                    break
-                            elapsed = round(time.monotonic() - t0, 1)
-                            hb = {"type": "heartbeat", "elapsed": elapsed}
-                            if audio_dur > 0:
-                                hb["progress"] = round(last_pct, 3)
-                                hb["current"] = round(last_pos, 1)
-                                hb["duration"] = round(audio_dur, 1)
-                            yield json.dumps(hb) + "\n"
-                            time.sleep(2)
-                        segments, full_text, duration, proc_time = future.result()
-                        for i, seg in enumerate(segments):
+                        yield from _wait_turn()
+                        t0 = time.monotonic()
+                        progress_q = queue.Queue()
+                        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                        future = pool.submit(_transcribe_openai, tmp_path, model, language,
+                                             progress_q=progress_q, noisy=is_noisy)
+                        audio_dur = 0
+                        last_pct = 0
+                        last_pos = 0
+                        try:
+                            while not future.done():
+                                # 讀取 progress queue 中的最新進度
+                                while not progress_q.empty():
+                                    try:
+                                        msg = progress_q.get_nowait()
+                                        if msg[0] == "duration":
+                                            audio_dur = msg[1]
+                                        elif msg[0] == "progress":
+                                            last_pos = msg[1]
+                                            last_pct = msg[3]
+                                    except queue.Empty:
+                                        break
+                                elapsed = round(time.monotonic() - t0, 1)
+                                hb = {"type": "heartbeat", "elapsed": elapsed}
+                                if audio_dur > 0:
+                                    hb["progress"] = round(last_pct, 3)
+                                    hb["current"] = round(last_pos, 1)
+                                    hb["duration"] = round(audio_dur, 1)
+                                yield json.dumps(hb) + "\n"
+                                time.sleep(2)
+                            segments, full_text, duration, proc_time = future.result()
+                            for i, seg in enumerate(segments):
+                                yield json.dumps({
+                                    "type": "segment", "index": i,
+                                    "start": seg["start"], "end": seg["end"],
+                                    "text": seg["text"], "duration": round(duration, 1),
+                                }) + "\n"
                             yield json.dumps({
-                                "type": "segment", "index": i,
-                                "start": seg["start"], "end": seg["end"],
-                                "text": seg["text"], "duration": round(duration, 1),
+                                "type": "done", "total_segments": len(segments),
+                                "duration": round(duration, 1), "processing_time": proc_time,
+                                "device": _device,
                             }) + "\n"
-                        yield json.dumps({
-                            "type": "done", "total_segments": len(segments),
-                            "duration": round(duration, 1), "processing_time": proc_time,
-                            "device": _device,
-                        }) + "\n"
-                    except GeneratorExit:
-                        cancelled = True
-                        future.cancel()
-                        elapsed = round(time.monotonic() - t0, 1)
-                        print(f"[取消] 客戶端中斷連線（{elapsed:.1f}s），等待 openai-whisper 辨識執行緒結束...")
-                        # 等 transcribe thread 真正結束再清理（GPU 仍在跑）
-                        pool.shutdown(wait=True)
-                        print(f"[取消] openai-whisper 執行緒已結束")
-                        return
-                    except Exception as e:
-                        yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
+                        except GeneratorExit:
+                            cancelled = True
+                            future.cancel()
+                            elapsed = round(time.monotonic() - t0, 1)
+                            print(f"[取消] 客戶端中斷連線（{elapsed:.1f}s），等待 openai-whisper 辨識執行緒結束...")
+                            # 等 transcribe thread 真正結束再清理（GPU 仍在跑）。
+                            # **也要等它結束才讓出隊伍**，否則下一件會跟它同時跑。
+                            pool.shutdown(wait=True)
+                            print(f"[取消] openai-whisper 執行緒已結束")
+                            return
+                        except Exception as e:
+                            yield json.dumps({"type": "error", "detail": str(e)}) + "\n"
                     finally:
-                        if not cancelled:
+                        if pool is not None and not cancelled:
                             pool.shutdown(wait=False)
-                        _clear_active_task(task_token)
+                        lane.leave(ticket)
                         try:
                             os.unlink(tmp_path)
                         except OSError:
                             pass
 
-            # 串流模式由 generator 負責刪除暫存檔，不走 finally。
+            # 串流模式由 generator 負責刪除暫存檔與讓出隊伍，不走 finally。
             # 用戶端中途斷線時，Starlette 只取消外層迭代、不會關閉這個同步 generator，
-            # generator 的 finally 就永遠不會執行 → 忙碌標記卡住、所有用戶端一直等、暫存檔殘留。
+            # generator 的 finally 就永遠不會執行 → 隊伍卡住、後面的人永遠等不到、暫存檔殘留。
             # 回應結束（含斷線）後一定會跑 background，由它關閉 generator 並補做清理。
+            # （generator 還沒開始跑就斷線時 close() 不會進 finally，所以這裡也要 leave。）
             gen = generate()
 
             def _cleanup_stream():
@@ -996,7 +1115,7 @@ async def transcribe(
                     gen.close()   # 未執行完時觸發 GeneratorExit，走 generator 自己的取消流程
                 except Exception as e:
                     print(f"[警告] 關閉辨識串流失敗: {e}")
-                _clear_active_task(task_token)
+                lane.leave(ticket)
                 try:
                     os.unlink(tmp_path)
                 except OSError:
@@ -1009,7 +1128,11 @@ async def transcribe(
             return StreamingResponse(gen, media_type="text/x-ndjson",
                                      background=BackgroundTask(_cleanup_stream_async))
 
-        # 非串流模式（用 asyncio.to_thread 避免阻塞 event loop）
+        # 非串流模式：先等輪到自己（即時線通常只等前一段幾百毫秒）
+        if not await _wait_turn_async(lane, ticket, request):
+            return JSONResponse(status_code=499, content={"error": "client_disconnected"})
+
+        # 用 asyncio.to_thread 避免阻塞 event loop
         try:
             if _backend == "openai-whisper":
                 segments, full_text, duration, proc_time = await asyncio.to_thread(
@@ -1037,7 +1160,7 @@ async def transcribe(
     finally:
         # 非串流模式，或串流回應交出前就出錯時在這裡清理（交出後由 background 清理）
         if not stream_handed_off:
-            _clear_active_task(task_token)
+            lane.leave(ticket)
             try:
                 os.unlink(tmp.name)
             except OSError:
@@ -1051,7 +1174,13 @@ async def diarize(
     segments: str = Form(...),
     num_speakers: int = Form(0),
 ):
-    """接收音訊檔 + segments JSON，回傳講者辨識結果"""
+    """接收音訊檔 + segments JSON，回傳講者辨識結果。
+
+    走 batch 線排隊。**回應是「前導空白 + JSON」的串流**：排隊與計算期間每 5 秒
+    送一個空白字元保持連線（用戶端的讀取逾時是 300 秒，排在一場長會議後面
+    一定會超過），最後才送 JSON 本體。JSON 允許前導空白，舊用戶端的
+    `json.loads(resp.read())` 照樣解得開。代價是狀態碼一開始就得定成 200，
+    排隊之後才發生的錯誤改放在 JSON 的 `error` 欄位。"""
     from fastapi.responses import JSONResponse
 
     if not _HAS_DIARIZE:
@@ -1075,45 +1204,73 @@ async def diarize(
         )
 
     client_ip = request.client.host if request.client else ""
-    diar_token = _set_active_task("diarize", "resemblyzer", language="", client_ip=client_ip)
-
     suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     try:
         content = await file.read()
         tmp.write(content)
         tmp.close()
-
-        ns = num_speakers if num_speakers > 0 else None
-        t0 = time.monotonic()
-
-        try:
-            speaker_labels = await asyncio.to_thread(_diarize, tmp.name, seg_list, num_speakers=ns)
-        except Exception as e:
-            print(f"[錯誤] diarize 失敗: {e}")
-            return JSONResponse(
-                status_code=500,
-                content={"error": f"講者辨識失敗: {e}"},
-            )
-
-        proc_time = round(time.monotonic() - t0, 2)
-
-        if speaker_labels is None:
-            # 無法提取聲紋，降級全部 Speaker 0
-            speaker_labels = [0] * len(seg_list)
-
-        return {
-            "speaker_labels": speaker_labels,
-            "num_speakers": len(set(speaker_labels)),
-            "processing_time": proc_time,
-            "device": _torch_device,
-        }
-    finally:
-        _clear_active_task(diar_token)
+    except Exception:
         try:
             os.unlink(tmp.name)
         except OSError:
             pass
+        raise
+
+    lane = _LANES["batch"]
+    ticket = lane.enter("diarize", "resemblyzer", "", client_ip)
+    ahead = lane.position(ticket)
+    if ahead > 0:
+        print(f"[排隊] {client_ip} 的講者辨識排入隊伍，前面 {ahead} 件", flush=True)
+    ns = num_speakers if num_speakers > 0 else None
+
+    def _release(_=None):
+        lane.leave(ticket)
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    async def body():
+        work = None
+        try:
+            last = time.monotonic()
+            while lane.position(ticket) > 0:
+                if time.monotonic() - last >= 5:
+                    yield b" "
+                    last = time.monotonic()
+                await asyncio.sleep(0.3)
+            t0 = time.monotonic()
+            work = asyncio.ensure_future(
+                asyncio.to_thread(_diarize, tmp.name, seg_list, num_speakers=ns))
+            while not work.done():
+                await asyncio.wait({work}, timeout=5)
+                if not work.done():
+                    yield b" "
+            try:
+                speaker_labels = work.result()
+            except Exception as e:
+                print(f"[錯誤] diarize 失敗: {e}")
+                yield json.dumps({"error": f"講者辨識失敗: {e}"}).encode()
+                return
+            if speaker_labels is None:
+                # 無法提取聲紋，降級全部 Speaker 0
+                speaker_labels = [0] * len(seg_list)
+            yield json.dumps({
+                "speaker_labels": speaker_labels,
+                "num_speakers": len(set(speaker_labels)),
+                "processing_time": round(time.monotonic() - t0, 2),
+                "device": _torch_device,
+            }).encode()
+        finally:
+            if work is not None and not work.done():
+                # 用戶端斷線了但執行緒還在算：**等它算完才讓出隊伍**，
+                # 否則下一件會跟它同時佔用 GPU
+                work.add_done_callback(_release)
+            else:
+                _release()
+
+    return StreamingResponse(body(), media_type="application/json")
 
 
 if __name__ == "__main__":
