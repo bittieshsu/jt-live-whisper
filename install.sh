@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.21.6 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.21.7 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1389,8 +1389,64 @@ _rw_stop() {    # $1=ssh_opts  $2=user@host  $3=port
 # 只重導背景那個指令不夠，子殼仍握著 ssh 的 stdout/stderr，ssh 會一直等不到 EOF。
 # 2026-09-23 實測：不包子殼時 ssh 掛滿 35 秒才逾時（服務其實已經起來了），
 # 包了之後 1 秒返回。`translate_meeting.py` 先前是用 timeout=30 + except 吞掉的。
+#
+# 有裝 systemd 單元（見 _rw_install_unit）時改走 systemctl：由 systemd 帶起來的
+# 行程才會在主機重開後、或程式崩潰後自動回來。
 _rw_start() {   # $1=ssh_opts  $2=user@host  $3=port
-    ssh $1 "$2" "( cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && nohup setsid venv/bin/python3 server.py --port $3 > /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1" &>/dev/null || true
+    ssh $1 "$2" "if [ \$(id -u) = 0 ] && systemctl is-enabled --quiet jt-whisper-server@$3 2>/dev/null; then systemctl restart jt-whisper-server@$3; else ( cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && nohup setsid venv/bin/python3 server.py --port $3 > /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1; fi" &>/dev/null || true
+}
+
+# 在 GPU 伺服器裝 systemd 範本單元 jt-whisper-server@<port>，開機自動啟動。
+# 2026-09-17 發現服務停了 29 天：主機重開過，而先前服務只靠 ssh + nohup 拉起來，
+# 重開之後沒有任何東西會去啟動它。
+#
+# Restart=on-failure 而**不是 always**：舊版用戶端的「重啟」是先送 SIGTERM
+# 再自己用 nohup 啟動；SIGTERM 對 systemd 算正常結束、不會補啟動，兩邊才不會
+# 搶同一個 port。崩潰（非零結束、SIGSEGV 等）仍會自動重啟。
+# 伺服器的自動更新用 os.execv 換掉自己，PID 不變，systemd 看不出差別。
+#
+# 非 root 或沒有 systemd 時什麼都不做（回傳 1），沿用 nohup。
+# 輸出一個字：ENABLED / NOROOT / NOSYSTEMD
+_RW_UNIT_SCRIPT='set -e
+PORT="$1"
+[ "$(id -u)" = 0 ] || { echo NOROOT; exit 0; }
+{ command -v systemctl >/dev/null && [ -d /run/systemd/system ]; } || { echo NOSYSTEMD; exit 0; }
+D="$HOME/jt-whisper-server"
+cat > /etc/systemd/system/jt-whisper-server@.service <<UNIT
+[Unit]
+Description=jt-live-whisper GPU ASR server (port %i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$D
+Environment=LD_LIBRARY_PATH=/usr/local/lib
+# JT_WHISPER_UPDATE_TOKEN 等設定放這裡（選用）
+EnvironmentFile=-$D/server.env
+ExecStart=$D/venv/bin/python3 server.py --port %i
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/tmp/jt-whisper-server.log
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable "jt-whisper-server@$PORT" >/dev/null 2>&1
+echo ENABLED'
+
+_rw_install_unit() {   # $1=ssh_opts  $2=user@host  $3=port
+    local r
+    r=$(printf '%s\n' "$_RW_UNIT_SCRIPT" | ssh $1 "$2" "bash -s -- $3" 2>/dev/null | tail -1)
+    case "$r" in
+        ENABLED)   check_ok "已設定開機自動啟動（systemd：jt-whisper-server@$3）"; return 0 ;;
+        NOROOT)    echo -e "  ${C_DIM}非 root 帳號，未設定開機自動啟動（主機重開後需重新啟動服務）${NC}" ;;
+        NOSYSTEMD) echo -e "  ${C_DIM}伺服器沒有 systemd，未設定開機自動啟動${NC}" ;;
+        *)         echo -e "  ${C_DIM}設定開機自動啟動失敗，沿用手動啟動${NC}" ;;
+    esac
+    return 1
 }
 
 # 等服務起來。**要看版本號不能只看通不通**：舊進程可能還活著，
@@ -2067,6 +2123,9 @@ else:
             " 2>&1 | grep -v "^Shared connection"
             check_ok "辨識模型檢查完成"
             # 同步部署最新 server.py（僅本地有此檔案時）
+            # 先前裝的伺服器沒有開機自動啟動；補裝（已裝過就只是覆寫同一份）。
+            # 要放在下面的更新重啟之前，重啟才會交給 systemd。
+            _rw_install_unit "$chk_opts" "$existing_user@$existing_host" "$existing_wport" || true
             if [ -f "$SCRIPT_DIR/remote_whisper_server.py" ]; then
                 local scp_chk_opts="-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -P $existing_port"
                 scp_chk_opts="$scp_chk_opts -o ControlMaster=auto -o ControlPath=$ctrl_sock -o ControlPersist=120"
@@ -2455,6 +2514,10 @@ print(f'{pt},{ct2}')
     if [ "$health_ok" -eq 0 ]; then
         echo ""
         check_ok "伺服器測試成功"
+        # 測試成功就交給 systemd 常駐（開機自動啟動）
+        if _rw_install_unit "$ssh_opts" "$rw_user@$rw_host" "$rw_port"; then
+            _rw_start "$ssh_opts" "$rw_user@$rw_host" "$rw_port"
+        fi
     else
         echo ""
         check_fail "伺服器無法啟動，請檢查防火牆或 GPU 驅動"

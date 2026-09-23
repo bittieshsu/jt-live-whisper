@@ -1599,7 +1599,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.21.6"
+APP_VERSION = "2.21.7"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -4246,9 +4246,13 @@ def _remote_whisper_start(rw_cfg, force_restart=False):
         # 子殼仍握著 ssh 的 stdout/stderr，ssh 等不到 EOF 就會一直掛著——
         # 這支先前是靠下面的 timeout=30 吞掉，**每次重啟都白等 30 秒**
         # （2026-09-23 實測：包了子殼之後 1 秒返回）。
+        # 伺服器有裝 systemd 單元（install.sh 的 _rw_install_unit）時改走 systemctl，
+        # 由 systemd 帶起來的行程才會在主機重開或崩潰後自動回來。
+        f"if [ $(id -u) = 0 ] && systemctl is-enabled --quiet jt-whisper-server@{port} 2>/dev/null; "
+        f"then systemctl restart jt-whisper-server@{port}; else "
         "( cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && "
         f"nohup setsid venv/bin/python3 server.py --port {port} "
-        "> /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1"
+        "> /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1; fi"
     ]
     try:
         # 不用 capture_output，讓 SSH 密碼提示可互動
@@ -4498,7 +4502,17 @@ def _check_remote_before_upload(rw_cfg, file_size_bytes=0):
         print(f"  {C_DIM}請清理伺服器 /tmp 或磁碟空間後再試{RESET}")
         return False
 
-    # 忙碌狀態檢查
+    # 伺服器 v2.21.7 起自己會排隊（一次一件），不必再問使用者要不要等：
+    # 直接送出，排隊進度會從串流的 queued 事件顯示。
+    # 「強制中斷」那個選項在排隊伺服器上會砍掉別人正在跑的作業，所以不再提供。
+    if isinstance(status.get("queue"), dict):
+        bq = status["queue"].get("batch") or {}
+        n = (1 if bq.get("running") else 0) + len(bq.get("waiting") or [])
+        if n:
+            print(f"  {C_DIM}[排隊] 伺服器目前有 {n} 件作業，送出後會自動排隊，輪到時開始{RESET}")
+        return True
+
+    # 忙碌狀態檢查（舊版伺服器：沒有排隊，同時送會一起擠在 GPU 上）
     if status.get("busy"):
         task = status.get("task", {})
         task_type = task.get("type", "unknown")
@@ -4707,6 +4721,12 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                                     f"  已耗時 {mins}:{secs:02d}")
                             else:
                                 progress_callback(f"伺服器辨識中（{mins}:{secs:02d}）")
+                    elif event["type"] == "queued":
+                        # 伺服器 v2.21.7 起一次跑一件，其餘排隊
+                        if progress_callback:
+                            w = int(event.get("waited", 0))
+                            progress_callback(f"伺服器排隊中：前面還有 {event.get('ahead', '?')} 件"
+                                              f"（已等 {w//60}:{w%60:02d}）")
                     elif event["type"] == "error":
                         raise RuntimeError(f"伺服器辨識錯誤: {event.get('detail', '未知錯誤')}")
             else:
@@ -4892,6 +4912,11 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         print(f"  {C_HIGHLIGHT}[伺服器 diarize] 連線失敗: {e}{RESET}")
         return None, 0
 
+    # 伺服器 v2.21.7 起講者辨識會排隊，回應一開始就定成 200，
+    # 排隊之後才發生的錯誤放在 error 欄位
+    if data.get("error"):
+        print(f"  {C_HIGHLIGHT}[伺服器 diarize] {data['error']}{RESET}")
+        return None, 0
     speaker_labels = data.get("speaker_labels")
     proc_time = data.get("processing_time", 0)
     n_spk = data.get("num_speakers", 0)
