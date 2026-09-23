@@ -184,6 +184,9 @@ cd C:\jt-live-whisper
 ./start.sh --mode en_zh
 <span class="c"># 日中雙向字幕</span>
 ./start.sh --mode ja_zh
+
+<span class="c"># 韓中雙向字幕</span>
+./start.sh --mode ko_zh
 <span class="c"># 即時翻譯 + 同時轉錄麥克風</span>
 ./start.sh --mode en2zh --mic</pre>
 
@@ -286,7 +289,7 @@ journalctl -u jt-live-whisper-webui -f
       <thead><tr><th><span class="zh">參數</span><span class="en">Flag</span></th><th><span class="zh">說明</span><span class="en">Description</span></th><th><span class="zh">預設</span><span class="en">Default</span></th></tr></thead>
       <tbody>
         <tr><td><code>--webui</code></td><td><span class="zh">啟動 WebUI 瀏覽器介面</span><span class="en">Launch the Web UI</span></td><td></td></tr>
-        <tr><td><code>--mode MODE</code></td><td><span class="zh">功能模式（en2zh / zh2en / ja2zh / zh2ja / en_zh / ja_zh / en / zh / ja / record）</span><span class="en">Mode (en2zh / zh2en / ja2zh / zh2ja / en_zh / ja_zh / en / zh / ja / record)</span></td><td><code>en2zh</code></td></tr>
+        <tr><td><code>--mode MODE</code></td><td><span class="zh">功能模式（en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record）</span><span class="en">Mode (en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record)</span></td><td><code>en2zh</code></td></tr>
         <tr><td><code>--asr ASR</code></td><td><span class="zh">辨識引擎（whisper / moonshine / faster-whisper）</span><span class="en">ASR engine</span></td><td><code>whisper</code></td></tr>
         <tr><td><code>-m, --model</code></td><td><span class="zh">Whisper 模型（base.en … large-v3-turbo / large-v3）</span><span class="en">Whisper model</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
         <tr><td><code>--moonshine-model</code></td><td><span class="zh">Moonshine 模型（medium / small / tiny）</span><span class="en">Moonshine model</span></td><td><code>medium</code></td></tr>

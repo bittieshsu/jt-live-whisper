@@ -301,7 +301,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.21.9 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.22.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -1009,10 +1009,10 @@ except: print('FAIL')
 }
 
 # ═══════════════════════════════════════════════════════════════
-# 4b. 下載 NLLB 離線翻譯模型（中日英互譯，CC-BY-NC 4.0 授權）
+# 4b. 下載 NLLB 離線翻譯模型（中日韓英互譯，CC-BY-NC 4.0 授權）
 # ═══════════════════════════════════════════════════════════════
 
-section "下載 NLLB 離線翻譯模型（中日英互譯）"
+section "下載 NLLB 離線翻譯模型（中日韓英互譯）"
 
 $NLLB_MODEL_DIR = Join-Path $env:LOCALAPPDATA "jt-live-whisper\models\nllb-600m"
 
@@ -2572,7 +2572,7 @@ $features = @(
     @{ OK = $fwModelOk;                        Desc = "Whisper 模型 large-v3-turbo"; Engine = "faster-whisper 格式" },
     @{ OK = (venv_import_ok "resemblyzer");    Desc = "AI 講者辨識 (--diarize)"; Engine = "resemblyzer" },
     @{ OK = (venv_import_ok "argostranslate"); Desc = "Argos 離線翻譯";          Engine = "僅英翻中" },
-    @{ OK = (Test-Path (Join-Path $env:LOCALAPPDATA "jt-live-whisper\models\nllb-600m\model.bin")); Desc = "NLLB 離線翻譯"; Engine = "中日英互譯" },
+    @{ OK = (Test-Path (Join-Path $env:LOCALAPPDATA "jt-live-whisper\models\nllb-600m\model.bin")); Desc = "NLLB 離線翻譯"; Engine = "中日韓英互譯" },
     @{ OK = (venv_import_ok "moonshine_voice");      Desc = "Moonshine 即時辨識";       Engine = "英文低延遲" }
 )
 

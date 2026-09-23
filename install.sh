@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.21.9 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.22.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1084,7 +1084,7 @@ else:
 
 # ─── NLLB 翻譯模型 ──────────────────────────────
 check_nllb_model() {
-    section "NLLB 離線翻譯模型（中日英互譯，CC-BY-NC 4.0 授權）"
+    section "NLLB 離線翻譯模型（中日韓英互譯，CC-BY-NC 4.0 授權）"
 
     if [ -d "$NLLB_MODEL_DIR" ] && [ -f "$NLLB_MODEL_DIR/model.bin" ] && \
        [ -f "$NLLB_MODEL_DIR/sentencepiece.bpe.model" ]; then
@@ -2779,9 +2779,9 @@ print('found' if found else '')
     # NLLB
     local nllb_dir="$HOME/.local/share/jt-live-whisper/models/nllb-600m"
     if [ -f "$nllb_dir/model.bin" ]; then
-        echo -e "  ${C_OK}■${NC} NLLB 離線翻譯  ${C_DIM}中日英互譯${NC}"
+        echo -e "  ${C_OK}■${NC} NLLB 離線翻譯  ${C_DIM}中日韓英互譯${NC}"
     else
-        echo -e "  ${C_DIM}□ NLLB 離線翻譯  中日英互譯${NC}"
+        echo -e "  ${C_DIM}□ NLLB 離線翻譯  中日韓英互譯${NC}"
     fi
 
     # Moonshine

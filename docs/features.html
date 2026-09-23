@@ -63,12 +63,12 @@
           <th><span class="zh">說明</span><span class="en">Notes</span></th>
         </tr></thead>
         <tbody>
-          <tr><td><span class="zh">語音辨識</span><span class="en">ASR</span></td><td><strong>Whisper</strong> (OpenAI)</td><td><span class="zh"><b>多語（中日英）</b>主力辨識模型；base / small / large-v3-turbo / large-v3 可選</span><span class="en"><b>Multilingual (ZH/JA/EN)</b> main ASR model; base / small / large-v3-turbo / large-v3</span></td></tr>
+          <tr><td><span class="zh">語音辨識</span><span class="en">ASR</span></td><td><strong>Whisper</strong> (OpenAI)</td><td><span class="zh"><b>多語（中日韓英）</b>主力辨識模型；base / small / large-v3-turbo / large-v3 可選</span><span class="en"><b>Multilingual (ZH/JA/KO/EN)</b> main ASR model; base / small / large-v3-turbo / large-v3</span></td></tr>
           <tr><td><span class="zh">語音辨識</span><span class="en">ASR</span></td><td><strong>Breeze-ASR-26</strong> (MediaTek Research)</td><td><span class="zh"><b>台語（台灣閩南語）專用</b>，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，結果直接輸出漢字，不需另外翻譯</span><span class="en"><b>Taiwanese Hokkien</b>, also selectable in Mandarin modes (for Taiwanese Mandarin mixed with Hokkien); fine-tuned from Whisper large-v2; outputs Han characters directly</span></td></tr>
           <tr><td><span class="zh">語音辨識</span><span class="en">ASR</span></td><td><strong>Moonshine</strong> (Useful Sensors)</td><td><span class="zh"><b>英文專用</b>，超低延遲串流辨識模型（不支援 Intel Mac）</span><span class="en"><b>English only</b>, ultra-low-latency streaming model (not on Intel Macs)</span></td></tr>
           <tr><td><span class="zh">翻譯 (LLM)</span><span class="en">Translation (LLM)</span></td><td><span class="zh">自架 LLM 伺服器，預設 <strong>gemma4:26b</strong>（伺服器沒有時改用 qwen2.5:14b）</span><span class="en">Self-hosted LLM, default <strong>gemma4:26b</strong> (falls back to qwen2.5:14b)</span></td><td><span class="zh">即時與離線翻譯，透過地端 Ollama 或其他 LLM 伺服器執行；建議 14B 以上，並<strong>選用不會思考、或思考可關閉的模型</strong>——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢</span><span class="en">Realtime and offline translation via local Ollama or another LLM server; 14B+ recommended. <strong>Pick a model without thinking, or one whose thinking can be turned off</strong> — the app disables thinking automatically (gemma4, qwen3, etc.), but gpt-oss models always reason and cannot be turned off, which noticeably slows realtime translation</span></td></tr>
           <tr><td><span class="zh">摘要 / 校正 (LLM)</span><span class="en">Summary (LLM)</span></td><td><span class="zh">自架 LLM 伺服器，預設 <strong>qwen3.8:27b</strong></span><span class="en">Self-hosted LLM, default <strong>qwen3.8:27b</strong></span></td><td><span class="zh">會議摘要與逐字稿校正；兩者共用同一個模型，建議 27B 以上，可與翻譯用不同模型</span><span class="en">Meeting summary and transcript correction (both use the same model); 27B+ recommended, can differ from the translation model</span></td></tr>
-          <tr><td><span class="zh">翻譯 (離線)</span><span class="en">Translate (offline)</span></td><td><strong>NLLB 600M</strong> (Meta)</td><td><span class="zh">離線翻譯，支援中日英互譯（en2zh / zh2en / ja2zh / zh2ja）</span><span class="en">Offline ZH/JA/EN translation</span></td></tr>
+          <tr><td><span class="zh">翻譯 (離線)</span><span class="en">Translate (offline)</span></td><td><strong>NLLB 600M</strong> (Meta)</td><td><span class="zh">離線翻譯，支援中日韓英互譯（en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko）</span><span class="en">Offline ZH/JA/KO/EN translation</span></td></tr>
           <tr><td><span class="zh">翻譯 (離線備援)</span><span class="en">Translate (fallback)</span></td><td><strong>Argos Translate</strong></td><td><span class="zh">完全離線的輕量翻譯模型，僅支援英翻中</span><span class="en">Fully offline, lightweight; English→Chinese only</span></td></tr>
           <tr><td><span class="zh">講者辨識</span><span class="en">Diarization</span></td><td><strong>resemblyzer</strong> + <strong>spectralcluster</strong></td><td><span class="zh">聲紋特徵提取 + 頻譜分群，可在本機或 GPU 伺服器執行</span><span class="en">Voice embeddings + spectral clustering; local or GPU server</span></td></tr>
         </tbody>
@@ -97,18 +97,22 @@
 
 <section id="modes" class="alt">
   <div class="wrap">
-    <div class="sec-head"><h2><span class="zh">10 種功能模式</span><span class="en">10 functional modes</span></h2>
+    <div class="sec-head"><h2><span class="zh">16 種功能模式</span><span class="en">16 functional modes</span></h2>
       <p><span class="zh">單向翻譯、雙向翻譯、純轉錄、純錄音，滿足各種使用場景。</span><span class="en">One-way, bidirectional, transcription-only and record-only — for every scenario.</span></p></div>
     <div class="modes">
       <div class="mode"><span class="tag">en2zh</span><span><b><span class="zh">英翻中</span><span class="en">EN → ZH</span></b></span></div>
       <div class="mode"><span class="tag">zh2en</span><span><b><span class="zh">中翻英</span><span class="en">ZH → EN</span></b></span></div>
       <div class="mode"><span class="tag">ja2zh</span><span><b><span class="zh">日翻中</span><span class="en">JA → ZH</span></b></span></div>
       <div class="mode"><span class="tag">zh2ja</span><span><b><span class="zh">中翻日</span><span class="en">ZH → JA</span></b></span></div>
+      <div class="mode"><span class="tag">ko2zh</span><span><b><span class="zh">韓翻中</span><span class="en">KO → ZH</span></b></span></div>
+      <div class="mode"><span class="tag">zh2ko</span><span><b><span class="zh">中翻韓</span><span class="en">ZH → KO</span></b></span></div>
       <div class="mode"><span class="tag">en_zh</span><span><b><span class="zh">英中雙向</span><span class="en">EN ↔ ZH</span></b> <span><span class="zh">系統音訊 + 麥克風</span><span class="en">system + mic</span></span></span></div>
       <div class="mode"><span class="tag">ja_zh</span><span><b><span class="zh">日中雙向</span><span class="en">JA ↔ ZH</span></b> <span><span class="zh">系統音訊 + 麥克風</span><span class="en">system + mic</span></span></span></div>
+      <div class="mode"><span class="tag">ko_zh</span><span><b><span class="zh">韓中雙向</span><span class="en">KO ↔ ZH</span></b> <span><span class="zh">系統音訊 + 麥克風</span><span class="en">system + mic</span></span></span></div>
       <div class="mode"><span class="tag">en</span><span><b><span class="zh">純英文轉錄</span><span class="en">English transcription</span></b></span></div>
       <div class="mode"><span class="tag">zh</span><span><b><span class="zh">純中文轉錄</span><span class="en">Chinese transcription</span></b></span></div>
       <div class="mode"><span class="tag">ja</span><span><b><span class="zh">純日文轉錄</span><span class="en">Japanese transcription</span></b></span></div>
+      <div class="mode"><span class="tag">ko</span><span><b><span class="zh">純韓文轉錄</span><span class="en">Korean transcription</span></b></span></div>
       <div class="mode"><span class="tag">nan</span><span><b><span class="zh">台語轉錄</span><span class="en">Taiwanese (Hokkien)</span></b> <span><span class="zh">直接輸出漢字</span><span class="en">outputs Han characters</span></span></span></div>
       <div class="mode"><span class="tag">nan2en</span><span><b><span class="zh">台翻英</span><span class="en">Taiwanese → EN</span></b></span></div>
       <div class="mode"><span class="tag">record</span><span><b><span class="zh">純錄音</span><span class="en">Record only</span></b></span></div>
@@ -133,7 +137,7 @@
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h8M9 4v4M7 8c0 4-2 6-4 7M11 8c0 5 3 8 6 9M14 18h7M16 22l2-6 2 6"/></svg></span><span class="zh">翻譯引擎</span><span class="en">Translation engines</span></h3>
         <ul style="margin:0;padding-left:18px;font-size:14px;line-height:1.8;color:var(--body)">
           <li><span class="zh"><b>LLM</b>：Ollama / OpenAI 相容伺服器，品質最佳</span><span class="en"><b>LLM</b>: Ollama / OpenAI-compatible servers, best quality</span></li>
-          <li><span class="zh"><b>NLLB</b>：離線中日英互譯，無需伺服器</span><span class="en"><b>NLLB</b>: offline ZH/JA/EN, no server needed</span></li>
+          <li><span class="zh"><b>NLLB</b>：離線中日韓英互譯，無需伺服器</span><span class="en"><b>NLLB</b>: offline ZH/JA/KO/EN, no server needed</span></li>
           <li><span class="zh"><b>Argos</b>：離線備援（僅英翻中）</span><span class="en"><b>Argos</b>: offline fallback (EN→ZH)</span></li>
         </ul>
       </div>
