@@ -301,7 +301,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.21.5 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.21.6 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -319,7 +319,7 @@ if ($Upgrade) {
     $UPGRADE_FILES = @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1",
                        "install-linux.sh","SOP.md","README.md","CHANGELOG.md","webui.py",
                        "webui.html","subtitle_overlay.py","sck_audio_capture.swift",
-                       "jtlw_tls.py")
+                       "jtlw_tls.py","remote_whisper_server.py")
 
     section "從 GitHub 升級程式"
 
@@ -1527,6 +1527,55 @@ function scp_file([string]$scpOpts, [string]$localFile, [string]$remoteDest) {
     return ($LASTEXITCODE -eq 0)
 }
 
+# ─── GPU 伺服器 server.py 的啟停與版本比較 ───────────────────
+# 2026-09-23 補。先前 install.sh / install.ps1 各自 inline 一份，
+# 兩邊都踩了同樣兩個坑（自殺式 pkill、殺完不啟動卻印「已重啟」）。
+
+# 停掉遠端的 server.py。
+# **絕對不可以用 pkill -f 'server.py --port N'**：執行這條指令的遠端 shell
+# 自己的命令列也含有那串字，pkill 會把自己一起殺掉（實測：後面的指令一行都不跑）。
+# [s] 打斷自我比對。
+function rw_stop([string]$sshOpts, [string]$userHost, [string]$port) {
+    $cmd = 'kill $(ps aux | awk ''/[s]erver\.py --port ' + $port + '/ {print $2}'') 2>/dev/null; sleep 0.5'
+    ssh_cmd $sshOpts $userHost $cmd | Out-Null
+}
+
+# 啟動遠端 server.py。
+# **setsid 與 < /dev/null 是必要的**，否則 ssh 連線結束時服務會被 SIGHUP 帶走。
+# **整段還要包在子殼裡、子殼自己也重導**：只重導背景那個指令不夠，
+# 子殼仍握著 ssh 的 stdout/stderr，ssh 會一直等不到 EOF
+# （2026-09-23 實測：不包子殼時掛滿 35 秒，包了之後 1 秒返回）。
+function rw_start([string]$sshOpts, [string]$userHost, [string]$port) {
+    $cmd = '( cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH && nohup setsid venv/bin/python3 server.py --port ' + $port + ' > /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1'
+    ssh_cmd $sshOpts $userHost $cmd | Out-Null
+}
+
+# 等服務起來。**要看版本號不能只看通不通**：舊進程可能還活著，
+# 那樣會把「根本沒換成功」誤判成更新完成。
+function rw_wait_health([string]$rwHost, [string]$port, [int]$secs, [string]$wantVer = "") {
+    for ($i = 1; $i -le $secs; $i++) {
+        try {
+            $oldProg = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+            $resp = Invoke-WebRequest -Uri "http://${rwHost}:${port}/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue 2>$null
+            $ProgressPreference = $oldProg
+            if ($resp.Content -match '"ok"') {
+                if (-not $wantVer) { return $true }
+                if ($resp.Content -match [regex]::Escape($wantVer)) { return $true }
+            }
+        } catch { $ProgressPreference = $oldProg }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+# $a 比 $b 舊嗎？空字串視為最舊（很舊的伺服器沒有 SERVER_VERSION）。
+function rw_ver_lt([string]$a, [string]$b) {
+    if ($a -eq $b) { return $false }
+    if (-not $a) { return $true }
+    if (-not $b) { return $false }
+    try { return ([version]$a -lt [version]$b) } catch { return $false }
+}
+
 # ─── SSH 金鑰自動部署（避免重複輸入密碼）─────────────────────
 function ensure_ssh_key_auth([string]$userHost, [string]$sshPort) {
     # 1. 已有 key 且 BatchMode 連線成功 → 免密碼
@@ -2013,11 +2062,32 @@ print(f'{pt},{ct2},{ow}')`""
             $localHash = (Get-FileHash $SERVER_PY -Algorithm MD5).Hash.ToLower()
             $remoteHash = ssh_cmd $sshOpts $userHost "md5sum ~/jt-whisper-server/server.py 2>/dev/null | cut -d' ' -f1"
             if ($localHash -ne $remoteHash) {
-                $scpOpts = "-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -P $rw_ssh_port"
-                if ($rw_key) { $scpOpts += " -i $rw_key" }
-                if (scp_file $scpOpts $SERVER_PY "${userHost}:~/jt-whisper-server/server.py") {
-                    ssh_cmd $sshOpts $userHost "pkill -f 'server.py --port' 2>/dev/null" | Out-Null
-                    check_ok "server.py 已同步更新（已重啟伺服器）"
+                # **只比 hash 會把伺服器降版**：本機這份可能比伺服器上的舊。
+                # 2026-09-23 之前 remote_whisper_server.py 不在升級清單裡，
+                # 每台 -Upgrade 上來的機器手上都是舊的，一跑 install.ps1 就蓋回去。
+                $localVer = ""
+                $vm = Select-String -Path $SERVER_PY -Pattern '^SERVER_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+                if ($vm) { $localVer = $vm.Matches[0].Groups[1].Value }
+                $verCmd = 'grep -m1 ''^SERVER_VERSION'' ~/jt-whisper-server/server.py 2>/dev/null | cut -d''"'' -f2'
+                $remoteVer = (ssh_cmd $sshOpts $userHost $verCmd | Select-Object -First 1)
+                if ($remoteVer) { $remoteVer = $remoteVer.Trim() }
+                if (rw_ver_lt $localVer $remoteVer) {
+                    check_ok "伺服器上的 server.py 較新（v${remoteVer} > 本機 v${localVer}），不覆蓋"
+                } else {
+                    $scpOpts = "-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -P $rw_ssh_port"
+                    if ($rw_key) { $scpOpts += " -i $rw_key" }
+                    if (scp_file $scpOpts $SERVER_PY "${userHost}:~/jt-whisper-server/server.py") {
+                        # 舊版到這裡只 pkill、**沒有任何啟動指令**，卻印「已重啟伺服器」
+                        # ——服務就停在那裡，而畫面說成功。
+                        rw_stop $sshOpts $userHost $rw_port
+                        rw_start $sshOpts $userHost $rw_port
+                        if (rw_wait_health $rw_host $rw_port 15 $localVer) {
+                            check_ok "server.py 已更新為 v${localVer} 並重新啟動"
+                        } else {
+                            check_fail "server.py 已更新為 v${localVer}，但伺服器沒有起來"
+                            info "可查看 log: ssh ${userHost} cat /tmp/jt-whisper-server.log"
+                        }
+                    }
                 }
             }
         }
@@ -2272,7 +2342,8 @@ print(f'{pt},{ct2}')`""
         }
 
         # 測試啟動
-        ssh_cmd $sshOpts $userHost "cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:`$LD_LIBRARY_PATH && nohup venv/bin/python3 server.py --port $rw_port > /tmp/jt-whisper-server.log 2>&1 &" | Out-Null
+        # setsid + < /dev/null：少了它們，ssh 一結束服務就被 SIGHUP 帶走
+        rw_start $sshOpts $userHost $rw_port
 
         # Health check（最多 15 秒）
         info "測試啟動伺服器..."
@@ -2287,8 +2358,8 @@ print(f'{pt},{ct2}')`""
             Start-Sleep -Seconds 1
         }
 
-        # 停止測試 server
-        ssh_cmd $sshOpts $userHost "pkill -f 'server.py --port $rw_port'" | Out-Null
+        # 停止測試 server（不可用 pkill -f，會殺到執行它的遠端 shell 自己）
+        rw_stop $sshOpts $userHost $rw_port
 
         if ($healthOk) {
             check_ok "伺服器測試成功"

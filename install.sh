@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.21.5 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.21.6 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1370,7 +1370,51 @@ check_sck() {
 # README.md 與 CHANGELOG.md 也要更新，否則升級後看不到改了什麼、版本號還停在舊版
 _UPGRADE_FILES="translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh \
 SOP.md README.md CHANGELOG.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
-jtlw_tls.py"
+jtlw_tls.py remote_whisper_server.py"
+
+# ─── GPU 伺服器 server.py 的啟停與版本比較 ──────────────────────
+# 這三支是 2026-09-23 補的。先前 install.sh / install.ps1 各自inline 一份，
+# 而且都踩了同樣兩個坑（自殺式 pkill、殺完不啟動）。
+
+# 停掉遠端的 server.py。
+# **絕對不可以用 `pkill -f 'server.py --port N'`**：執行這條指令的遠端 shell
+# 自己的命令列也含有那串字，pkill 會把自己一起殺掉。`[s]` 打斷自我比對。
+_rw_stop() {    # $1=ssh_opts  $2=user@host  $3=port
+    ssh $1 "$2" "kill \$(ps aux | awk '/[s]erver\.py --port $3/ {print \$2}') 2>/dev/null; sleep 0.5" &>/dev/null || true
+}
+
+# 啟動遠端 server.py。
+# **setsid 與 `< /dev/null` 是必要的**，否則 ssh 連線結束時服務會被 SIGHUP 帶走。
+# **整段還要包在子殼裡、子殼自己也重導**（`( ... & ) >/dev/null 2>&1`）：
+# 只重導背景那個指令不夠，子殼仍握著 ssh 的 stdout/stderr，ssh 會一直等不到 EOF。
+# 2026-09-23 實測：不包子殼時 ssh 掛滿 35 秒才逾時（服務其實已經起來了），
+# 包了之後 1 秒返回。`translate_meeting.py` 先前是用 timeout=30 + except 吞掉的。
+_rw_start() {   # $1=ssh_opts  $2=user@host  $3=port
+    ssh $1 "$2" "( cd ~/jt-whisper-server && export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH && nohup setsid venv/bin/python3 server.py --port $3 > /tmp/jt-whisper-server.log 2>&1 < /dev/null & ) >/dev/null 2>&1" &>/dev/null || true
+}
+
+# 等服務起來。**要看版本號不能只看通不通**：舊進程可能還活著，
+# 那樣會把「根本沒換成功」誤判成更新完成（手動操作時實際踩過）。
+_rw_wait_health() {   # $1=host  $2=port  $3=秒數  [$4=期望版本]
+    local i body
+    for i in $(seq 1 "$3"); do
+        body=$(curl -s --connect-timeout 2 "http://$1:$2/health" 2>/dev/null)
+        if echo "$body" | grep -q '"ok"'; then
+            [ -z "$4" ] && return 0
+            echo "$body" | grep -q "\"$4\"" && return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+# $1 比 $2 舊嗎？空字串視為最舊（很舊的伺服器沒有 SERVER_VERSION）。
+_rw_ver_lt() {
+    [ "$1" = "$2" ] && return 1
+    [ -z "$1" ] && return 0
+    [ -z "$2" ] && return 1
+    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
+}
 
 do_upgrade() {
     section "從 GitHub 升級程式"
@@ -2033,11 +2077,26 @@ else:
                 local_hash=$(md5 -q "$SCRIPT_DIR/remote_whisper_server.py" 2>/dev/null || md5sum "$SCRIPT_DIR/remote_whisper_server.py" 2>/dev/null | cut -d' ' -f1)
                 remote_hash=$(ssh $chk_opts "$existing_user@$existing_host" "md5sum ~/jt-whisper-server/server.py 2>/dev/null | cut -d' ' -f1" 2>/dev/null)
                 if [ "$local_hash" != "$remote_hash" ]; then
-                    scp $scp_chk_opts "$SCRIPT_DIR/remote_whisper_server.py" "$existing_user@$existing_host:~/jt-whisper-server/server.py" &>/dev/null
-                    if [ $? -eq 0 ]; then
-                        # 重啟伺服器以載入新版程式
-                        ssh $chk_opts "$existing_user@$existing_host" "pkill -f 'server.py --port' 2>/dev/null" &>/dev/null || true
-                        check_ok "server.py 已同步更新（已重啟伺服器，執行程式時自動載入新版）"
+                    # **只比 hash 會把伺服器降版**：本機這份可能比伺服器上的舊。
+                    # 2026-09-23 之前 remote_whisper_server.py 不在 _UPGRADE_FILES 裡，
+                    # 所以每一台 --upgrade 上來的機器手上都是舊的，一跑 install.sh
+                    # 就會把 GPU 伺服器蓋回去。先比版本號再決定。
+                    local local_ver remote_ver
+                    local_ver=$(grep -m1 '^SERVER_VERSION' "$SCRIPT_DIR/remote_whisper_server.py" 2>/dev/null | cut -d'"' -f2)
+                    remote_ver=$(ssh $chk_opts "$existing_user@$existing_host" "grep -m1 '^SERVER_VERSION' ~/jt-whisper-server/server.py 2>/dev/null | cut -d'\"' -f2" 2>/dev/null)
+                    if _rw_ver_lt "$local_ver" "$remote_ver"; then
+                        check_ok "伺服器上的 server.py 較新（v${remote_ver} > 本機 v${local_ver}），不覆蓋"
+                    elif scp $scp_chk_opts "$SCRIPT_DIR/remote_whisper_server.py" "$existing_user@$existing_host:~/jt-whisper-server/server.py" &>/dev/null; then
+                        # 舊版到這裡只 pkill、**沒有任何啟動指令**，卻印「已重啟伺服器」
+                        # ——服務就停在那裡，而畫面說成功。
+                        _rw_stop "$chk_opts" "$existing_user@$existing_host" "$existing_wport"
+                        _rw_start "$chk_opts" "$existing_user@$existing_host" "$existing_wport"
+                        if _rw_wait_health "$existing_host" "$existing_wport" 15 "$local_ver"; then
+                            check_ok "server.py 已更新為 v${local_ver} 並重新啟動"
+                        else
+                            check_fail "server.py 已更新為 v${local_ver}，但伺服器沒有起來"
+                            echo -e "  ${C_DIM}可查看 log: ssh $existing_user@$existing_host cat /tmp/jt-whisper-server.log${NC}"
+                        fi
                     fi
                 fi
             fi
@@ -2372,12 +2431,8 @@ print(f'{pt},{ct2}')
     check_ok "server.py 已部署"
 
     # 測試啟動
-    ssh $ssh_opts "$rw_user@$rw_host" "
-        cd ~/jt-whisper-server
-        export LD_LIBRARY_PATH=/usr/local/lib:\$LD_LIBRARY_PATH
-        nohup venv/bin/python3 server.py --port $rw_port > /tmp/jt-whisper-server.log 2>&1 &
-        echo \$!
-    " > /tmp/rw_pid.txt 2>/dev/null
+    # setsid + < /dev/null：少了它們，ssh 一結束服務就被 SIGHUP 帶走
+    _rw_start "$ssh_opts" "$rw_user@$rw_host" "$rw_port"
 
     # Health check（最多 15 秒）+ spinner
     _test_health() {
@@ -2394,8 +2449,8 @@ print(f'{pt},{ct2}')
     run_spinner "測試啟動伺服器..." _test_health
     local health_ok=$?
 
-    # 停止測試 server
-    ssh $ssh_opts "$rw_user@$rw_host" "pkill -f 'server.py --port $rw_port'" &>/dev/null
+    # 停止測試 server（不可用 pkill -f，會殺到執行它的遠端 shell 自己）
+    _rw_stop "$ssh_opts" "$rw_user@$rw_host" "$rw_port"
 
     if [ "$health_ok" -eq 0 ]; then
         echo ""
