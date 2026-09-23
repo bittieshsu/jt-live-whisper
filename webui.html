@@ -460,12 +460,12 @@ let _asrItemsCache=null,_asrLastVal='';
 let _recModels={},_cfgModels=[],_lastModel='';
 function _updateModelRec(mode){
   const recM=_recModels[mode]||'large-v3-turbo';const prev=cselVal($('iModel'));
-  const noEng=['zh','zh2en','zh2ja','ja2zh','ja','en_zh','ja_zh','nan','nan2en'];
+  const noEng=['zh','zh2en','zh2ja','ja2zh','ja','en_zh','ja_zh','ko2zh','zh2ko','ko','ko_zh','nan','nan2en'];
   const isNoEng=noEng.includes(mode);
   // 模型大小排序（用於判斷效能需求）
   const _mOrder={'base.en':0,'base':1,'small.en':2,'small':3,'large-v3-turbo':4,'large-v3':5};
   const recIdx=_mOrder[recM]??6;
-  const isNan=['nan','nan2en'].includes(mode),breezeOk=['zh','zh2en','zh2ja','nan','nan2en'].includes(mode);
+  const isNan=['nan','nan2en'].includes(mode),breezeOk=['zh','zh2en','zh2ja','zh2ko','nan','nan2en'].includes(mode);
   cselSetItems($('iModel'),_cfgModels.map(m=>{
     const isEnOnly=m.value.endsWith('.en'),isBreeze=m.value==='breeze-asr-26';
     if(isNoEng&&isEnOnly)return{value:m.value,label:m.label,tag:'不支援此模式',disabled:true};
@@ -484,7 +484,7 @@ function _updateModelRec(mode){
   else if(!breezeOk&&curVal==='breeze-asr-26')cselSetValue($('iModel'),_recModels[mode]||'large-v3-turbo');
   else cselSetValue($('iModel'),curVal);
 }
-const _modeLabels={'en2zh':'英翻中字幕','zh2en':'中翻英字幕','ja2zh':'日翻中字幕','zh2ja':'中翻日字幕','en_zh':'英中雙向字幕','ja_zh':'日中雙向字幕','en':'英文轉錄','zh':'中文轉錄','ja':'日文轉錄','nan':'台語轉錄','nan2en':'台翻英字幕','record':'純錄音'};
+const _modeLabels={'en2zh':'英翻中字幕','zh2en':'中翻英字幕','ja2zh':'日翻中字幕','zh2ja':'中翻日字幕','ko2zh':'韓翻中字幕','zh2ko':'中翻韓字幕','en_zh':'英中雙向字幕','ja_zh':'日中雙向字幕','ko_zh':'韓中雙向字幕','en':'英文轉錄','zh':'中文轉錄','ja':'日文轉錄','ko':'韓文轉錄','nan':'台語轉錄','nan2en':'台翻英字幕','record':'純錄音'};
 const _spkColors=['#ffa550','#64c8ff','#ff96b4','#b4e664','#bea0ff','#fff064','#64f0c8','#ffb4a0'];
 /* Custom Select */
 function cselInit(el){const d=document.createElement('div');d.className='csel-display';d.textContent='選擇...';const dr=document.createElement('div');dr.className='csel-drop';el.appendChild(d);el.appendChild(dr);d.addEventListener('click',e=>{e.stopPropagation();document.querySelectorAll('.csel.open').forEach(s=>{if(s!==el)s.classList.remove('open')});el.classList.toggle('open')})}
@@ -658,7 +658,7 @@ function _setSecTitle(el,text){
   if(n)n.textContent=text;
 }
 function engChg(){
-  const m=cselVal($('iMode')),isT=['en','zh','ja','nan','record'].includes(m),isRec=m==='record',isFile=cselVal($('iSource'))==='file';
+  const m=cselVal($('iMode')),isT=['en','zh','ja','ko','nan','record'].includes(m),isRec=m==='record',isFile=cselVal($('iSource'))==='file';
   // 純錄音整區隱藏；純轉錄只藏翻譯引擎與翻譯模型，LLM 主機仍要能填（逐字稿校正、AI 摘要會用到）
   $('rEngine').style.display=isRec?'none':'';
   $('engineRow').style.display=isT?'none':'';
@@ -668,7 +668,7 @@ function engChg(){
   // 純錄音：只需模式 + 裝置
   $('rModelScene').style.display=isRec?'none':'';
   $('rOther').style.display=isRec?'none':'';
-  const isBidi=['en_zh','ja_zh'].includes(m);
+  const isBidi=['en_zh','ja_zh','ko_zh'].includes(m);
   if(isRec){$('rAsrLoc').style.display='none';$('rOffline').style.display='none'}
   else{$('rOffline').style.display=isFile?'':'none'}
   // 雙向模式：強制本機，GPU 不支援
@@ -679,7 +679,7 @@ function engChg(){
     cselSetItems($('iAsrLoc'),_asrItemsCache);cselSetValue($('iAsrLoc'),_asrLastVal||'local');
   }
   // 根據模式標記不支援的引擎（反灰 + 不可選）
-  const noArgos=['en_zh','ja_zh','zh2en','ja2zh','zh2ja'].includes(m);
+  const noArgos=['en_zh','ja_zh','ko_zh','zh2en','ja2zh','zh2ja','ko2zh','zh2ko'].includes(m);
   if(_allEngines.length){
     const items=_allEngines.map(e=>{
       const disabled=noArgos&&e.value==='argos';
@@ -713,12 +713,12 @@ async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').inne
 async function go(){
   const mode=cselVal($('iMode')),isFile=cselVal($('iSource'))==='file';
   const asrLoc=cselVal($('iAsrLoc'))==='local'?'本機':'GPU 伺服器';
-  const eng=cselVal($('iEngine')),needLlm=eng==='llm'&&!['en','zh','ja','record'].includes(mode);
+  const eng=cselVal($('iEngine')),needLlm=eng==='llm'&&!['en','zh','ja','ko','record'].includes(mode);
   // 防呆檢查
   if(isFile&&!_selectedFiles.length){showToast('請先選擇至少一個音訊檔案','err');return}
   if(needLlm&&!$('iLlmHost').value.trim()){showToast('使用 LLM 翻譯引擎需填寫 LLM 主機地址','err');return}
   if(needLlm&&!cselVal($('iLlmModel'))){showToast('請先測試連線並選擇 LLM 模型','err');return}
-  if(isFile&&$('iSummarize').checked&&!$('iLlmHost').value.trim()){showToast('產生摘要需要 LLM 伺服器：請在「'+(['en','zh','ja','nan'].includes(mode)?'語言模型':'語言翻譯')+'」區填寫 LLM 主機（例如本機 Ollama 為 127.0.0.1:11434）','err');return}
+  if(isFile&&$('iSummarize').checked&&!$('iLlmHost').value.trim()){showToast('產生摘要需要 LLM 伺服器：請在「'+(['en','zh','ja','ko','nan'].includes(mode)?'語言模型':'語言翻譯')+'」區填寫 LLM 主機（例如本機 Ollama 為 127.0.0.1:11434）','err');return}
   // 檢查是否已在執行
   try{const st=await(await fetch('/api/status',{headers:_authHeaders()})).json();if(st.running){showToast('已有處理正在執行中，請先停止再重新啟動','err');return}}catch(e){}
   curCfg={mode,modeLabel:_modeLabels[mode]||mode,model:cselVal($('iModel')),engine:eng,asrLoc,isFile,record:$('iRec').checked,denoise:$('iDenoise').checked,mic:$('iMic').checked,diarize:isFile&&$('iDiarize').checked,summarize:isFile&&$('iSummarize').checked,subtitle_overlay:$('iOvEnable')&&$('iOvEnable').checked};
@@ -757,11 +757,11 @@ function _showLiveIn(live){
   live.classList.add('on');live.classList.remove('shown');
   document.body.classList.add('has-live');
   requestAnimationFrame(()=>requestAnimationFrame(()=>live.classList.add('shown')));
-  const isBidi=['en_zh','ja_zh'].includes(curCfg.mode);$('pLive').classList.toggle('bidi',isBidi);
+  const isBidi=['en_zh','ja_zh','ko_zh'].includes(curCfg.mode);$('pLive').classList.toggle('bidi',isBidi);
   msgsEl.innerHTML='';cnt=0;_discShown=false;_outputFiles=[];_outputDirs=[];$('sCount').textContent='0 句';
   $('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('hSource').textContent=curCfg.isFile?'離線處理':'即時模式';$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
   $('sModel').textContent=(curCfg.model?(curCfg.asrLoc+' '+curCfg.model):'');
-  const hasEng=curCfg.engine&&!['en','zh','ja','record'].includes(curCfg.mode);
+  const hasEng=curCfg.engine&&!['en','zh','ja','ko','record'].includes(curCfg.mode);
   const _eLbl=hasEng?(curCfg.engine==='llm'?'LLM '+(cselVal($('iLlmModel'))||''):'本機 '+curCfg.engine.toUpperCase()):'';
   $('sEngine').textContent=_eLbl;$('bTrans').style.display=hasEng?'inline-flex':'none';
   // 場景膠囊（即時模式才顯示）

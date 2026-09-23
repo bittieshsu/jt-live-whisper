@@ -1,4 +1,4 @@
-# jt-live-whisper v2.21.9
+# jt-live-whisper v2.22.0
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -9,7 +9,7 @@
 | **目錄** | [核心功能](#核心功能) · [其他特色](#其他特色) · [系統需求](#系統需求) · [快速開始](#快速開始) · [使用方式](#使用方式) · [互動式選單](#互動式選單功能一覽) · [命令列參數](#命令列參數) · [技術架構](#技術架構) · [硬體建議](#硬體建議) · [升級](#升級) |
 |---|---|
 
-核心功能涵蓋即時語音轉錄、中日英即時翻譯字幕、離線音訊檔批次處理、講者辨識（Speaker Diarization）、以及 LLM 會議摘要產出。採用系統音訊層級擷取（macOS 使用內建 ScreenCaptureKit，免安裝驅動；Windows 使用 WASAPI Loopback；Linux 使用 PipeWire / PulseAudio 的 monitor 來源），**理論上任何軟體的聲音輸出都能即時處理**：視訊會議（Zoom、Teams、Meet）、YouTube、Podcast、串流影片等，不限定特定應用程式。所有 AI 推論皆由地端模型完成，全程不經過第三方雲端 API。
+核心功能涵蓋即時語音轉錄、中日韓英即時翻譯字幕、離線音訊檔批次處理、講者辨識（Speaker Diarization）、以及 LLM 會議摘要產出。採用系統音訊層級擷取（macOS 使用內建 ScreenCaptureKit，免安裝驅動；Windows 使用 WASAPI Loopback；Linux 使用 PipeWire / PulseAudio 的 monitor 來源），**理論上任何軟體的聲音輸出都能即時處理**：視訊會議（Zoom、Teams、Meet）、YouTube、Podcast、串流影片等，不限定特定應用程式。所有 AI 推論皆由地端模型完成，全程不經過第三方雲端 API。
 
 Author: Jason Cheng (Jason Tools)
 
@@ -48,12 +48,12 @@ Author: Jason Cheng (Jason Tools)
 
 | 用途 | AI 模型 | 說明 |
 |------|---------|------|
-| 語音辨識 (ASR) | **Whisper** (OpenAI) | **多語（中日英）** 主力辨識模型；base / small / large-v3-turbo / large-v3 可選 |
+| 語音辨識 (ASR) | **Whisper** (OpenAI) | **多語（中日韓英）** 主力辨識模型；base / small / large-v3-turbo / large-v3 可選 |
 | 語音辨識 (ASR) | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，直接輸出漢字 |
 | 語音辨識 (ASR) | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（不支援 Intel Mac） |
 | 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯，透過地端 Ollama 或其他 LLM 伺服器執行；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
 | 摘要 / 逐字稿校正 (LLM) | 自架 LLM 伺服器，預設 **qwen3.8:27b** | 會議摘要與逐字稿校正（兩者共用同一個模型）；建議 27B 以上，可與翻譯用不同模型 |
-| 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯模型，支援中日英互譯（`en2zh`/`zh2en`/`ja2zh`/`zh2ja`） |
+| 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯模型，支援中日韓英互譯（`en2zh`/`zh2en`/`ja2zh`/`zh2ja`/`ko2zh`/`zh2ko`） |
 | 翻譯 (離線備援) | **Argos Translate** | 完全離線的輕量翻譯模型，僅支援英翻中 |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + Google 頻譜分群演算法，可在本機或 GPU 伺服器執行 |
 
@@ -141,7 +141,7 @@ Author: Jason Cheng (Jason Tools)
 ![時間逐字稿 HTML](images/offline-transcript.png)
 
 ### 5. 多模式語音轉錄
-12 種功能模式：英翻中 / 中翻英 / 日翻中 / 中翻日 / 英中雙向 / 日中雙向 / 純英文轉錄 / 純中文轉錄 / 純日文轉錄 / **台語轉錄** / **台翻英** / 純錄音，滿足各種使用場景。
+16 種功能模式：英翻中 / 中翻英 / 日翻中 / 中翻日 / **韓翻中** / **中翻韓** / 英中雙向 / 日中雙向 / **韓中雙向** / 純英文轉錄 / 純中文轉錄 / 純日文轉錄 / **純韓文轉錄** / **台語轉錄** / **台翻英** / 純錄音，滿足各種使用場景。
 
 **台語（台灣閩南語）支援**：採用 [MediaTek Breeze-ASR-26](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)（Whisper large-v2 的台語微調版，Apache-2.0），辨識結果**直接輸出漢字**，不需另外翻譯。即時與離線皆可用，模型依平台自動選擇（Apple Silicon 用 mlx 4bit 877MB、CPU 用 int8、NVIDIA GPU 用 float16）。
 
@@ -152,12 +152,12 @@ Author: Jason Cheng (Jason Tools)
 
 > 台語模型是 large-v2 微調（decoder 層數約為 large-v3-turbo 的 8 倍），先天較慢：Apple Silicon 約 1.3 倍即時，純 CPU 約 0.24 倍即時（1 小時音訊需約 4 小時），建議搭配 Apple Silicon 或 NVIDIA GPU 使用。
 
-> **華語模式也可選用 Breeze-ASR-26**：台灣的會議常是華語為主、夾雜台語，可在中文轉錄 / 中翻英 / 中翻日模式選 `breeze-asr-26`，與 large-v3 比較哪個適合自己的錄音（`./start.sh --input 會議.mp3 --mode zh -m breeze-asr-26`）。選用時自動套用本模型專屬的辨識參數，並固定在本機辨識。
+> **華語模式也可選用 Breeze-ASR-26**：台灣的會議常是華語為主、夾雜台語，可在中文轉錄 / 中翻英 / 中翻日 / 中翻韓模式選 `breeze-asr-26`，與 large-v3 比較哪個適合自己的錄音（`./start.sh --input 會議.mp3 --mode zh -m breeze-asr-26`）。選用時自動套用本模型專屬的辨識參數，並固定在本機辨識。
 
 ![即時日翻中字幕畫面（Windows）](images/realtime-ja2zh.png)
 
 ### 6. 雙向字幕模式
-英中雙向（`en_zh`）和日中雙向（`ja_zh`），同時擷取系統音訊與麥克風，對方外語翻中文、自己中文翻外語，適用於雙語視訊會議。
+英中雙向（`en_zh`）、日中雙向（`ja_zh`）和韓中雙向（`ko_zh`），同時擷取系統音訊與麥克風，對方外語翻中文、自己中文翻外語，適用於雙語視訊會議。
 
 ![英中雙向即時字幕（終端機）](images/bidi-en-zh-cli.png)
 
@@ -179,7 +179,7 @@ Author: Jason Cheng (Jason Tools)
 
 - **同時轉錄麥克風**：所有即時模式加上 `--mic` 即可同時轉錄自己的麥克風語音，雙向模式自動啟用
 - **多種本地端 AI 語音辨識引擎**：即時辨識：Whisper（高準確度）/ Moonshine（超低延遲 ~300ms）；離線音訊檔轉錄：faster-whisper（支援 VAD 靜音過濾）
-- **多種本地端翻譯引擎**：LLM 大型語言模型（Ollama / OpenAI 相容伺服器）、NLLB 離線翻譯（中日英互譯）或 Argos 離線翻譯
+- **多種本地端翻譯引擎**：LLM 大型語言模型（Ollama / OpenAI 相容伺服器）、NLLB 離線翻譯（中日韓英互譯）或 Argos 離線翻譯
 - **會議主題感知翻譯**：可指定會議主題（如「ZFS 儲存管理」），讓 LLM 根據領域上下文精準翻譯專業術語
 - **自動偵測 LLM 伺服器**：支援 Ollama、LM Studio、Jan.ai、vLLM、LocalAI、llama.cpp、LiteLLM 等本地端 LLM 伺服器
 - **互動式選單 + CLI 模式**：新手友善的選單介面，進階用戶可用命令列參數直接啟動
@@ -249,7 +249,7 @@ Author: Jason Cheng (Jason Tools)
 | whisper.cpp | ~60 MB | macOS: 原始碼編譯；Windows: 預編譯版本；Linux: 不需要（改用 faster-whisper） |
 | Whisper GGML 模型 | 1.5~6.4 GB | 預設 large-v3-turbo (1.5GB)；全部 5 個模型共 6.4 GB |
 | Moonshine 模型 | ~245 MB | 英文即時辨識（選用） |
-| NLLB 600M 翻譯模型 | ~600 MB | 離線翻譯（中日英互譯） |
+| NLLB 600M 翻譯模型 | ~600 MB | 離線翻譯（中日韓英互譯） |
 | Argos 翻譯模型 | ~83 MB | 離線備援翻譯（僅英翻中） |
 | Homebrew 套件 | ~140 MB | cmake + sdl2 + ffmpeg（僅 macOS） |
 | HuggingFace 快取 | ~5.3 GB | `~/.cache/huggingface/`，`--input` 離線處理用，首次使用時下載 |
@@ -442,7 +442,7 @@ ollama pull gemma4:26b      # 預設翻譯模型（約 17GB；記憶體不足可
 
 > **推薦硬體：** 如果有 [NVIDIA DGX Spark](https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/)（128GB 記憶體），將 Ollama 安裝在 DGX Spark 上是非常實惠的選擇：可執行更大的模型、翻譯品質更好、推論速度更快，透過 `--llm-host` 指向即可。
 
-> **不裝 LLM 也能翻譯：** 程式可切換為 NLLB（中日英互譯，品質 7-8/10）或 Argos（僅英翻中）離線翻譯引擎，完全不需要額外伺服器。注意：摘要功能仍需 LLM 伺服器。
+> **不裝 LLM 也能翻譯：** 程式可切換為 NLLB（中日韓英互譯，品質 7-8/10）或 Argos（僅英翻中）離線翻譯引擎，完全不需要額外伺服器。注意：摘要功能仍需 LLM 伺服器。
 
 ### 4. 啟動
 
@@ -532,6 +532,9 @@ cd C:\jt-live-whisper
 # 日中雙向字幕（對方日文翻中文 + 自己中文翻日文）
 ./start.sh --mode ja_zh
 
+# 韓中雙向字幕（對方韓文翻中文 + 自己中文翻韓文）
+./start.sh --mode ko_zh
+
 # 即時翻譯 + 同時轉錄麥克風
 ./start.sh --mode en2zh --mic
 ```
@@ -584,7 +587,7 @@ cd C:\jt-live-whisper
 | 步驟 | 選單項目 | 選項 | 說明 |
 |------|----------|------|------|
 | 1 | 輸入來源 | 即時語音 / 讀入檔案 | 選擇即時擷取系統音訊或匯入錄音檔離線處理 |
-| 2 | 功能模式 | 英翻中 / 中翻英 / 日翻中 / 中翻日 / 英中雙向 / 日中雙向 / 英文轉錄 / 中文轉錄 / 日文轉錄 / 台語轉錄 / 台翻英 / 純錄音 | 12 種模式，分群顯示（單向翻譯、雙向翻譯、轉錄、其他） |
+| 2 | 功能模式 | 英翻中 / 中翻英 / 日翻中 / 中翻日 / 韓翻中 / 中翻韓 / 英中雙向 / 日中雙向 / 韓中雙向 / 英文轉錄 / 中文轉錄 / 日文轉錄 / 韓文轉錄 / 台語轉錄 / 台翻英 / 純錄音 | 16 種模式，分群顯示（單向翻譯、雙向翻譯、轉錄、其他） |
 | 3 | 麥克風轉錄 | 是 / 否 | 轉錄模式（en/zh/ja）詢問是否同時轉錄麥克風 |
 | 4 | 辨識位置 | GPU 伺服器 / 本機 | 有設定 GPU 伺服器時才顯示 |
 | 5 | ASR 引擎 | Whisper / Moonshine | 英文模式可選 Moonshine（超低延遲），其他語言固定 Whisper |
@@ -600,7 +603,7 @@ cd C:\jt-live-whisper
 
 | 步驟 | 選單項目 | 選項 | 說明 |
 |------|----------|------|------|
-| 1 | 功能模式 | 英文轉錄+中文翻譯 / 中文轉錄+英文翻譯 / 日文轉錄+中文翻譯 / 中文轉錄+日文翻譯 / 英中雙向 / 日中雙向 / 台語轉錄 / 台翻英 / 純轉錄 | 11 種模式（不含純錄音） |
+| 1 | 功能模式 | 英文轉錄+中文翻譯 / 中文轉錄+英文翻譯 / 日文轉錄+中文翻譯 / 中文轉錄+日文翻譯 / 韓文轉錄+中文翻譯 / 中文轉錄+韓文翻譯 / 英中雙向 / 日中雙向 / 韓中雙向 / 台語轉錄 / 台翻英 / 純轉錄 | 15 種模式（不含純錄音） |
 | 2 | 辨識位置 | GPU 伺服器 / 本機 | GPU 伺服器辨識速度快 5-10 倍 |
 | 3 | 辨識模型 | large-v3-turbo / large-v3 / medium 等 | 依辨識位置推薦模型，伺服器模式顯示快取標籤 |
 | 4 | LLM 伺服器 | host:port | 翻譯模式才詢問，自動偵測伺服器類型 |
@@ -626,7 +629,7 @@ cd C:\jt-live-whisper
 | 參數 | 說明 | 預設值 |
 |------|------|--------|
 | `--webui` | 啟動 WebUI 瀏覽器介面 | |
-| `--mode MODE` | 功能模式 (`en2zh` / `zh2en` / `ja2zh` / `zh2ja` / `en_zh` / `ja_zh` / `en` / `zh` / `ja` / `record`) | `en2zh` |
+| `--mode MODE` | 功能模式 (`en2zh` / `zh2en` / `ja2zh` / `zh2ja` / `ko2zh` / `zh2ko` / `en_zh` / `ja_zh` / `ko_zh` / `en` / `zh` / `ja` / `ko` / `nan` / `nan2en` / `record`) | `en2zh` |
 | `--asr ASR` | 語音辨識引擎 (`whisper` / `moonshine` / `faster-whisper`) | `whisper` |
 | `-m`, `--model MODEL` | Whisper 模型 (`base.en` / `small.en` / `small` / `medium.en` / `medium` / `large-v3-turbo` / `large-v3`) | 依裝置推薦 |
 | `--moonshine-model MODEL` | Moonshine 模型 (`medium` / `small` / `tiny`) | `medium` |

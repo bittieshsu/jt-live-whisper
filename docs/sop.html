@@ -113,7 +113,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.9 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.22.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -230,7 +230,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 <tbody><tr>
 <td>語音辨識</td>
 <td><strong>Whisper</strong> (OpenAI)</td>
-<td><strong>多語（中日英）</strong> 主力辨識模型；base / small / large-v3-turbo / large-v3 可選</td>
+<td><strong>多語（中日韓英）</strong> 主力辨識模型；base / small / large-v3-turbo / large-v3 可選</td>
 </tr>
 <tr>
 <td>語音辨識</td>
@@ -260,7 +260,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 <tr>
 <td>翻譯 (離線)</td>
 <td><strong>NLLB 600M</strong> (Meta)</td>
-<td>離線翻譯，支援中日英互譯，僅限本機</td>
+<td>離線翻譯，支援中日韓英互譯，僅限本機</td>
 </tr>
 <tr>
 <td>翻譯 (離線備援)</td>
@@ -713,7 +713,7 @@ bash install.sh --server
 </tr>
 <tr>
 <td>NLLB 600M 翻譯模型</td>
-<td>離線翻譯模型，中日英互譯 (~600MB)</td>
+<td>離線翻譯模型，中日韓英互譯 (~600MB)</td>
 </tr>
 <tr>
 <td>Argos 翻譯模型</td>
@@ -754,7 +754,7 @@ bash install.sh --server
 </tr>
 <tr>
 <td>NLLB 600M 翻譯模型</td>
-<td>離線翻譯模型，中日英互譯 (~600MB)</td>
+<td>離線翻譯模型，中日韓英互譯 (~600MB)</td>
 </tr>
 <tr>
 <td>Argos 翻譯模型</td>
@@ -791,7 +791,7 @@ bash install.sh --server
 </tr>
 <tr>
 <td>NLLB 600M 翻譯模型</td>
-<td>離線翻譯模型，中日英互譯 (~600MB)</td>
+<td>離線翻譯模型，中日韓英互譯 (~600MB)</td>
 </tr>
 <tr>
 <td>Argos 翻譯模型</td>
@@ -1195,7 +1195,7 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td><code>--mode MODE</code></td>
-<td>功能模式 (<code>en2zh</code> / <code>zh2en</code> / <code>ja2zh</code> / <code>zh2ja</code> / <code>en_zh</code> / <code>ja_zh</code> / <code>en</code> / <code>zh</code> / <code>ja</code> / <code>record</code>)</td>
+<td>功能模式 (<code>en2zh</code> / <code>zh2en</code> / <code>ja2zh</code> / <code>zh2ja</code> / <code>ko2zh</code> / <code>zh2ko</code> / <code>en_zh</code> / <code>ja_zh</code> / <code>ko_zh</code> / <code>en</code> / <code>zh</code> / <code>ja</code> / <code>ko</code> / <code>nan</code> / <code>nan2en</code> / <code>record</code>)</td>
 <td><code>en2zh</code></td>
 </tr>
 <tr>
@@ -1206,7 +1206,7 @@ cd C:\jt-live-whisper
 <tr>
 <td><code>-m</code>, <code>--model MODEL</code></td>
 <td>Whisper 模型 (large-v3-turbo / large-v3 / small / small.en / base / base.en)</td>
-<td><code>en2zh</code>: large-v3-turbo / 中日文+有GPU: large-v3-turbo / 中日文+無GPU: small</td>
+<td><code>en2zh</code>: large-v3-turbo / 中日韓文+有GPU: large-v3-turbo / 中日韓文+無GPU: small</td>
 </tr>
 <tr>
 <td><code>--moonshine-model MODEL</code></td>
@@ -1396,6 +1396,9 @@ cd C:\jt-live-whisper
 ./start.sh --mode ja_zh
 ./start.sh --mode ja_zh -e llm --llm-model gemma4:26b
 
+# 即時韓中雙向
+./start.sh --mode ko_zh -e llm --llm-model gemma4:26b
+
 # 對記錄檔生成摘要
 ./start.sh --summarize logs/英翻中_逐字稿_20260303_140000.txt
 
@@ -1450,12 +1453,24 @@ cd C:\jt-live-whisper
 <td>中文語音 → 翻譯成日文</td>
 </tr>
 <tr>
+<td>韓翻中字幕</td>
+<td>韓文語音 → 翻譯成繁體中文</td>
+</tr>
+<tr>
+<td>中翻韓字幕</td>
+<td>中文語音 → 翻譯成韓文</td>
+</tr>
+<tr>
 <td>英中雙向字幕</td>
 <td>對方英文翻中文 + 自己中文翻英文（需耳機）</td>
 </tr>
 <tr>
 <td>日中雙向字幕</td>
 <td>對方日文翻中文 + 自己中文翻日文（需耳機）</td>
+</tr>
+<tr>
+<td>韓中雙向字幕</td>
+<td>對方韓文翻中文 + 自己中文翻韓文（需耳機）</td>
 </tr>
 <tr>
 <td>英文轉錄</td>
@@ -1468,6 +1483,10 @@ cd C:\jt-live-whisper
 <tr>
 <td>日文轉錄</td>
 <td>日文語音 → 直接顯示日文（不翻譯）</td>
+</tr>
+<tr>
+<td>韓文轉錄</td>
+<td>韓文語音 → 直接顯示韓文（不翻譯）</td>
 </tr>
 <tr>
 <td>台語轉錄</td>
@@ -1483,23 +1502,31 @@ cd C:\jt-live-whisper
 </tr>
 </tbody></table>
 <p>選擇「純錄音」時，跳過 ASR 引擎、翻譯引擎、模型、場景等所有設定，自動偵測錄音裝置後直接開始錄音。錄音期間顯示即時音量波形圖，按 Ctrl+C 停止並儲存。此模式在離線處理（讀入音訊檔案）選單中不會出現。</p>
-<p>選擇「中文轉錄」或「中翻英字幕」時，.en 結尾的模型會自動隱藏。「英文轉錄」和「英翻中字幕」可使用所有模型，預設 large-v3-turbo。日文相關模式（日翻中、中翻日、日文轉錄）同樣隱藏 .en 模型，顯示 small、large-v3-turbo、medium、large-v3 四個多語言模型。中日文模式的預設模型依硬體自動選擇：有 GPU（Apple Silicon / NVIDIA CUDA）時預設 large-v3-turbo，無 GPU 時預設 small（確保即時性）。</p>
+<p>選擇「中文轉錄」或「中翻英字幕」時，.en 結尾的模型會自動隱藏。「英文轉錄」和「英翻中字幕」可使用所有模型，預設 large-v3-turbo。日文與韓文相關模式（日翻中、中翻日、日文轉錄、韓翻中、中翻韓、韓文轉錄）同樣隱藏 .en 模型，顯示 small、large-v3-turbo、medium、large-v3 四個多語言模型。中日韓文模式的預設模型依硬體自動選擇：有 GPU（Apple Silicon / NVIDIA CUDA）時預設 large-v3-turbo，無 GPU 時預設 small（確保即時性）。</p>
+<p><strong>韓文（v2.22.0 起）</strong>：辨識直接使用 Whisper 本身的韓文能力，不需要另外下載模型；翻譯支援 LLM 與 NLLB（Argos 不支援）。韓文沒有簡繁轉換的問題。</p>
+<ul>
+<li><strong>幻覺過濾清單是實測蒐集的</strong>：把靜音、雜訊、和弦、旋律、掌聲、鍵盤聲以韓文模式送進 base / small / large-v3-turbo / large-v3，整理出重複出現的無關輸出（「다음 영상에서 만나요（下支影片見）」「시청해주셔서 감사합니다（感謝收看）」「한글자막 by…（字幕歸屬）」「MBC 뉴스…」與各種重複字串）。實測 178 段無人講話的輸出擋下 164 段，49 句真實會議句子誤擋 0 句</li>
+<li><strong>已知取捨</strong>：整句只有「감사합니다」（謝謝）時會被當成幻覺濾掉——它是無人講話時最常見的幻覺之一，但真的有人只說這句時也會被濾掉（英文的「thank you」也是同樣做法）。句中出現不受影響</li>
+<li><strong>擋不住的</strong>：模型偶爾在無人講話時吐出一般詞句（例如「닭고기」），跟真的講話分不開，不做過濾</li>
+<li>實測辨識品質（合成語音＋會議室雜訊，large-v3-turbo）：字元錯誤率約 10%，其中一大部分是數字寫法差異（韓文數字詞 vs 阿拉伯數字），不是聽錯</li>
+</ul>
 <p>翻譯引擎限制：</p>
 <ul>
 <li><strong>英翻中字幕</strong>：支援 LLM、NLLB、Argos 三種翻譯引擎</li>
-<li><strong>中翻英、日翻中、中翻日</strong>：支援 LLM 和 NLLB（不支援 Argos 離線翻譯）</li>
+<li><strong>中翻英、日翻中、中翻日、韓翻中、中翻韓</strong>：支援 LLM 和 NLLB（不支援 Argos 離線翻譯）</li>
 <li><strong>英中雙向字幕</strong>：支援 LLM 和 NLLB（不支援 Argos，因為 Argos 僅支援英翻中單向）</li>
-<li><strong>日中雙向字幕</strong>：支援 LLM 和 NLLB（不支援 Argos）</li>
-<li><strong>轉錄模式</strong>（英文、中文、日文轉錄）：不需要翻譯引擎，會跳過翻譯引擎選擇</li>
+<li><strong>日中雙向、韓中雙向字幕</strong>：支援 LLM 和 NLLB（不支援 Argos）</li>
+<li><strong>轉錄模式</strong>（英文、中文、日文、韓文轉錄）：不需要翻譯引擎，會跳過翻譯引擎選擇</li>
 </ul>
 <blockquote>
 <p><strong>NLLB 模型授權聲明：</strong> NLLB 600M 使用 Meta 的 CC-BY-NC 4.0 授權，僅限非商業用途。本工具不包含 NLLB 模型，模型由使用者執行安裝程式時自行從 HuggingFace 下載。若用於商業目的，請改用 LLM 伺服器翻譯。</p>
 </blockquote>
-<p><strong>雙向字幕模式說明（<code>en_zh</code> / <code>ja_zh</code>）</strong></p>
+<p><strong>雙向字幕模式說明（<code>en_zh</code> / <code>ja_zh</code> / <code>ko_zh</code>）</strong></p>
 <p>雙向字幕模式同時擷取兩路音訊：系統音訊（對方外語）和麥克風（自己中文），分別翻譯。適用於視訊會議中雙方使用不同語言的場景。</p>
 <ul>
 <li><strong><code>en_zh</code>（英中雙向）</strong>：對方英文翻中文 + 自己中文翻英文。麥克風支援中英混雜輸入，說英文時自動偵測並直接顯示（不翻譯）</li>
 <li><strong><code>ja_zh</code>（日中雙向）</strong>：對方日文翻中文 + 自己中文翻日文。麥克風支援中日英混雜輸入，說日文或英文時自動偵測並直接顯示（不翻譯）</li>
+<li><strong><code>ko_zh</code>（韓中雙向）</strong>：對方韓文翻中文 + 自己中文翻韓文。麥克風支援中韓英混雜輸入，說韓文或英文時自動偵測並直接顯示（不翻譯）</li>
 </ul>
 <p><img src="images/bidi-en-zh-cli.png" alt="英中雙向即時字幕（終端機）"></p>
 <p><img src="images/bidi-en-zh-html.png" alt="英中雙向離線逐字稿（HTML 聊天風格）"></p>
@@ -1528,23 +1555,23 @@ cd C:\jt-live-whisper
 ./start.sh --mode ja_zh -e llm --llm-model gemma4:26b
 </code></pre>
 <p><strong>麥克風轉錄模式（--mic）</strong></p>
-<p><code>--mic</code> 參數可在任何即時模式（<code>en2zh</code>、<code>zh2en</code>、<code>ja2zh</code>、<code>zh2ja</code>、<code>en</code>、<code>zh</code>、<code>ja</code>）啟用麥克風轉錄，將自己說的話即時轉為文字顯示。與雙向字幕模式的差異：</p>
+<p><code>--mic</code> 參數可在任何即時模式（<code>en2zh</code>、<code>zh2en</code>、<code>ja2zh</code>、<code>zh2ja</code>、<code>ko2zh</code>、<code>zh2ko</code>、<code>en</code>、<code>zh</code>、<code>ja</code>、<code>ko</code>）啟用麥克風轉錄，將自己說的話即時轉為文字顯示。與雙向字幕模式的差異：</p>
 <table>
 <thead>
 <tr>
 <th></th>
-<th><code>--mode en_zh / ja_zh</code>（雙向模式）</th>
+<th><code>--mode en_zh / ja_zh / ko_zh</code>（雙向模式）</th>
 <th><code>--mic</code>（麥克風轉錄）</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>麥克風處理</td>
-<td>ASR + 翻譯（中→英 / 中→日）</td>
+<td>ASR + 翻譯（中→英 / 中→日 / 中→韓）</td>
 <td>僅 ASR 轉錄</td>
 </tr>
 <tr>
 <td>適用模式</td>
-<td><code>en_zh</code> / <code>ja_zh</code></td>
+<td><code>en_zh</code> / <code>ja_zh</code> / <code>ko_zh</code></td>
 <td>所有即時模式</td>
 </tr>
 <tr>
@@ -1584,12 +1611,22 @@ cd C:\jt-live-whisper
 <td>日文轉錄</td>
 </tr>
 <tr>
-<td><code>en</code> / <code>zh</code> / <code>ja</code></td>
+<td><code>ko2zh</code></td>
+<td>韓文 ASR + 翻譯中文</td>
+<td>中文轉錄</td>
+</tr>
+<tr>
+<td><code>zh2ko</code></td>
+<td>中文 ASR + 翻譯韓文</td>
+<td>韓文轉錄</td>
+</tr>
+<tr>
+<td><code>en</code> / <code>zh</code> / <code>ja</code> / <code>ko</code></td>
 <td>直接轉錄</td>
 <td>同語言轉錄</td>
 </tr>
 </tbody></table>
-<p>不支援：Moonshine（僅英文）、遠端 GPU 模式、<code>en_zh</code>/<code>ja_zh</code> 雙向模式（已內建）、<code>record</code> 模式。</p>
+<p>不支援：Moonshine（僅英文）、遠端 GPU 模式、<code>en_zh</code>/<code>ja_zh</code>/<code>ko_zh</code> 雙向模式（已內建）、<code>record</code> 模式。</p>
 <p>CLI 用法：</p>
 <pre><code class="language-bash">./start.sh --mode en2zh --mic
 ./start.sh --mode en --mic
@@ -1610,7 +1647,7 @@ cd C:\jt-live-whisper
 </thead>
 <tbody><tr>
 <td><strong>Whisper</strong>（預設）</td>
-<td>高準確度，完整斷句，支援中日英文</td>
+<td>高準確度，完整斷句，支援中日韓英文</td>
 </tr>
 <tr>
 <td>Moonshine</td>
@@ -1953,7 +1990,7 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td>NLLB 本機離線翻譯</td>
-<td>支援中日英互譯，免 LLM 伺服器（CC-BY-NC 4.0 授權）</td>
+<td>支援中日韓英互譯，免 LLM 伺服器（CC-BY-NC 4.0 授權）</td>
 </tr>
 <tr>
 <td>Argos 本機離線翻譯</td>

@@ -246,6 +246,8 @@ C_JA = "\x1b[38;2;255;180;100m"       # 橙色 - 日文
 C_MY_ZH = "\x1b[38;2;120;200;255m"    # 水藍 - 我方中文原文（雙向模式）
 C_MY_EN = "\x1b[38;2;200;160;255m"   # 淡紫 - 我方英文翻譯（雙向模式）
 C_MY_JA = "\x1b[38;2;255;200;140m"   # 淡橙 - 我方日文（雙向模式）
+C_KO = "\x1b[38;2;255;140;200m"       # 粉紅 - 韓文（v2.22.0）
+C_MY_KO = "\x1b[38;2;255;185;225m"   # 淡粉 - 我方韓文（雙向模式）
 C_OK = "\x1b[38;2;80;255;120m"        # 綠色 - 成功
 C_DIM = "\x1b[38;2;100;100;100m"      # 暗灰 - 次要資訊
 C_WHITE = "\x1b[38;2;255;255;255m"    # 白色 - 一般文字
@@ -1235,11 +1237,15 @@ MODE_PRESETS = [
     ("zh2en", "中翻英字幕", "中文語音 → 翻譯成英文"),
     ("ja2zh", "日翻中字幕", "日文語音 → 翻譯成繁體中文"),
     ("zh2ja", "中翻日字幕", "中文語音 → 翻譯成日文"),
+    ("ko2zh", "韓翻中字幕", "韓文語音 → 翻譯成繁體中文"),
+    ("zh2ko", "中翻韓字幕", "中文語音 → 翻譯成韓文"),
     ("en_zh", "英中雙向字幕", "對方說英文翻中文 + 自己說中文翻英文"),
     ("ja_zh", "日中雙向字幕", "對方說日文翻中文 + 自己說中文翻日文"),
+    ("ko_zh", "韓中雙向字幕", "對方說韓文翻中文 + 自己說中文翻韓文"),
     ("en", "英文轉錄", "英文語音 → 直接顯示英文"),
     ("zh", "中文轉錄", "中文語音 → 直接顯示繁體中文"),
     ("ja", "日文轉錄", "日文語音 → 直接顯示日文"),
+    ("ko", "韓文轉錄", "韓文語音 → 直接顯示韓文"),
     ("nan", "台語轉錄", "台語語音 → 直接顯示繁體中文（Breeze-ASR-26）"),
     ("nan2en", "台翻英字幕", "台語語音 → 翻譯成英文"),
     ("record", "純錄音", f"僅錄製音訊為 {RECORDING_FORMAT.upper()} 檔"),
@@ -1247,15 +1253,20 @@ MODE_PRESETS = [
 
 # Mode 分類常數
 _EN_INPUT_MODES = ("en2zh", "en")
-_ZH_INPUT_MODES = ("zh2en", "zh", "zh2ja")
+_ZH_INPUT_MODES = ("zh2en", "zh", "zh2ja", "zh2ko")
 _JA_INPUT_MODES = ("ja2zh", "ja")
+_KO_INPUT_MODES = ("ko2zh", "ko")      # v2.22.0
 _NAN_INPUT_MODES = ("nan", "nan2en")   # 台語輸入（Breeze-ASR-26 專用，輸出為漢字）
-_TRANSLATE_MODES = ("en2zh", "zh2en", "ja2zh", "zh2ja", "en_zh", "ja_zh", "nan2en")
+_TRANSLATE_MODES = ("en2zh", "zh2en", "ja2zh", "zh2ja", "ko2zh", "zh2ko",
+                    "en_zh", "ja_zh", "ko_zh", "nan2en")
 _NOENG_MODELS = ("zh", "zh2en", "zh2ja", "ja2zh", "ja", "en_zh", "ja_zh",
+                 "ko2zh", "zh2ko", "ko", "ko_zh",
                  "nan", "nan2en")  # 不能用 .en 模型
-_BIDI_MODES = ("en_zh", "ja_zh")  # 雙向翻譯模式（用硬體音訊來源分流）
-_BIDI_LB_DIR = {"en_zh": "en2zh", "ja_zh": "ja2zh"}   # 系統音訊翻譯方向
-_BIDI_MIC_DIR = {"en_zh": "zh2en", "ja_zh": "zh2ja"}  # 麥克風翻譯方向
+_BIDI_MODES = ("en_zh", "ja_zh", "ko_zh")  # 雙向翻譯模式（用硬體音訊來源分流）
+_BIDI_LB_DIR = {"en_zh": "en2zh", "ja_zh": "ja2zh", "ko_zh": "ko2zh"}   # 系統音訊翻譯方向
+_BIDI_MIC_DIR = {"en_zh": "zh2en", "ja_zh": "zh2ja", "ko_zh": "zh2ko"}  # 麥克風翻譯方向
+# 雙向模式對方的外語（麥克風自動偵測到這個語言時不翻譯，直接顯示）
+_BIDI_FOREIGN = {"en_zh": "en", "ja_zh": "ja", "ko_zh": "ko"}
 
 # 顯示標籤 dict（src_color, src_label, dst_color, dst_label）
 _MODE_LABELS = {
@@ -1263,11 +1274,15 @@ _MODE_LABELS = {
     "zh2en": (C_ZH, "中", C_EN, "EN"),
     "ja2zh": (C_JA, "日", C_ZH, "中"),
     "zh2ja": (C_ZH, "中", C_JA, "日"),
+    "ko2zh": (C_KO, "韓", C_ZH, "中"),
+    "zh2ko": (C_ZH, "中", C_KO, "韓"),
     "en":    (C_EN, "EN", C_EN, "EN"),
     "zh":    (C_ZH, "中", C_ZH, "中"),
     "ja":    (C_JA, "日", C_JA, "日"),
+    "ko":    (C_KO, "韓", C_KO, "韓"),
     "en_zh": (C_EN, "EN", C_ZH, "中"),  # 雙向模式 fallback（即時模式用 _BIDI_LABELS）
     "ja_zh": (C_JA, "日", C_ZH, "中"),
+    "ko_zh": (C_KO, "韓", C_ZH, "中"),
     "nan":    (C_ZH, "台", C_ZH, "台"),   # 台語辨識結果本身即為漢字
     "nan2en": (C_ZH, "台", C_EN, "EN"),
 }
@@ -1281,6 +1296,10 @@ _BIDI_LABELS = {
     "ja_zh": {
         "loopback": (C_JA, "日", C_ZH, "中"),      # 對方：日文 → 中文
         "mic":      (C_MY_ZH, "中", C_MY_JA, "日"), # 我方：中文 → 日文
+    },
+    "ko_zh": {
+        "loopback": (C_KO, "韓", C_ZH, "中"),      # 對方：韓文 → 中文
+        "mic":      (C_MY_ZH, "中", C_MY_KO, "韓"), # 我方：中文 → 韓文
     },
     "en2zh": {
         "loopback": (C_EN, "EN", C_ZH, "中"),
@@ -1298,6 +1317,14 @@ _BIDI_LABELS = {
         "loopback": (C_ZH, "中", C_JA, "日"),
         "mic":      (C_MY_JA, "日", C_MY_JA, "日"),
     },
+    "ko2zh": {
+        "loopback": (C_KO, "韓", C_ZH, "中"),
+        "mic":      (C_MY_ZH, "中", C_MY_ZH, "中"),
+    },
+    "zh2ko": {
+        "loopback": (C_ZH, "中", C_KO, "韓"),
+        "mic":      (C_MY_KO, "韓", C_MY_KO, "韓"),
+    },
     "en": {
         "loopback": (C_EN, "EN", C_EN, "EN"),
         "mic":      (C_MY_EN, "EN", C_MY_EN, "EN"),
@@ -1310,14 +1337,22 @@ _BIDI_LABELS = {
         "loopback": (C_JA, "日", C_JA, "日"),
         "mic":      (C_MY_JA, "日", C_MY_JA, "日"),
     },
+    "ko": {
+        "loopback": (C_KO, "韓", C_KO, "韓"),
+        "mic":      (C_MY_KO, "韓", C_MY_KO, "韓"),
+    },
 }
 
 # 雙向模式語言對照表（模組級，供 process_bidi_audio_files 等使用）
 _LB_LANG = {"en2zh": "en", "zh2en": "zh", "ja2zh": "ja", "zh2ja": "zh",
-            "en": "en", "zh": "zh", "ja": "ja", "en_zh": "en", "ja_zh": "ja",
+            "ko2zh": "ko", "zh2ko": "zh",
+            "en": "en", "zh": "zh", "ja": "ja", "ko": "ko",
+            "en_zh": "en", "ja_zh": "ja", "ko_zh": "ko",
             "nan": "en", "nan2en": "en"}
 _MIC_LANG = {"en2zh": "zh", "zh2en": "en", "ja2zh": "zh", "zh2ja": "ja",
-             "en": "en", "zh": "zh", "ja": "ja", "en_zh": "zh", "ja_zh": "zh",
+             "ko2zh": "zh", "zh2ko": "ko",
+             "en": "en", "zh": "zh", "ja": "ja", "ko": "ko",
+             "en_zh": "zh", "ja_zh": "zh", "ko_zh": "zh",
              "nan": "en", "nan2en": "en"}
 
 # ── 台語辨識模型（MediaTek Breeze-ASR-26，Whisper large-v2 台語微調）────────
@@ -1337,7 +1372,7 @@ _BREEZE_WHISPER_LANG = "en"
 # 本模型專屬的處理（language="en"、_FW_NAN_KW、自行 VAD 切段、即時步進下限、
 # 固定本機辨識）都以 _is_nan_mode() 判斷；選用時由 _enforce_nan_model() 打開旗標，
 # 讓這些處理一起生效，避免只換模型卻沿用一般參數組而大幅劣化。
-_BREEZE_OPTIONAL_MODES = ("zh", "zh2en", "zh2ja")
+_BREEZE_OPTIONAL_MODES = ("zh", "zh2en", "zh2ja", "zh2ko")
 _breeze_selected = False
 
 
@@ -1349,7 +1384,7 @@ def _is_nan_mode(mode):
 def _enforce_nan_model(mode, model_name, quiet=False):
     """決定實際使用的模型，並同步 Breeze-ASR-26 處理流程的開關。
     - 台語模式只有 Breeze-ASR-26 能用，指定其他模型時改回並提示
-    - 華語模式（zh / zh2en / zh2ja）可選用 Breeze-ASR-26
+    - 華語模式（zh / zh2en / zh2ja / zh2ko）可選用 Breeze-ASR-26
     - 其他模式不支援 Breeze-ASR-26，改用該模式的推薦模型
     未選用 Breeze-ASR-26 時，回傳值與處理流程都和原本相同。"""
     global _breeze_selected
@@ -1363,7 +1398,7 @@ def _enforce_nan_model(mode, model_name, quiet=False):
         fallback = _recommended_whisper_model(mode)
         if not quiet:
             print(f"  {C_HIGHLIGHT}[提示] {BREEZE_MODEL} 僅支援台語與華語輸入模式"
-                  f"（nan / nan2en / zh / zh2en / zh2ja），已改用 {fallback}{RESET}")
+                  f"（nan / nan2en / zh / zh2en / zh2ja / zh2ko），已改用 {fallback}{RESET}")
         model_name = fallback
     _breeze_selected = (model_name == BREEZE_MODEL)
     return model_name
@@ -1377,6 +1412,8 @@ def _mode_whisper_lang(mode):
         return "en"
     if mode in _JA_INPUT_MODES:
         return "ja"
+    if mode in _KO_INPUT_MODES:
+        return "ko"
     return "zh"
 
 
@@ -1601,7 +1638,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.21.9"
+APP_VERSION = "2.22.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3437,6 +3474,8 @@ class OllamaTranslator:
         _dispatch = {"zh2en": self._build_prompt_zh2en,
                      "ja2zh": self._build_prompt_ja2zh,
                      "zh2ja": self._build_prompt_zh2ja,
+                     "ko2zh": self._build_prompt_ko2zh,
+                     "zh2ko": self._build_prompt_zh2ko,
                      # 台語辨識結果本身就是漢字，翻英文與中翻英同一條路徑
                      "nan2en": self._build_prompt_zh2en}
         builder = _dispatch.get(self.direction, self._build_prompt_en2zh)
@@ -3532,10 +3571,57 @@ class OllamaTranslator:
         prompt += f"\n翻訳してください：{text}"
         return prompt
 
+    def _build_prompt_ko2zh(self, text, context):
+        prompt = (
+            "你是即時會議翻譯員，將韓文翻譯成台灣繁體中文。\n"
+            "規則：\n"
+            "1. 必須使用繁體中文，禁止使用簡體中文（例：用「軟體」不用「软件」，用「記憶體」不用「内存」）\n"
+            "2. 使用台灣用語：軟體、網路、記憶體、程式、伺服器、資料庫、影片、滑鼠、設定、訊息\n"
+            "3. 專有名詞維持原文（如 iPhone、API、Kubernetes、GitHub）；韓文人名用韓文原文或其漢字\n"
+            "4. 只輸出一行繁體中文翻譯，不要輸出原文、解釋、替代版本\n"
+            "5. 只能包含繁體中文和英文，禁止輸出韓文、日文、俄文等其他語言\n"
+            "6. 禁止添加任何評論、括號註解、翻譯說明\n"
+            "7. 即使原文不完整或語意不清，也直接逐字翻譯，不要跳過或加說明\n"
+            "8. 直接輸出翻譯結果，不要使用 <think> 標籤或任何思考過程\n"
+            "9. 忠實翻譯原文，禁止因政治因素修改任何用語（國名、地名、人物稱謂須與原文一致）\n"
+        )
+        if self.meeting_topic:
+            prompt += f"\n本次會議主題：{self.meeting_topic}\n請根據此主題的領域知識翻譯專業術語。\n"
+        if context:
+            prompt += "\n最近的對話上下文：\n"
+            for src, dst in context:
+                prompt += f"韓：{src}\n中：{dst}\n"
+        prompt += f"\n請翻譯：{text}"
+        return prompt
+
+    def _build_prompt_zh2ko(self, text, context):
+        # 跟 zh2ja 一樣用目標語言寫指示：用中文寫會讓模型傾向輸出中文
+        prompt = (
+            "당신은 실시간 회의 통역사입니다. 중국어를 한국어로 번역하세요.\n"
+            "규칙:\n"
+            "1. 자연스럽고 매끄러운 한국어로 출력할 것\n"
+            "2. 고유 명사는 그대로 유지할 것 (예: iPhone, API, Kubernetes, GitHub)\n"
+            "3. 번역 결과만 한 줄로 출력하고, 설명이나 다른 번역안은 쓰지 말 것\n"
+            "4. 한국어만 출력하고 중국어, 일본어, 러시아어 등은 포함하지 말 것\n"
+            "5. 코멘트, 괄호 주석, 번역에 관한 메모를 덧붙이지 말 것\n"
+            "6. 원문이 불완전해도 그대로 번역하고 설명을 덧붙이지 말 것\n"
+            "7. 번역 결과를 바로 출력하고 <think> 태그나 사고 과정을 쓰지 말 것\n"
+            "8. 원문에 충실하게 번역하고 정치적 이유로 용어를 바꾸지 말 것 (국가명, 지명, 인물의 직함은 원문 그대로)\n"
+        )
+        if self.meeting_topic:
+            prompt += f"\n회의 주제: {self.meeting_topic}\n이 주제에 관련된 전문 용어를 적절히 번역하세요.\n"
+        if context:
+            prompt += "\n최근 대화 맥락:\n"
+            for src, dst in context:
+                prompt += f"중: {src}\n한: {dst}\n"
+        prompt += f"\n번역하세요: {text}"
+        return prompt
+
     def warmup(self, max_retries=3, timeout=120):
         """預熱 LLM 模型，確保模型已載入且能正常回應（ASR 耗時可能導致模型被卸載）"""
         _test = {"en2zh": "Hello", "zh2en": "你好", "ja2zh": "こんにちは",
-                 "zh2ja": "你好", "nan2en": "你好"}.get(self.direction, "Hello")
+                 "zh2ja": "你好", "ko2zh": "안녕하세요", "zh2ko": "你好",
+                 "nan2en": "你好"}.get(self.direction, "Hello")
         for attempt in range(max_retries):
             try:
                 result = _llm_generate(
@@ -3587,6 +3673,13 @@ class OllamaTranslator:
             )
             if not has_kana:
                 return True
+        # 韓文（v2.22.0）。只加在韓文方向上，其他既有模式的判斷不動
+        _has_hangul = any('\uac00' <= ch <= '\ud7a3' or '\u3130' <= ch <= '\u318f'
+                          for ch in text)
+        if self.direction == "ko2zh" and _has_hangul:
+            return True          # 韓翻中：夾帶韓文原文是最常見的失誤
+        if self.direction == "zh2ko" and len(text) >= 2 and not _has_hangul:
+            return True          # 中翻韓：沒有韓文字多半是模型直接回了中文
         return False
 
     @classmethod
@@ -3760,12 +3853,15 @@ class NllbTranslator:
         "en": "eng_Latn",
         "zh": "zho_Hant",
         "ja": "jpn_Jpan",
+        "ko": "kor_Hang",
     }
     _DIRECTION_MAP = {
         "en2zh": ("en", "zh"),
         "zh2en": ("zh", "en"),
         "ja2zh": ("ja", "zh"),
         "zh2ja": ("zh", "ja"),
+        "ko2zh": ("ko", "zh"),
+        "zh2ko": ("zh", "ko"),
         "nan2en": ("zh", "en"),
     }
 
@@ -3851,7 +3947,7 @@ class NllbTranslator:
             else:
                 translated_parts.append(part)
         result = " ".join(translated_parts)
-        if self.direction in ("en2zh", "ja2zh"):
+        if self.direction in ("en2zh", "ja2zh", "ko2zh"):
             return _s2twp_safe(result)
         return result
 
@@ -5133,7 +5229,7 @@ def select_translator(init_host=None, init_port=None, mode="en2zh"):
             _argos_ok = mode == "en2zh" and os.path.isdir(ARGOS_PKG_PATH)
             _offline_opts = []
             if _nllb_ok:
-                _offline_opts.append(("NLLB 本機離線", "支援中日英，品質一般", "nllb"))
+                _offline_opts.append(("NLLB 本機離線", "支援中日韓英，品質一般", "nllb"))
             if _argos_ok:
                 _offline_opts.append(("Argos 本機離線", "僅英翻中，品質一般", "argos"))
             if len(_offline_opts) == 0:
@@ -5191,7 +5287,7 @@ def select_translator(init_host=None, init_port=None, mode="en2zh"):
         for model_name in sorted(available_models):
             options.append((model_name, "", "llm", model_name))
     if os.path.isdir(NLLB_MODEL_DIR):
-        options.append(("NLLB 本機離線", "支援中日英，品質一般，免 LLM 伺服器", "nllb", None))
+        options.append(("NLLB 本機離線", "支援中日韓英，品質一般，免 LLM 伺服器", "nllb", None))
     if mode == "en2zh" and os.path.isdir(ARGOS_PKG_PATH):
         options.append(("Argos 本機離線", "僅英翻中，品質一般，免 LLM 伺服器", "argos", None))
 
@@ -5383,8 +5479,11 @@ def _input_interactive_menu(args):
                          "nan2en": ("台語轉錄+英文翻譯", "台語語音 → 轉錄成漢字並翻譯成英文"),
                          "ja2zh": ("日文轉錄+中文翻譯", "日文語音 → 轉錄並翻譯成繁體中文"),
                          "zh2ja": ("中文轉錄+日文翻譯", "中文語音 → 轉錄並翻譯成日文"),
+                         "ko2zh": ("韓文轉錄+中文翻譯", "韓文語音 → 轉錄並翻譯成繁體中文"),
+                         "zh2ko": ("中文轉錄+韓文翻譯", "中文語音 → 轉錄並翻譯成韓文"),
                          "en_zh": ("英中雙向轉錄+翻譯", "系統音訊(英→中) + 麥克風(中→英)，需配對兩個檔案"),
-                         "ja_zh": ("日中雙向轉錄+翻譯", "系統音訊(日→中) + 麥克風(中→日)，需配對兩個檔案")}
+                         "ja_zh": ("日中雙向轉錄+翻譯", "系統音訊(日→中) + 麥克風(中→日)，需配對兩個檔案"),
+                         "ko_zh": ("韓中雙向轉錄+翻譯", "系統音訊(韓→中) + 麥克風(中→韓)，需配對兩個檔案")}
         input_modes = [
             (k, _input_labels[k][0], _input_labels[k][1]) if k in _input_labels else (k, n, d)
             for k, n, d in MODE_PRESETS if k != "record"
@@ -5599,9 +5698,10 @@ def _input_interactive_menu(args):
                 else:
                     print(f"  {C_ERR}[錯誤] 未設定 LLM 伺服器，離線翻譯模型也未安裝{RESET}")
 
-            # 日文模式不支援 Argos
-            if _use_argos and mode_key in ("ja2zh", "zh2ja"):
-                print(f"  {C_HIGHLIGHT}[警告] 日文翻譯不支援 Argos，將只做轉錄（不翻譯）{RESET}")
+            # 日文、韓文模式不支援 Argos（Argos 只裝了英翻中）
+            if _use_argos and mode_key in ("ja2zh", "zh2ja", "ko2zh", "zh2ko"):
+                _lang_nm = "韓文" if mode_key in ("ko2zh", "zh2ko") else "日文"
+                print(f"  {C_HIGHLIGHT}[警告] {_lang_nm}翻譯不支援 Argos，將只做轉錄（不翻譯）{RESET}")
                 _use_argos = False
                 need_translate = False
 
@@ -5620,7 +5720,7 @@ def _input_interactive_menu(args):
 
                 # 加入本機離線翻譯選項
                 if os.path.isdir(NLLB_MODEL_DIR):
-                    translate_models.append(("NLLB 本機離線翻譯", "支援中日英互譯，免 LLM 伺服器", "nllb"))
+                    translate_models.append(("NLLB 本機離線翻譯", "支援中日韓英互譯，免 LLM 伺服器", "nllb"))
                 if mode_key == "en2zh" and os.path.isdir(ARGOS_PKG_PATH):
                     translate_models.append(("Argos 本機離線翻譯", "僅英翻中，免 LLM 伺服器", "argos"))
 
@@ -5977,7 +6077,8 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
 
     # 翻譯記錄檔（以時間命名）
     from datetime import datetime
-    log_prefixes = {"en2zh": "英翻中_逐字稿", "zh2en": "中翻英_逐字稿", "ja2zh": "日翻中_逐字稿", "zh2ja": "中翻日_逐字稿", "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿"}
+    log_prefixes = {"en2zh": "英翻中_逐字稿", "zh2en": "中翻英_逐字稿", "ja2zh": "日翻中_逐字稿", "zh2ja": "中翻日_逐字稿", "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿",
+                    "ko2zh": "韓翻中_逐字稿", "zh2ko": "中翻韓_逐字稿", "ko": "韓文_逐字稿"}
     log_prefix = log_prefixes.get(mode, "逐字稿")
     topic_part = _topic_to_filename_part(meeting_topic)
     log_filename = datetime.now().strftime(f"{log_prefix}{topic_part}_%Y%m%d_%H%M%S.txt")
@@ -6200,6 +6301,9 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
         "en": "說英文即可看到字幕",
         "zh": "說中文即可看到字幕",
         "ja": "說日文即可看到字幕",
+        "ko2zh": "說韓文即可看到中文翻譯",
+        "zh2ko": "說中文即可看到韓文翻譯",
+        "ko": "說韓文即可看到字幕",
     }
     print(f"{C_OK}{BOLD}開始監聽...{RESET} {C_WHITE}{listen_hints.get(mode, '')}{RESET}\n\n", flush=True)
     _webui_send({"type": "progress", "stage": "", "detail": ""})
@@ -6367,14 +6471,15 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
                             )
                             t.start()
 
-                    elif mode in _JA_INPUT_MODES:
-                        # 日文模式：過濾日文幻覺
-                        if _is_ja_hallucination(line):
+                    elif mode in _JA_INPUT_MODES or mode in _KO_INPUT_MODES:
+                        # 日文／韓文模式：過濾各自的幻覺（韓文 v2.22.0 起）
+                        _hall = _is_ko_hallucination if mode in _KO_INPUT_MODES else _is_ja_hallucination
+                        if _hall(line):
                             continue
                         if line == last_translated:
                             continue
-                        if mode == "ja":
-                            _src_c, _src_l = _MODE_LABELS["ja"][0], _MODE_LABELS["ja"][1]
+                        if mode in ("ja", "ko"):
+                            _src_c, _src_l = _MODE_LABELS[mode][0], _MODE_LABELS[mode][1]
                             with print_lock:
                                 print(f"{_src_c}{BOLD}[{_src_l}] {line}{RESET}", flush=True)
                                 print(flush=True)
@@ -6389,7 +6494,7 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
                                          "asr_time": round(_asr_elapsed, 1),
                                          "timestamp": timestamp})
                         else:
-                            # ja2zh：原文延後到翻譯完成時一起顯示
+                            # ja2zh／ko2zh：原文延後到翻譯完成時一起顯示
                             last_translated = line
                             seq = _trans_seq[0]; _trans_seq[0] += 1
                             t = threading.Thread(
@@ -6399,7 +6504,7 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
                             )
                             t.start()
 
-                    elif mode in ("zh2en", "zh2ja"):
+                    elif mode in ("zh2en", "zh2ja", "zh2ko"):
                         # 中文輸入翻譯模式：中文輸入過濾 + 翻譯
                         stripped_zh = re.sub(r"[^\u4e00-\u9fff]", "", line)
                         if len(stripped_zh) < 2:
@@ -6509,7 +6614,8 @@ def run_stream_moonshine(capture_id: int, translator, moonshine_model_name: str,
     from datetime import datetime
     log_prefixes = {"en2zh": "英翻中_逐字稿", "zh2en": "中翻英_逐字稿",
                     "ja2zh": "日翻中_逐字稿", "zh2ja": "中翻日_逐字稿",
-                    "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿"}
+                    "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿",
+                    "ko2zh": "韓翻中_逐字稿", "zh2ko": "中翻韓_逐字稿", "ko": "韓文_逐字稿"}
     log_prefix = log_prefixes.get(mode, "逐字稿")
     topic_part = _topic_to_filename_part(meeting_topic)
     log_filename = datetime.now().strftime(f"{log_prefix}{topic_part}_%Y%m%d_%H%M%S.txt")
@@ -6916,7 +7022,8 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
     from datetime import datetime
     log_prefixes = {"en2zh": "英翻中_逐字稿", "zh2en": "中翻英_逐字稿",
                     "ja2zh": "日翻中_逐字稿", "zh2ja": "中翻日_逐字稿",
-                    "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿"}
+                    "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿",
+                    "ko2zh": "韓翻中_逐字稿", "zh2ko": "中翻韓_逐字稿", "ko": "韓文_逐字稿"}
     log_prefix = log_prefixes.get(mode, "逐字稿")
     topic_part = _topic_to_filename_part(meeting_topic)
     log_filename = datetime.now().strftime(f"{log_prefix}{topic_part}_%Y%m%d_%H%M%S.txt")
@@ -7233,6 +7340,9 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
         hallucination_check = _is_en_hallucination
     elif mode in _JA_INPUT_MODES:
         hallucination_check = _is_ja_hallucination
+    elif mode in _KO_INPUT_MODES:
+        # 不可以落到中文過濾：它要求至少兩個漢字，韓文會整句被丟掉
+        hallucination_check = _is_ko_hallucination
     else:
         hallucination_check = _is_zh_hallucination
     src_color, src_label = _MODE_LABELS[mode][0], _MODE_LABELS[mode][1]
@@ -7364,6 +7474,9 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
         "en": "說英文即可看到字幕",
         "zh": "說中文即可看到字幕",
         "ja": "說日文即可看到字幕",
+        "ko2zh": "說韓文即可看到中文翻譯",
+        "zh2ko": "說中文即可看到韓文翻譯",
+        "ko": "說韓文即可看到字幕",
     }
     print(f"{C_OK}{BOLD}開始監聽...{RESET} {C_WHITE}{listen_hints.get(mode, '')}{RESET}\n\n", flush=True)
     _webui_send({"type": "progress", "stage": "", "detail": ""})
@@ -7460,7 +7573,8 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
     from datetime import datetime
     log_prefixes = {"en2zh": "英翻中_逐字稿", "zh2en": "中翻英_逐字稿",
                     "ja2zh": "日翻中_逐字稿", "zh2ja": "中翻日_逐字稿",
-                    "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿"}
+                    "en": "英文_逐字稿", "zh": "中文_逐字稿", "ja": "日文_逐字稿",
+                    "ko2zh": "韓翻中_逐字稿", "zh2ko": "中翻韓_逐字稿", "ko": "韓文_逐字稿"}
     log_prefix = log_prefixes.get(mode, "逐字稿")
     topic_part = _topic_to_filename_part(meeting_topic)
     log_filename = datetime.now().strftime(f"{log_prefix}{topic_part}_%Y%m%d_%H%M%S.txt")
@@ -7927,6 +8041,9 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
         hallucination_check = _is_en_hallucination
     elif mode in _JA_INPUT_MODES:
         hallucination_check = _is_ja_hallucination
+    elif mode in _KO_INPUT_MODES:
+        # 不可以落到中文過濾：它要求至少兩個漢字，韓文會整句被丟掉
+        hallucination_check = _is_ko_hallucination
     else:
         hallucination_check = _is_zh_hallucination
     src_color, src_label = _MODE_LABELS[mode][0], _MODE_LABELS[mode][1]
@@ -8062,6 +8179,9 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
         "en": "說英文即可看到字幕",
         "zh": "說中文即可看到字幕",
         "ja": "說日文即可看到字幕",
+        "ko2zh": "說韓文即可看到中文翻譯",
+        "zh2ko": "說中文即可看到韓文翻譯",
+        "ko": "說韓文即可看到字幕",
     }
     print(f"\n{C_OK}{BOLD}開始監聽...{RESET} {C_WHITE}{listen_hints.get(mode, '')}{RESET}\n\n", flush=True)
     _webui_send({"type": "started", "mode": mode})
@@ -8154,29 +8274,36 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                  "ja2zh": _is_ja_hallucination, "zh2ja": _is_zh_hallucination,
                  "en": _is_en_hallucination, "zh": _is_zh_hallucination,
                  "ja": _is_ja_hallucination, "en_zh": _is_en_hallucination,
-                 "ja_zh": _is_ja_hallucination}
+                 "ja_zh": _is_ja_hallucination,
+                 "ko2zh": _is_ko_hallucination, "zh2ko": _is_zh_hallucination,
+                 "ko": _is_ko_hallucination, "ko_zh": _is_ko_hallucination}
     _MIC_HALLU = {"en2zh": _is_zh_hallucination, "zh2en": _is_en_hallucination,
                   "ja2zh": _is_zh_hallucination, "zh2ja": _is_ja_hallucination,
                   "en": _is_en_hallucination, "zh": _is_zh_hallucination,
                   "ja": _is_ja_hallucination, "en_zh": _is_zh_hallucination,
-                  "ja_zh": _is_zh_hallucination}
+                  "ja_zh": _is_zh_hallucination,
+                  "ko2zh": _is_zh_hallucination, "zh2ko": _is_ko_hallucination,
+                  "ko": _is_ko_hallucination, "ko_zh": _is_zh_hallucination}
     lb_lang = _LB_LANG[mode]
     mic_lang = _MIC_LANG[mode]
     lb_hallu = _LB_HALLU[mode]
     mic_hallu = _MIC_HALLU[mode]
     # 雙向模式麥克風語言預偵測（detect_language → 正確語言辨識）
-    # en_zh: 中文翻譯、英文直接顯示；ja_zh: 中文翻譯、日文/英文直接顯示
-    _mic_auto_detect = (mode in ("en_zh", "ja_zh"))
-    _mic_skip_langs = {"en_zh": {"en"}, "ja_zh": {"ja", "en"}}.get(mode)  # 偵測到這些語言時跳過翻譯
+    # en_zh: 中文翻譯、英文直接顯示；ja_zh／ko_zh: 中文翻譯、日文或韓文／英文直接顯示
+    _mic_auto_detect = (mode in ("en_zh", "ja_zh", "ko_zh"))
+    _mic_skip_langs = {"en_zh": {"en"}, "ja_zh": {"ja", "en"},
+                       "ko_zh": {"ko", "en"}}.get(mode)  # 偵測到這些語言時跳過翻譯
     if _mic_auto_detect:
         mic_lang = None  # 觸發 local_transcribe 內的語言預偵測
 
     # ── 翻譯記錄檔 ──
     from datetime import datetime
     _LOG_PREFIX = {"en_zh": "英中雙向_逐字稿", "ja_zh": "日中雙向_逐字稿",
+                   "ko_zh": "韓中雙向_逐字稿",
                    "en2zh": "英翻中_逐字稿",
                    "zh2en": "中翻英_逐字稿", "ja2zh": "日翻中_逐字稿",
-                   "zh2ja": "中翻日_逐字稿", "en": "英文轉錄", "zh": "中文轉錄", "ja": "日文轉錄"}
+                   "zh2ja": "中翻日_逐字稿", "ko2zh": "韓翻中_逐字稿", "zh2ko": "中翻韓_逐字稿",
+                   "en": "英文轉錄", "zh": "中文轉錄", "ja": "日文轉錄", "ko": "韓文轉錄"}
     log_prefix = _LOG_PREFIX.get(mode, "逐字稿")
     topic_part = _topic_to_filename_part(meeting_topic)
     log_filename = datetime.now().strftime(f"{log_prefix}{topic_part}_%Y%m%d_%H%M%S.txt")
@@ -8255,8 +8382,8 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
             if mic_lang is None:
                 # 自動偵測模式：預熱 transcribe（偵測可能用到的語言）
                 _warmup_langs = {"zh", "en"}
-                if mode == "ja_zh":
-                    _warmup_langs.add("ja")
+                if mode in ("ja_zh", "ko_zh"):
+                    _warmup_langs.add(_BIDI_FOREIGN[mode])
                 for _wl in _warmup_langs - {lb_lang}:
                     _mlx_whisper_mod.transcribe(_mlx_input(_warmup_path), path_or_hf_repo=_mlx_repo, language=_wl)
                 # 預熱 detect_language + direct_decode 路徑（避免首次辨識觸發 MLX JIT 編譯）
@@ -8282,8 +8409,8 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                     _w_model.decode(_w_mel_seg, _w_opts)
                 except Exception:
                     pass
-                # 也預熱英文（+ ja_zh 模式的日文）decode
-                for _wl2 in ({"en", "ja"} if mode == "ja_zh" else {"en"}):
+                # 也預熱英文（+ ja_zh／ko_zh 模式的日文／韓文）decode
+                for _wl2 in ({"en", _BIDI_FOREIGN[mode]} if mode in ("ja_zh", "ko_zh") else {"en"}):
                     _w_opts2 = _WarmupDO(language=_wl2, task="transcribe", temperature=0.0,
                         sample_len=25, fp16=True)
                     try:
@@ -8420,7 +8547,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
     # 方向標籤（用 _BIDI_LABELS 的 src_label/dst_label 組合）
     _lb_labels = bidi_cfg["loopback"]  # (src_color, src_label, dst_color, dst_label)
     _mic_labels = bidi_cfg["mic"]
-    _lang_name = {"en": "英文", "zh": "中文", "ja": "日文"}
+    _lang_name = {"en": "英文", "zh": "中文", "ja": "日文", "ko": "韓文"}
     if translator_lb is not None:
         _lb_dir = f"{_lb_labels[1]}→{_lb_labels[3]}"  # e.g. "EN→中"
     else:
@@ -8449,7 +8576,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         print(f"  {C_HIGHLIGHT}  {_hint_n}. ASR 雙路辨識（非 whisper-stream），辨識負載加倍{RESET}")
         _hint_n += 1
     if _mic_auto_detect:
-        _mix_hint = "中日英混雜" if mode == "ja_zh" else "中英混雜"
+        _mix_hint = {"ja_zh": "中日英混雜", "ko_zh": "中韓英混雜"}.get(mode, "中英混雜")
         print(f"  {C_OK}  {_hint_n}. 麥克風支援{_mix_hint}，開始幾句辨識較慢屬正常（模型預熱中）{RESET}")
     print(f"  {C_DIM}按 Ctrl+P 暫停/繼續 ─ Ctrl+C 停止{RESET}")
     print(f"{C_TITLE}{'=' * 60}{RESET}")
@@ -8696,10 +8823,10 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                 _zh_prob = _probs.get("zh", 0)
                 if _zh_prob > 0.3:
                     lang = "zh"
-                elif mode == "ja_zh":
-                    # ja_zh 模式：非中文時區分日文和英文
-                    _ja_prob = _probs.get("ja", 0)
-                    lang = "ja" if _ja_prob > _probs.get("en", 0) else "en"
+                elif mode in ("ja_zh", "ko_zh"):
+                    # ja_zh／ko_zh 模式：非中文時區分日文（或韓文）和英文
+                    _fl = _BIDI_FOREIGN[mode]
+                    lang = _fl if _probs.get(_fl, 0) > _probs.get("en", 0) else "en"
                 else:
                     lang = "en"
                 # 直接 decode（省掉 transcribe 的 mel 重算 + ffmpeg）
@@ -8807,9 +8934,9 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                 _zh_prob_fw = _prob_dict.get("zh", 0)
                 if _zh_prob_fw > 0.3:
                     lang = "zh"
-                elif mode == "ja_zh":
-                    _ja_prob_fw = _prob_dict.get("ja", 0)
-                    lang = "ja" if _ja_prob_fw > _prob_dict.get("en", 0) else "en"
+                elif mode in ("ja_zh", "ko_zh"):
+                    _fl = _BIDI_FOREIGN[mode]
+                    lang = _fl if _prob_dict.get(_fl, 0) > _prob_dict.get("en", 0) else "en"
                 else:
                     lang = "en"
             _kw = dict(
@@ -8972,7 +9099,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
             # 遠端 GPU 伺服器辨識（麥克風）
             if use_remote and mic_remote_cfg:
                 try:
-                    _rl = lang or ("zh" if mode in ("zh", "zh2en", "zh2ja", "en_zh", "ja_zh") else "en")
+                    _rl = lang or ("zh" if mode in ("zh", "zh2en", "zh2ja", "zh2ko", "en_zh", "ja_zh", "ko_zh") else "en")
                     with open(wav_path, "rb") as _rf:
                         _wav_bytes = _rf.read()
                     _segs, _full, _pt = _remote_whisper_transcribe_bytes(
@@ -9050,7 +9177,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
     # ── 排乾辨識結果 ──
     # 語言→幻覺檢查對照（語言預偵測模式用）
     _hallu_by_lang = {"en": _is_en_hallucination, "zh": _is_zh_hallucination,
-                      "ja": _is_ja_hallucination}
+                      "ja": _is_ja_hallucination, "ko": _is_ko_hallucination}
 
     def drain_ordered_results(source, pending_res, next_disp, res_lock,
                               trans_seq, trans_pending, trans_next, trans_lock,
@@ -9103,7 +9230,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                     # 不翻譯：直接塞入翻譯佇列，用 _NO_TRANSLATE 哨兵
                     with trans_lock:
                         trans_pending[seq] = (line, _NO_TRANSLATE, 0, proc_time)
-                    _lbl = {"en": "EN", "ja": "日", "zh": "中"}.get(_effective_lang, _effective_lang.upper()) if _skip_this else None
+                    _lbl = {"en": "EN", "ja": "日", "ko": "韓", "zh": "中"}.get(_effective_lang, _effective_lang.upper()) if _skip_this else None
                     _drain_translations(trans_pending, trans_next, trans_lock, source,
                                         label_override=_lbl)
                 else:
@@ -9442,7 +9569,9 @@ class _AudioRecorder:
     _HEADER_UPDATE_INTERVAL = 30  # 每 30 秒更新一次 WAV header
 
     _MODE_FNAME = {"en2zh": "英翻中", "zh2en": "中翻英", "ja2zh": "日翻中", "zh2ja": "中翻日",
-                   "en_zh": "英中雙向", "ja_zh": "日中雙向", "en": "英文", "zh": "中文", "ja": "日文"}
+                   "ko2zh": "韓翻中", "zh2ko": "中翻韓",
+                   "en_zh": "英中雙向", "ja_zh": "日中雙向", "ko_zh": "韓中雙向",
+                   "en": "英文", "zh": "中文", "ja": "日文", "ko": "韓文"}
 
     def __init__(self, samplerate=16000, channels=1, fmt=None, topic=None, mode=None):
         os.makedirs(RECORDING_DIR, exist_ok=True)
@@ -11309,9 +11438,8 @@ def _is_en_hallucination(text):
     ))
 
 
-def _is_zh_hallucination(text):
-    """檢查中文文字是否為 Whisper 幻覺（YouTube 訓練資料殘留 + 重複模式）"""
-    _t = text.strip()
+def _is_repetitive_hallucination(_t):
+    """重複模式的幻覺（中文與韓文共用；v2.22.0 從 _is_zh_hallucination 抽出，判斷完全不變）"""
     # 重複模式偵測 1：單一字元佔比 > 60%（如「衛衛衛衛衛...」）
     if len(_t) >= 6:
         from collections import Counter as _Counter
@@ -11333,6 +11461,14 @@ def _is_zh_hallucination(text):
         _top_word, _top_count = _wc.most_common(1)[0]
         if _top_count >= 5 and _top_count / len(_words) > 0.5:
             return True
+    return False
+
+
+def _is_zh_hallucination(text):
+    """檢查中文文字是否為 Whisper 幻覺（YouTube 訓練資料殘留 + 重複模式）"""
+    _t = text.strip()
+    if _is_repetitive_hallucination(_t):
+        return True
     # 太短的中文（去除標點後不到 2 個字）
     _stripped = re.sub(r'[^\u4e00-\u9fff\u3040-\u30ff]', '', _t)
     if _stripped.startswith("字幕") and len(_stripped) <= 6:
@@ -11373,6 +11509,41 @@ def _is_zh_hallucination(text):
             "張惠妹", "张惠妹", "五月天", "陳奕迅", "陈奕迅",
             "鄧紫棋", "邓紫棋", "王力宏",
         ))
+    return False
+
+
+def _is_ko_hallucination(text):
+    """檢查韓文文字是否為 Whisper 幻覺（v2.22.0）。
+
+    清單是**實際蒐集**來的，不是憑印象列：把靜音、雜訊、和弦、旋律、掌聲、鍵盤聲
+    以韓文模式、關掉 VAD 送進 base／small（本機）與 large-v3-turbo／large-v3（GPU），
+    整理重複出現的無關輸出（工具與結果見 tools/korean/）。沒觀察到的就不加
+    （例如 KBS／SBS 新聞結尾語都沒出現過，只收 MBC）。
+
+    擋不住的：隨機的正常詞句（small 對鍵盤聲吐「닭고기」「오늘의 주인공은」），
+    跟真的講話分不開，硬擋會誤殺。
+    """
+    _t = text.strip()
+    if _is_repetitive_hallucination(_t):          # 아, 아, 아…／이곳은 이곳은…／1,2,3,4,4,4…
+        return True
+    _hangul = sum(1 for c in _t if '\uac00' <= c <= '\ud7a3' or '\u3131' <= c <= '\u318e')
+    if _hangul < 2:
+        return True
+    # 整句就是這個詞才擋：會議裡真的會有人說「謝謝」，不能出現在句中就擋
+    _bare = re.sub(r"[\s.,!?。！？…~]", "", _t)
+    if _bare in ("감사합니다", "고맙습니다", "아멘"):
+        return True
+    if any(kw in _t for kw in (
+        # YouTube 結尾語（GPU 上最常見：「下支影片見」「感謝收看」）
+        "다음 영상에서", "시청해주셔서", "시청해 주셔서",
+        "구독과 좋아요", "좋아요와 구독", "구독 부탁",
+        # 新聞台結尾語
+        "MBC 뉴스",
+    )):
+        return True
+    # 字幕歸屬（與中文「字幕提供」、日文「字幕制作」同一類）：「한글자막 by …」「자막 제공 …」
+    if "자막" in _t and re.search(r"자막\s*(by|BY|제공|제작|협찬)", _t):
+        return True
     return False
 
 
@@ -11841,7 +12012,8 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
     # Log 檔名（每次處理建子目錄）
     log_prefixes = {"en2zh": "英翻中_時間逐字稿", "zh2en": "中翻英_時間逐字稿",
                     "ja2zh": "日翻中_時間逐字稿", "zh2ja": "中翻日_時間逐字稿",
-                    "en": "英文_時間逐字稿", "zh": "中文_時間逐字稿", "ja": "日文_時間逐字稿"}
+                    "en": "英文_時間逐字稿", "zh": "中文_時間逐字稿", "ja": "日文_時間逐字稿",
+                    "ko2zh": "韓翻中_時間逐字稿", "zh2ko": "中翻韓_時間逐字稿", "ko": "韓文_時間逐字稿"}
     log_prefix = log_prefixes.get(mode, "時間逐字稿")
     ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     session_dir = os.path.join(LOG_DIR, f"{basename}_{ts_str}")
@@ -11870,6 +12042,9 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
         hallucination_check = _is_en_hallucination
     elif mode in _JA_INPUT_MODES:
         hallucination_check = _is_ja_hallucination
+    elif mode in _KO_INPUT_MODES:
+        # 不可以落到中文過濾：它要求至少兩個漢字，韓文會整句被丟掉
+        hallucination_check = _is_ko_hallucination
     else:
         hallucination_check = _is_zh_hallucination
 
@@ -12277,8 +12452,9 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
         print(f"  {C_OK}{BOLD}處理完成{RESET} {C_DIM}（共 {seg_count} 段{diarize_info} | 耗時 {total_str}）{RESET}")
         if seg_count == 0:
             _mode_lang = {"en2zh": "英文", "zh2en": "中文", "ja2zh": "日文", "zh2ja": "中文",
-                          "en": "英文", "zh": "中文", "ja": "日文",
-                          "en_zh": "英文/中文", "ja_zh": "日文/中文"}
+                          "ko2zh": "韓文", "zh2ko": "中文",
+                          "en": "英文", "zh": "中文", "ja": "日文", "ko": "韓文",
+                          "en_zh": "英文/中文", "ja_zh": "日文/中文", "ko_zh": "韓文/中文"}
             _expected = _mode_lang.get(mode, mode)
             print(f"  {C_HIGHLIGHT}[注意] 辨識結果為 0 段，可能原因：{RESET}")
             print(f"  {C_HIGHLIGHT}  1. 功能模式選錯（目前: {mode}，期望音訊語言: {_expected}）{RESET}")
@@ -12349,7 +12525,8 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
     mic_lang = _MIC_LANG.get(mode, "zh")
 
     # 幻覺檢查函式
-    _hall_check = {"en": _is_en_hallucination, "zh": _is_zh_hallucination, "ja": _is_ja_hallucination}
+    _hall_check = {"en": _is_en_hallucination, "zh": _is_zh_hallucination, "ja": _is_ja_hallucination,
+                   "ko": _is_ko_hallucination}
     lb_hall = _hall_check.get(lb_lang, _is_en_hallucination)
     mic_hall = _hall_check.get(mic_lang, _is_zh_hallucination)
 
@@ -12364,10 +12541,12 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
 
     # Log 檔名
     log_prefixes = {"en_zh": "英中雙向_時間逐字稿", "ja_zh": "日中雙向_時間逐字稿",
+                    "ko_zh": "韓中雙向_時間逐字稿",
                     "en2zh": "英翻中_配對時間逐字稿",
                     "zh2en": "中翻英_配對時間逐字稿", "ja2zh": "日翻中_配對時間逐字稿",
-                    "zh2ja": "中翻日_配對時間逐字稿", "en": "英文_配對時間逐字稿",
-                    "zh": "中文_配對時間逐字稿", "ja": "日文_配對時間逐字稿"}
+                    "zh2ja": "中翻日_配對時間逐字稿", "ko2zh": "韓翻中_配對時間逐字稿",
+                    "zh2ko": "中翻韓_配對時間逐字稿", "en": "英文_配對時間逐字稿",
+                    "zh": "中文_配對時間逐字稿", "ja": "日文_配對時間逐字稿", "ko": "韓文_配對時間逐字稿"}
     log_prefix = log_prefixes.get(mode, "配對_時間逐字稿")
     ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     session_dir = os.path.join(LOG_DIR, f"{lb_basename}_{ts_str}")
@@ -12970,6 +13149,21 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
         out_name = basename.replace("中文_配對時間逐字稿", "中文_配對摘要", 1)
     elif basename.startswith("日文_配對時間逐字稿"):
         out_name = basename.replace("日文_配對時間逐字稿", "日文_配對摘要", 1)
+    # 韓文（v2.22.0）：比照日文的對應
+    elif basename.startswith("韓翻中_雙向時間逐字稿"):
+        out_name = basename.replace("韓翻中_雙向時間逐字稿", "韓翻中_雙向摘要", 1)
+    elif basename.startswith("中翻韓_雙向時間逐字稿"):
+        out_name = basename.replace("中翻韓_雙向時間逐字稿", "中翻韓_雙向摘要", 1)
+    elif basename.startswith("韓文_雙向時間逐字稿"):
+        out_name = basename.replace("韓文_雙向時間逐字稿", "韓文_雙向摘要", 1)
+    elif basename.startswith("韓中雙向_時間逐字稿"):
+        out_name = basename.replace("韓中雙向_時間逐字稿", "韓中雙向_摘要", 1)
+    elif basename.startswith("韓翻中_配對時間逐字稿"):
+        out_name = basename.replace("韓翻中_配對時間逐字稿", "韓翻中_配對摘要", 1)
+    elif basename.startswith("中翻韓_配對時間逐字稿"):
+        out_name = basename.replace("中翻韓_配對時間逐字稿", "中翻韓_配對摘要", 1)
+    elif basename.startswith("韓文_配對時間逐字稿"):
+        out_name = basename.replace("韓文_配對時間逐字稿", "韓文_配對摘要", 1)
     elif basename.startswith("配對_時間逐字稿"):
         out_name = basename.replace("配對_時間逐字稿", "配對_摘要", 1)
     elif basename.startswith("英翻中_時間逐字稿"):
@@ -14184,7 +14378,7 @@ def _refresh_title_bar():
         m, s = divmod(rem, 60)
         time_str = f"{h:02d}:{m:02d}:{s:02d}"
         count = _status_bar_state["count"]
-        label = "轉錄" if _status_bar_state["mode"] in ("zh", "en", "ja") else "翻譯"
+        label = "轉錄" if _status_bar_state["mode"] in ("zh", "en", "ja", "ko") else "翻譯"
         parts = [time_str]
         # 波形圖
         hist = _status_bar_state.get("rms_history")
@@ -14277,7 +14471,7 @@ def _draw_status_bar(rows=None, cols=None):
         m, s = divmod(rem, 60)
         time_str = f"{h:02d}:{m:02d}:{s:02d}"
         count = _status_bar_state["count"]
-        label = "轉錄" if _status_bar_state["mode"] in ("zh", "en", "ja") else "翻譯"
+        label = "轉錄" if _status_bar_state["mode"] in ("zh", "en", "ja", "ko") else "翻譯"
         # 波形文字（12 字元）
         wave_str = ""
         lock = _status_bar_state.get("rms_lock")
@@ -14849,7 +15043,7 @@ def main():
             sys.exit(1)
         # 自動偵測雙向配對：若未指定 mode 但輸入檔案符合配對，從檔名推斷模式
         if args.mode is None and _detect_bidi_file_pair(args.input):
-            _FNAME_MODE_MAP = {"英中雙向": "en_zh", "日中雙向": "ja_zh"}
+            _FNAME_MODE_MAP = {"英中雙向": "en_zh", "日中雙向": "ja_zh", "韓中雙向": "ko_zh"}
             _detected_mode = "en_zh"  # 預設（向下相容舊檔名無模式標籤）
             for fpath in args.input:
                 fname = os.path.basename(fpath)
@@ -15050,7 +15244,7 @@ def main():
                 translator = NllbTranslator(direction=_trans_dir)
             else:
                 # 使用者明確指定 argos
-                if mode in ("zh2en", "ja2zh", "zh2ja") or mode in _BIDI_MODES:
+                if mode in ("zh2en", "ja2zh", "zh2ja", "ko2zh", "zh2ko") or mode in _BIDI_MODES:
                     print(f"{C_HIGHLIGHT}[錯誤] 此模式不支援 Argos 離線翻譯，請使用 LLM 伺服器或 NLLB{RESET}",
                           file=sys.stderr)
                     sys.exit(1)
@@ -15781,7 +15975,7 @@ def main():
                 elif engine == "nllb":
                     translator = NllbTranslator(direction=mode)
                 else:
-                    if mode in ("zh2en", "ja2zh", "zh2ja"):
+                    if mode in ("zh2en", "ja2zh", "zh2ja", "ko2zh", "zh2ko"):
                         print(f"[錯誤] 此模式不支援 Argos 離線翻譯，請使用 LLM 伺服器或 NLLB", file=sys.stderr)
                         sys.exit(1)
                     translator = ArgosTranslator()
@@ -15972,7 +16166,7 @@ def main():
                 elif engine == "nllb":
                     translator = NllbTranslator(direction=mode)
                 else:
-                    if mode in ("zh2en", "ja2zh", "zh2ja"):
+                    if mode in ("zh2en", "ja2zh", "zh2ja", "ko2zh", "zh2ko"):
                         print(f"[錯誤] 此模式不支援 Argos 離線翻譯，請使用 LLM 伺服器或 NLLB", file=sys.stderr)
                         sys.exit(1)
                     translator = ArgosTranslator()
@@ -16146,7 +16340,7 @@ def main():
         # 轉錄模式：提前詢問麥克風轉錄（影響辨識位置預設值）
         _early_mic = False
         _early_bidi_devs = None
-        if mode in ("en", "zh", "ja"):
+        if mode in ("en", "zh", "ja", "ko"):
             _early_bidi_devs = _detect_bidi_devices()
             if _early_bidi_devs:
                 try:
@@ -16186,7 +16380,7 @@ def main():
                 elif engine == "nllb":
                     translator = NllbTranslator(direction=mode)
                 else:
-                    if mode in ("zh2en", "ja2zh", "zh2ja"):
+                    if mode in ("zh2en", "ja2zh", "zh2ja", "ko2zh", "zh2ko"):
                         print(f"{C_HIGHLIGHT}[錯誤] 此模式不支援 Argos 離線翻譯，請使用 LLM 伺服器或 NLLB{RESET}",
                               file=sys.stderr)
                         sys.exit(1)
@@ -16289,7 +16483,7 @@ def main():
                 elif engine == "nllb":
                     translator = NllbTranslator(direction=mode)
                 else:
-                    if mode in ("zh2en", "ja2zh", "zh2ja"):
+                    if mode in ("zh2en", "ja2zh", "zh2ja", "ko2zh", "zh2ko"):
                         print(f"{C_HIGHLIGHT}[錯誤] 此模式不支援 Argos 離線翻譯，請使用 LLM 伺服器或 NLLB{RESET}",
                               file=sys.stderr)
                         sys.exit(1)
@@ -16307,7 +16501,7 @@ def main():
             bidi_devs = _early_bidi_devs  # 轉錄模式已提前偵測
             if _early_mic:
                 use_mic = True
-            elif mode not in _BIDI_MODES and mode not in ("record", "en", "zh", "ja") and asr_engine == "whisper":
+            elif mode not in _BIDI_MODES and mode not in ("record", "en", "zh", "ja", "ko") and asr_engine == "whisper":
                 bidi_devs = _detect_bidi_devices()
                 if bidi_devs:
                     try:

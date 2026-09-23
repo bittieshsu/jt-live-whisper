@@ -511,11 +511,15 @@ def _get_config():
         {"value": "zh2en", "label": "中翻英字幕", "group": "單向翻譯"},
         {"value": "ja2zh", "label": "日翻中字幕", "group": "單向翻譯"},
         {"value": "zh2ja", "label": "中翻日字幕", "group": "單向翻譯"},
+        {"value": "ko2zh", "label": "韓翻中字幕", "group": "單向翻譯"},
+        {"value": "zh2ko", "label": "中翻韓字幕", "group": "單向翻譯"},
         {"value": "en_zh", "label": "英中雙向字幕", "group": "雙向翻譯"},
         {"value": "ja_zh", "label": "日中雙向字幕", "group": "雙向翻譯"},
+        {"value": "ko_zh", "label": "韓中雙向字幕", "group": "雙向翻譯"},
         {"value": "en", "label": "英文轉錄", "group": "轉錄"},
         {"value": "zh", "label": "中文轉錄", "group": "轉錄"},
         {"value": "ja", "label": "日文轉錄", "group": "轉錄"},
+        {"value": "ko", "label": "韓文轉錄", "group": "轉錄"},
         {"value": "nan", "label": "台語轉錄", "group": "轉錄"},
         {"value": "nan2en", "label": "台翻英字幕", "group": "單向翻譯"},
         {"value": "record", "label": "純錄音", "group": "其他"},
@@ -544,7 +548,7 @@ def _get_config():
         ]
     engines = [
         {"value": "llm", "label": "LLM — 品質最好，需 LLM 伺服器"},
-        {"value": "nllb", "label": "NLLB — 本機離線，中日英互譯"},
+        {"value": "nllb", "label": "NLLB — 本機離線，中日韓英互譯"},
         {"value": "argos", "label": "Argos — 本機離線，僅英翻中"},
     ]
     # LLM 翻譯模型清單
@@ -675,7 +679,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.21.9",
+        "last": last, "version": "2.22.0",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1118,7 +1122,7 @@ def _build_args(body: dict) -> list:
     args.extend(["-s", scene])
     engine = body.get("engine")
     llm_host = (body.get("llm_host") or "").strip()
-    if engine and mode not in ("en", "zh", "ja", "nan"):
+    if engine and mode not in ("en", "zh", "ja", "ko", "nan"):
         args.extend(["-e", engine])
         if engine == "llm":
             llm_model = body.get("llm_model", "")
