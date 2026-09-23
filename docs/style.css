@@ -272,3 +272,10 @@ footer a{color:#7fd3ff}
 .fl-cite{stroke:var(--amber);stroke-dasharray:6 5}
 .fl-head-cite{fill:var(--amber)}
 .fl-cite-t{font-size:13px;font-weight:700;fill:#b9770e}
+/* 首頁招牌標題輪播：四句疊在同一格，高度取最高的一句，切換時版面不跳動 */
+.rot-set{display:grid}
+.rot-item{grid-area:1/1;opacity:0;transform:translateY(10px);transition:opacity .6s ease,transform .6s ease;pointer-events:none}
+.rot-item.on{opacity:1;transform:none;pointer-events:auto}
+.rot .ln{display:block}
+@media(max-width:480px){.hero h1.rot{font-size:28px}body.lang-en .hero h1.rot{font-size:26px}}
+@media(prefers-reduced-motion:reduce){.rot-item{transition:none;transform:none}}
