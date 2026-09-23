@@ -47,3 +47,17 @@
     pre.appendChild(b);
   });
 })();
+
+/* 首頁招牌標題輪播（每 5 秒換一句；減少動態效果時停在第一句） */
+(function(){
+  var items = document.querySelectorAll('.rot-item');
+  if (items.length < 2) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var i = 0;
+  setInterval(function(){
+    if (document.hidden) return;
+    items[i].classList.remove('on'); items[i].setAttribute('aria-hidden', 'true');
+    i = (i + 1) % items.length;
+    items[i].classList.add('on'); items[i].removeAttribute('aria-hidden');
+  }, 5000);
+})();
