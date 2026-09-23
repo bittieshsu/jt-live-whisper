@@ -46,7 +46,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.21.8"
+SERVER_VERSION = "2.21.9"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -1300,6 +1300,7 @@ async def diarize(
     file: UploadFile = File(...),
     segments: str = Form(...),
     num_speakers: int = Form(0),
+    stream: str = Form("false"),
 ):
     """接收音訊檔 + segments JSON，回傳講者辨識結果。
 
@@ -1364,13 +1365,23 @@ async def diarize(
         except OSError:
             pass
 
+    # stream=true（v2.21.9 起的用戶端）：改回 NDJSON，排隊時每 2 秒一個 queued 事件、
+    # 計算中每 5 秒一個 heartbeat，最後一行 type=result。呼叫端（v3 API）要靠
+    # queued 分辨「在排隊」與「卡住」——空白保活只能保住連線，說不出在等什麼。
+    ndjson = str(stream).lower() in ("1", "true", "yes")
+
+    def _line(obj):
+        return (json.dumps(obj) + "\n").encode()
+
     async def body():
         work = None
         try:
-            last = time.monotonic()
+            last = 0.0 if ndjson else time.monotonic()
             while lane.position(ticket) > 0:
-                if time.monotonic() - last >= 5:
-                    yield b" "
+                if time.monotonic() - last >= (2 if ndjson else 5):
+                    yield (_line({"type": "queued", "ahead": lane.position(ticket),
+                                  "waited": round(time.time() - ticket.enqueued, 1)})
+                           if ndjson else b" ")
                     last = time.monotonic()
                 await asyncio.sleep(0.3)
             t0 = time.monotonic()
@@ -1379,22 +1390,25 @@ async def diarize(
             while not work.done():
                 await asyncio.wait({work}, timeout=5)
                 if not work.done():
-                    yield b" "
+                    yield (_line({"type": "heartbeat", "elapsed": round(time.monotonic() - t0, 1)})
+                           if ndjson else b" ")
             try:
                 speaker_labels = work.result()
             except Exception as e:
                 print(f"[錯誤] diarize 失敗: {e}")
-                yield json.dumps({"error": f"講者辨識失敗: {e}"}).encode()
+                err = {"error": f"講者辨識失敗: {e}"}
+                yield _line({"type": "error", **err}) if ndjson else json.dumps(err).encode()
                 return
             if speaker_labels is None:
                 # 無法提取聲紋，降級全部 Speaker 0
                 speaker_labels = [0] * len(seg_list)
-            yield json.dumps({
+            res = {
                 "speaker_labels": speaker_labels,
                 "num_speakers": len(set(speaker_labels)),
                 "processing_time": round(time.monotonic() - t0, 2),
                 "device": _torch_device,
-            }).encode()
+            }
+            yield _line({"type": "result", **res}) if ndjson else json.dumps(res).encode()
         finally:
             if work is not None and not work.done():
                 # 用戶端斷線了但執行緒還在算：**等它算完才讓出隊伍**，
@@ -1403,7 +1417,7 @@ async def diarize(
             else:
                 _release()
 
-    return StreamingResponse(body(), media_type="application/json")
+    return StreamingResponse(body(), media_type="application/x-ndjson" if ndjson else "application/json")
 
 
 if __name__ == "__main__":

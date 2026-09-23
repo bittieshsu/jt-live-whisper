@@ -1601,7 +1601,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.21.8"
+APP_VERSION = "2.21.9"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -4666,7 +4666,7 @@ def _wait_remote_update(rw_cfg, progress_callback=None, max_wait=600):
 
 def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                                progress_callback=None, on_upload_done=None,
-                               noisy=False):
+                               noisy=False, on_event=None):
     """POST 音訊到伺服器辨識（串流 NDJSON），回傳 (segments, duration, proc_time, device)。
 
     伺服器正在更新時（v2.21.8）等它換完再重送，最多 3 次；等不到就拋例外，
@@ -4677,7 +4677,7 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
         try:
             return _remote_whisper_transcribe_once(
                 rw_cfg, wav_path, model, language, progress_callback=progress_callback,
-                on_upload_done=on_upload_done, noisy=noisy)
+                on_upload_done=on_upload_done, noisy=noisy, on_event=on_event)
         except _RemoteUpdating as e:
             if attempt == 2 or not _wait_remote_update(rw_cfg, progress_callback):
                 raise RuntimeError(f"GPU 伺服器更新中，等不到它恢復：{e}") from e
@@ -4687,7 +4687,7 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
 
 def _remote_whisper_transcribe_once(rw_cfg, wav_path, model, language,
                                     progress_callback=None, on_upload_done=None,
-                                    noisy=False):
+                                    noisy=False, on_event=None):
     """POST 音訊到伺服器 /v1/audio/transcriptions（串流 NDJSON），回傳 (segments, duration, proc_time, device)。
     noisy=True：用戶端音源分析判定為低音量錄音，伺服器套用寬鬆參數。"""
     host = rw_cfg["host"]
@@ -4779,6 +4779,13 @@ def _remote_whisper_transcribe_once(rw_cfg, wav_path, model, language,
                     except ValueError as e:
                         # 只有被切斷的最後一行才會解不開
                         raise _RemoteUpdating("串流在一行的中間被切斷") from e
+                    if on_event:
+                        # 給 v3 API 用：把排隊（queued）與辨識進度（segment）即時回報給呼叫端。
+                        # 回呼出錯不可以害到辨識本身
+                        try:
+                            on_event(event)
+                        except Exception:
+                            pass
                     if event["type"] == "segment":
                         # confidence / language 是伺服器 v2.19.0 起才有，舊伺服器沒有就留 None
                         segments.append({"start": event["start"], "end": event["end"],
@@ -4914,7 +4921,7 @@ def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout
 
 
 def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
-                    progress_callback=None, on_upload_done=None, _attempt=0):
+                    progress_callback=None, on_upload_done=None, _attempt=0, on_event=None):
     """POST 音訊 + segments 到伺服器 /v1/audio/diarize
     回傳 (speaker_labels, proc_time) 或失敗回傳 (None, 0)。
     伺服器正在更新（503 updating、或回應被重啟切斷）時等它換完再送，最多 3 次。"""
@@ -4924,7 +4931,8 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
             return None, 0
         return _remote_diarize(rw_cfg, wav_path, segments, num_speakers=num_speakers,
                                progress_callback=progress_callback,
-                               on_upload_done=on_upload_done, _attempt=_attempt + 1)
+                               on_upload_done=on_upload_done, _attempt=_attempt + 1,
+                               on_event=on_event)
     host = rw_cfg["host"]
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
     url = f"http://{host}:{port}/v1/audio/diarize"
@@ -4979,6 +4987,14 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         f"{ns_val}\r\n"
     )
 
+    # stream 欄位（v2.21.9 起）：伺服器改回 NDJSON，排隊時送 queued 事件，
+    # 呼叫端才分得出「在排隊」與「卡住」。舊版伺服器不認得這個欄位，照舊回 JSON
+    body_parts.append(
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"stream\"\r\n\r\n"
+        f"true\r\n"
+    )
+
     body_parts.append(f"--{boundary}--\r\n")
 
     # 組合 body
@@ -4999,12 +5015,27 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         with urllib.request.urlopen(req, timeout=300) as resp:
             if progress_callback:
                 progress_callback("辨識中，等待伺服器回應...")
-            raw = resp.read().decode("utf-8", errors="replace")
+            if "ndjson" in resp.headers.get("Content-Type", ""):
+                raw = ""
+                for line in _iter_stream_lines(resp):
+                    line = line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    ev = json.loads(line)
+                    if ev.get("type") in ("result", "error"):
+                        raw = json.dumps(ev)
+                    elif on_event:
+                        try:
+                            on_event(ev)
+                        except Exception:
+                            pass
+            else:
+                raw = resp.read().decode("utf-8", errors="replace")
         if not raw.strip():
             # 只收到保持連線的空白就斷了：伺服器在算完前被重啟
             return _retry("回應在完成前中斷")
         data = json.loads(raw)
-    except (http.client.IncompleteRead, ConnectionError, ValueError) as e:
+    except (http.client.IncompleteRead, ConnectionError, ValueError, _RemoteUpdating) as e:
         return _retry(f"回應在完成前中斷：{type(e).__name__}")
     except urllib.error.HTTPError as e:
         if e.code == 503:
@@ -10929,7 +10960,7 @@ def call_ollama_raw(prompt, model, host, port, timeout=300, spinner=None, live_o
 
 
 def _correct_segments_with_llm(segments_data, model, host, port, server_type="ollama",
-                                topic=None):
+                                topic=None, on_progress=None):
     """用 LLM 校正離線逐字稿的 ASR 辨識錯誤，原地修改 segments_data"""
     # 1. 提取所有文字行，建立編號對應
     all_lines = []   # [(seg_idx, line_idx, text), ...]
@@ -11021,6 +11052,14 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
     try:
         sbar.set_task(f"LLM 校正逐字稿（{total_chunks} 批）" if total_chunks > 1 else "LLM 校正逐字稿")
         # 同時送出 _CORRECT_PARALLEL 批（Ollama 預設可並行處理多個請求）；結果回到主執行緒再依序解析
+        # on_progress(完成批數, 總批數)：給 v3 API 回報校正進度（v2.21.9），回呼出錯不影響校正
+        def _report(done):
+            if on_progress:
+                try:
+                    on_progress(done, total_chunks)
+                except Exception:
+                    pass
+        _report(0)
         with concurrent.futures.ThreadPoolExecutor(max_workers=_CORRECT_PARALLEL) as pool:
             futures = {pool.submit(_run_chunk, ci, chunk): (ci, chunk) for ci, chunk in enumerate(chunks)}
             n_done = 0
@@ -11028,6 +11067,7 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
                 ci, chunk = futures[fut]
                 result = fut.result()
                 n_done += 1
+                _report(n_done)
                 if total_chunks > 1:
                     sbar.set_task(f"LLM 校正逐字稿（{n_done}/{total_chunks} 批完成）")
                 if not result:
