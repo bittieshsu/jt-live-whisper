@@ -108,6 +108,8 @@ os.environ["MKL_SERVICE_FORCE_INTEL"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 import json
+import http.client
+import urllib.error
 import urllib.request
 
 import ctranslate2
@@ -1599,7 +1601,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.21.7"
+APP_VERSION = "2.21.8"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -4409,6 +4411,11 @@ def _push_server_update(rw_cfg, token, sbar=None):
     except Exception as e:
         return False, f"連線失敗：{str(e)[:120]}"
 
+    if info.get("status") == "scheduled":
+        # v2.21.8 起：伺服器上有作業在跑時不拒絕、而是排定，等作業做完才換。
+        # 不在這裡等（可能要幾分鐘），這次作業會自動等它換完再送。
+        return True, (f"伺服器有 {info.get('waiting', '?')} 件作業在跑，"
+                      f"已排定做完後更新到 v{info.get('to')}")
     _say(f"伺服器驗證通過（{info.get('from')} → {info.get('to')}），重啟中...")
     # 輪詢到版本真的變了為止。**不能只看 /health 通不通**——舊進程可能還活著，
     # 那樣會把「根本沒換成功」誤判成更新完成（今天手動操作時就踩過：
@@ -4463,6 +4470,9 @@ def _ensure_remote_server_version(rw_cfg, auto_update=True):
         ok, msg = _push_server_update(rw_cfg, token, sbar=sbar)
     finally:
         sbar.stop()
+    if ok and "已排定" in msg:
+        print(f"  {C_OK}[已排定] {msg}{RESET}")
+        return sv
     if ok:
         print(f"  {C_OK}[完成] {msg}{RESET}")
         return APP_VERSION
@@ -4501,6 +4511,17 @@ def _check_remote_before_upload(rw_cfg, file_size_bytes=0):
         print(f"\n  {C_HIGHLIGHT}[警告] 伺服器磁碟空間不足：{disk_free} GB 可用（需要約 {need_gb:.1f} GB）{RESET}")
         print(f"  {C_DIM}請清理伺服器 /tmp 或磁碟空間後再試{RESET}")
         return False
+
+    # 伺服器 v2.21.8 起更新會排定、等作業做完才換；排定期間離線線不收新件（回 503）。
+    # 先等它換完再上傳，免得上傳完才被拒、整個檔案要重傳。
+    if status.get("update_pending"):
+        p = status["update_pending"]
+        print(f"  {C_DIM}[等候] GPU 伺服器即將更新到 v{p.get('to', '?')}，"
+              f"等 {p.get('waiting_jobs', '?')} 件作業做完；換完後自動送出{RESET}")
+        if not _wait_remote_update(rw_cfg):
+            print(f"  {C_HIGHLIGHT}[等候] 等不到伺服器更新完成{RESET}")
+            return False
+        status = _remote_whisper_status(rw_cfg) or {}
 
     # 伺服器 v2.21.7 起自己會排隊（一次一件），不必再問使用者要不要等：
     # 直接送出，排隊進度會從串流的 queued 事件顯示。
@@ -4600,9 +4621,73 @@ class _ProgressBody(io.BytesIO):
         return self._total
 
 
+class _RemoteUpdating(Exception):
+    """GPU 伺服器正在更新（503 updating、或串流被重啟切斷），等它換完再送"""
+
+
+def _iter_stream_lines(resp):
+    """逐行讀串流（邊讀邊處理，進度才能即時顯示）；連線被切斷時轉成 _RemoteUpdating"""
+    try:
+        for raw in resp:
+            yield raw
+    except (http.client.IncompleteRead, ConnectionError, OSError) as e:
+        raise _RemoteUpdating(f"串流中斷：{type(e).__name__}") from e
+
+
+def _wait_remote_update(rw_cfg, progress_callback=None, max_wait=600):
+    """等 GPU 伺服器把排定的更新換完、重新起來。回傳是否等到。
+
+    伺服器 v2.21.8 起有作業在跑時不拒絕更新，而是排定、等作業做完才換；
+    排定期間離線作業會收到 503。這時**等**比改用本機好：通常只要幾秒到幾分鐘，
+    結果仍是 GPU 的品質。等太久（max_wait）才放棄，交給呼叫端改用本機。
+    """
+    deadline = time.monotonic() + max_wait
+    # 單純連不上（沒看過「更新排定」）最多等 60 秒：那可能是真的停機，
+    # 不能讓使用者乾等 10 分鐘才改用本機。重啟通常 10 秒內就回來。
+    down_since = None
+    while time.monotonic() < deadline:
+        h = _remote_server_health(rw_cfg, timeout=3)
+        if h and h.get("status") == "ok" and not h.get("update_pending"):
+            return True
+        if h is None:
+            down_since = down_since or time.monotonic()
+            if time.monotonic() - down_since > 60:
+                return False
+        else:
+            down_since = None
+        pend = (h or {}).get("update_pending") or {}
+        msg = (f"GPU 伺服器更新中（等 {pend.get('waiting_jobs', '?')} 件作業做完後換到 "
+               f"v{pend.get('to', '?')}），稍候…" if pend else "GPU 伺服器重啟中，稍候…")
+        if progress_callback:
+            progress_callback(msg)
+        time.sleep(3)
+    return False
+
+
 def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                                progress_callback=None, on_upload_done=None,
                                noisy=False):
+    """POST 音訊到伺服器辨識（串流 NDJSON），回傳 (segments, duration, proc_time, device)。
+
+    伺服器正在更新時（v2.21.8）等它換完再重送，最多 3 次；等不到就拋例外，
+    由呼叫端改用本機。**不可以把被切斷的串流當成辨識完成**——v2.21.7 以前會那樣，
+    結果是一份 0 段的逐字稿、畫面還顯示「處理完成」。
+    """
+    for attempt in range(3):
+        try:
+            return _remote_whisper_transcribe_once(
+                rw_cfg, wav_path, model, language, progress_callback=progress_callback,
+                on_upload_done=on_upload_done, noisy=noisy)
+        except _RemoteUpdating as e:
+            if attempt == 2 or not _wait_remote_update(rw_cfg, progress_callback):
+                raise RuntimeError(f"GPU 伺服器更新中，等不到它恢復：{e}") from e
+            if progress_callback:
+                progress_callback("GPU 伺服器已恢復，重新送出…")
+
+
+def _remote_whisper_transcribe_once(rw_cfg, wav_path, model, language,
+                                    progress_callback=None, on_upload_done=None,
+                                    noisy=False):
     """POST 音訊到伺服器 /v1/audio/transcriptions（串流 NDJSON），回傳 (segments, duration, proc_time, device)。
     noisy=True：用戶端音源分析判定為低音量錄音，伺服器套用寬鬆參數。"""
     host = rw_cfg["host"]
@@ -4684,11 +4769,16 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                 duration = 0
                 proc_time = 0
                 device = "unknown"
-                for raw_line in resp:
-                    line = raw_line.decode().strip()
+                got_done = False
+                for raw_line in _iter_stream_lines(resp):
+                    line = raw_line.decode("utf-8", errors="replace").strip()
                     if not line:
                         continue
-                    event = json.loads(line)
+                    try:
+                        event = json.loads(line)
+                    except ValueError as e:
+                        # 只有被切斷的最後一行才會解不開
+                        raise _RemoteUpdating("串流在一行的中間被切斷") from e
                     if event["type"] == "segment":
                         # confidence / language 是伺服器 v2.19.0 起才有，舊伺服器沒有就留 None
                         segments.append({"start": event["start"], "end": event["end"],
@@ -4702,6 +4792,7 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                             dur = int(duration)
                             progress_callback(f"{pct:.0%}  {pos//60}:{pos%60:02d} / {dur//60}:{dur%60:02d}")
                     elif event["type"] == "done":
+                        got_done = True
                         duration = event.get("duration", duration)
                         proc_time = event.get("processing_time", 0)
                         device = event.get("device", "unknown")
@@ -4729,6 +4820,9 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
                                               f"（已等 {w//60}:{w%60:02d}）")
                     elif event["type"] == "error":
                         raise RuntimeError(f"伺服器辨識錯誤: {event.get('detail', '未知錯誤')}")
+                if not got_done:
+                    # 伺服器在送完之前斷掉（重啟、更新、崩潰）。**不是「0 段、成功」。**
+                    raise _RemoteUpdating(f"串流在完成前中斷（已收到 {len(segments)} 段）")
             else:
                 # 非串流模式（向下相容舊版伺服器）
                 if progress_callback:
@@ -4749,10 +4843,15 @@ def _remote_whisper_transcribe(rw_cfg, wav_path, model, language,
         if err_body:
             try:
                 err_data = json.loads(err_body)
+                if e.code == 503 and err_data.get("error") == "updating":
+                    raise _RemoteUpdating(err_data.get("detail", "updating")) from e
                 detail = err_data.get("detail", err_data.get("error", ""))
             except (json.JSONDecodeError, ValueError):
                 detail = err_body[:200]
         raise RuntimeError(f"伺服器錯誤 ({e.code}): {detail or e.reason}") from e
+    except urllib.error.URLError as e:
+        # 連不上：可能是更新／重啟的那幾秒。交給外層等它回來（等不到才改用本機）
+        raise _RemoteUpdating(f"連線失敗：{e.reason}") from e
 
     return segments, duration, proc_time, device
 
@@ -4815,9 +4914,17 @@ def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout
 
 
 def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
-                    progress_callback=None, on_upload_done=None):
+                    progress_callback=None, on_upload_done=None, _attempt=0):
     """POST 音訊 + segments 到伺服器 /v1/audio/diarize
-    回傳 (speaker_labels, proc_time) 或失敗回傳 (None, 0)"""
+    回傳 (speaker_labels, proc_time) 或失敗回傳 (None, 0)。
+    伺服器正在更新（503 updating、或回應被重啟切斷）時等它換完再送，最多 3 次。"""
+    def _retry(why):
+        if _attempt >= 2 or not _wait_remote_update(rw_cfg, progress_callback):
+            print(f"  {C_HIGHLIGHT}[伺服器 diarize] GPU 伺服器更新中，等不到它恢復（{why}）{RESET}")
+            return None, 0
+        return _remote_diarize(rw_cfg, wav_path, segments, num_speakers=num_speakers,
+                               progress_callback=progress_callback,
+                               on_upload_done=on_upload_done, _attempt=_attempt + 1)
     host = rw_cfg["host"]
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
     url = f"http://{host}:{port}/v1/audio/diarize"
@@ -4892,8 +4999,20 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         with urllib.request.urlopen(req, timeout=300) as resp:
             if progress_callback:
                 progress_callback("辨識中，等待伺服器回應...")
-            data = json.loads(resp.read().decode())
+            raw = resp.read().decode("utf-8", errors="replace")
+        if not raw.strip():
+            # 只收到保持連線的空白就斷了：伺服器在算完前被重啟
+            return _retry("回應在完成前中斷")
+        data = json.loads(raw)
+    except (http.client.IncompleteRead, ConnectionError, ValueError) as e:
+        return _retry(f"回應在完成前中斷：{type(e).__name__}")
     except urllib.error.HTTPError as e:
+        if e.code == 503:
+            try:
+                if json.loads(e.read().decode()).get("error") == "updating":
+                    return _retry("伺服器更新中")
+            except Exception:
+                pass
         err_body = ""
         try:
             err_body = e.read().decode()
