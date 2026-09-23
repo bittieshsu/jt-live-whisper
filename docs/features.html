@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<!-- site-nav：由 tools/site_nav.py 產生，請改那支 -->
 <nav>
   <div class="wrap nav-in">
     <a class="brand" href="index.html" style="text-decoration:none">
@@ -23,18 +24,24 @@
       jt-live-whisper
     </a>
     <div class="nav-links">
-      <a href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
-      <a href="#models"><span class="zh">AI 模型</span><span class="en">AI models</span></a>
-      <a href="#modes"><span class="zh">功能模式</span><span class="en">Modes</span></a>
-      <a href="#engines"><span class="zh">引擎</span><span class="en">Engines</span></a>
-      <a href="#advanced"><span class="zh">進階特色</span><span class="en">Advanced</span></a>
-      <a href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
-      <a href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
+      <a class="nav-page" href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
+      <a class="nav-page" href="features.html" aria-current="page"><span class="zh">功能詳解</span><span class="en">Features</span></a>
+      <a class="nav-page" href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a class="btn btn-ghost btn-sm" href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
       <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
       <button class="btn btn-ghost btn-sm" id="langBtn" type="button">English</button>
     </div>
   </div>
 </nav>
+<div class="page-nav"><div class="wrap page-nav-in">
+    <span class="page-nav-label"><span class="zh">本頁</span><span class="en">On this page</span></span>
+    <a href="#models"><span class="zh">AI 模型</span><span class="en">AI models</span></a>
+    <a href="#modes"><span class="zh">功能模式</span><span class="en">Modes</span></a>
+    <a href="#engines"><span class="zh">引擎</span><span class="en">Engines</span></a>
+    <a href="#advanced"><span class="zh">進階特色</span><span class="en">Advanced</span></a>
+</div></div>
+<!-- /site-nav -->
 
 <header class="hero" style="padding:64px 0 44px">
   <div class="wrap">

@@ -46,7 +46,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.21.7"
+SERVER_VERSION = "2.21.8"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -115,6 +115,13 @@ UPDATE_TOKEN = os.environ.get("JT_WHISPER_UPDATE_TOKEN", "").strip()
 # 沒有上限的話一個大 POST 就能把這台機器的記憶體吃光。
 UPDATE_MAX_BYTES = 8 * 1024 * 1024
 UPDATE_KEEP_BACKUPS = 5
+# 有作業時不拒絕更新，而是**排定**：驗證完先存起來，等作業做完才換（v2.21.8）。
+# 排定期間離線線不收新作業（否則一直有人送就永遠換不了）；等太久就放棄這次更新、重新開門，
+# 以免一件卡死的作業讓整台伺服器永遠不收離線作業。
+UPDATE_DRAIN_TIMEOUT = int(os.environ.get("JT_WHISPER_UPDATE_DRAIN_SEC", 30 * 60))   # 環境變數只給測試用
+UPDATE_RETRY_AFTER = 10
+_UPDATE_LOCK = threading.Lock()
+_UPDATE_PENDING = None   # {"to", "from", "since", "client_ip", "path"}
 
 
 def _version_tuple(v):
@@ -191,14 +198,33 @@ class _Lane:
         self.name = name
         self._cv = threading.Condition()
         self._items = []
+        self.closed = False   # 更新排定時關門：已在隊伍裡的照樣做完，新的不收
 
     def enter(self, task_type, model, language, client_ip=""):
+        """排進隊伍，回傳 ticket；**關門中回傳 None**（呼叫端要回 503）。
+        「檢查有沒有關門」與「排進去」在同一把鎖裡，不然更新可能在兩者之間換掉程式。"""
         t = _Ticket(task_type, model, language, client_ip)
         with self._cv:
+            if self.closed:
+                return None
             self._items.append(t)
             if self._items[0] is t:
                 t.started = time.time()
         return t
+
+    def close(self):
+        with self._cv:
+            self.closed = True
+
+    def reopen(self):
+        with self._cv:
+            self.closed = False
+            self._cv.notify_all()
+
+    def wait_empty(self, timeout):
+        """等隊伍清空（含正在跑的那件），最多 timeout 秒；回傳是否清空"""
+        with self._cv:
+            return self._cv.wait_for(lambda: not self._items, max(timeout, 0))
 
     def position(self, t):
         """0＝輪到了；n＝前面還有 n 件；-1＝已不在隊伍裡"""
@@ -244,12 +270,36 @@ class _Lane:
         with self._cv:
             return bool(self._items)
 
+    def count(self):
+        with self._cv:
+            return len(self._items)
+
 
 _LANES = {"batch": _Lane("batch"), "realtime": _Lane("realtime")}
 
 
 def _any_busy():
     return any(l.busy() for l in _LANES.values())
+
+
+def _update_pending_info():
+    with _UPDATE_LOCK:
+        p = dict(_UPDATE_PENDING) if _UPDATE_PENDING else None
+    if not p:
+        return None
+    return {"to": p["to"], "waited": round(time.time() - p["since"], 1),
+            "waiting_jobs": _LANES["batch"].count()}
+
+
+def _updating_response():
+    """更新排定中、這條線已關門時的回應。用戶端（v2.21.8 起）看到會等更新完再重送；
+    舊版用戶端會當成伺服器錯誤、改用本機辨識——兩者都不會拿到殘缺的結果。"""
+    with _UPDATE_LOCK:
+        to = (_UPDATE_PENDING or {}).get("to")
+    return JSONResponse(
+        status_code=503, headers={"Retry-After": str(UPDATE_RETRY_AFTER)},
+        content={"error": "updating", "retry_after": UPDATE_RETRY_AFTER, "to": to,
+                 "detail": f"伺服器即將更新到 v{to}，正在等目前的作業做完"})
 
 
 async def _wait_turn_async(lane, t, request):
@@ -742,6 +792,8 @@ def health():
         "can_update": bool(UPDATE_TOKEN),
         # v2.21.7 起一次一件、其餘排隊；用戶端據此決定要不要問「等候／改用本機」
         "queue": True,
+        # v2.21.8：有排定的更新時用戶端先等它換完再送件（null＝沒有）
+        "update_pending": _update_pending_info(),
     }
 
 
@@ -762,6 +814,7 @@ async def admin_update(request: Request):
     「同一份內容」（無害——那就是同一支程式），無法偽造新的 payload。
     做法與 jtlw_api 的 webhook 簽章一致：HMAC-SHA256 over "{timestamp}.{body}"。
     """
+    global _UPDATE_PENDING
     import hashlib
     import hmac as _hmac
     import subprocess
@@ -813,11 +866,12 @@ async def admin_update(request: Request):
     if want_sha and want_sha != got_sha:
         return _deny("checksum_mismatch", 400, expected=want_sha, actual=got_sha)
 
-    if _any_busy():
-        return _deny("busy", 409, detail="有作業進行中或排隊中，稍後再試")
+    # **有作業在跑時不拒絕**（v2.21.8）：先把驗證做完、排定，等作業做完才換。
+    # 以前是回 409 busy 然後放棄——伺服器一直有人在用就永遠更新不了。
 
     me = os.path.abspath(__file__)
-    new_path = me + ".new"
+    # 每個請求用自己的暫存檔：兩個用戶端同時推更新時不會互相蓋掉對方正在驗證的檔案
+    new_path = f"{me}.new-{os.getpid()}-{threading.get_ident()}-{int(time.time() * 1000)}"
     with open(new_path, "wb") as f:
         f.write(body)
 
@@ -849,6 +903,12 @@ async def admin_update(request: Request):
         _cleanup()
         return JSONResponse({"status": "already_current", "version": SERVER_VERSION},
                             status_code=200)
+    with _UPDATE_LOCK:
+        pend = dict(_UPDATE_PENDING) if _UPDATE_PENDING else None
+    if pend and _version_tuple(new_ver) <= _version_tuple(pend["to"]):
+        # 已經排定同版或更新的版本：不必再驗一次，告訴對方目前的排定狀態
+        _cleanup()
+        return JSONResponse(_update_state_body("scheduled"), status_code=202)
 
     # 驗證二：真的能啟動（import 得起來、設定沒寫壞）
     try:
@@ -861,27 +921,87 @@ async def admin_update(request: Request):
         _cleanup()
         return _deny("selftest_timeout", 400)
 
-    # selftest 期間可能有新作業進來（它要跑十幾秒），換檔前再確認一次。
-    if _any_busy():
-        _cleanup()
-        return _deny("busy", 409, detail="selftest 期間有作業開始，已取消更新")
+    # 排定。**排定之後離線線立刻關門**：已經在跑、在排隊的照樣做完，新的回 503。
+    # 即時線要到換檔前一刻才關，讓即時字幕只斷幾秒。
+    staged = me + ".pending"
+    with _UPDATE_LOCK:
+        if _UPDATE_PENDING and _version_tuple(new_ver) <= _version_tuple(_UPDATE_PENDING["to"]):
+            _cleanup()   # selftest 期間別人排定了同版或更新的版本
+            return JSONResponse(_update_state_body("scheduled"), status_code=202)
+        os.replace(new_path, staged)
+        first = _UPDATE_PENDING is None
+        _UPDATE_PENDING = {"to": new_ver, "from": SERVER_VERSION, "since": time.time(),
+                           "client_ip": client_ip, "path": staged}
+        _LANES["batch"].close()
+    if first:
+        threading.Thread(target=_update_worker, daemon=True).start()
+    waiting = _LANES["batch"].count()
+    print(f"[更新] 排定 {SERVER_VERSION} → {new_ver}，來自 {client_ip}，"
+          f"{'立即換版' if waiting == 0 else f'等 {waiting} 件作業做完'}", flush=True)
+    if waiting == 0:
+        # 舊版用戶端只認得這個格式（看到就開始輪詢版本號）
+        return {"status": "updating", "from": SERVER_VERSION, "to": new_ver,
+                "restart_in_sec": 1}
+    return JSONResponse(_update_state_body("scheduled"), status_code=202)
 
+
+def _update_state_body(status):
+    with _UPDATE_LOCK:
+        pend = dict(_UPDATE_PENDING) if _UPDATE_PENDING else {}
+    return {"status": status, "from": SERVER_VERSION, "to": pend.get("to"),
+            "waiting": _LANES["batch"].count(),
+            "since": round(pend["since"], 1) if pend.get("since") else None}
+
+
+def _update_worker():
+    """等作業做完再換版。
+
+    順序很重要：**先關門、再等清空、最後換檔**。先等清空再關門的話，
+    「清空」與「關門」之間進來的作業會在跑到一半時被換掉（v2.21.7 以前的 1 秒空窗
+    就是這樣砍掉作業的，而用戶端還把它當成 0 段、成功）。
+    """
+    global _UPDATE_PENDING
+    me = os.path.abspath(__file__)
+    batch, rt = _LANES["batch"], _LANES["realtime"]
+    deadline = time.time() + UPDATE_DRAIN_TIMEOUT
+
+    def _abort(why):
+        global _UPDATE_PENDING
+        with _UPDATE_LOCK:
+            pend = _UPDATE_PENDING
+            _UPDATE_PENDING = None
+        rt.reopen()
+        batch.reopen()
+        try:
+            os.remove((pend or {}).get("path") or me + ".pending")
+        except OSError:
+            pass
+        print(f"[更新] 放棄這次更新（{why}），恢復收件", flush=True)
+
+    # 離線線在排定時就關了；這裡等它清空
+    if not batch.wait_empty(deadline - time.time()):
+        return _abort(f"等了 {UPDATE_DRAIN_TIMEOUT} 秒作業仍未做完")
+    # 最後一刻才關即時線，並等正在辨識的那一小段做完（通常不到一秒）
+    rt.close()
+    if not rt.wait_empty(30):
+        return _abort("即時辨識 30 秒內沒有做完")
+
+    with _UPDATE_LOCK:
+        pend = dict(_UPDATE_PENDING)
     backup = f"{me}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
-    shutil.copy2(me, backup)
-    os.replace(new_path, me)
-    _prune_backups(me)
-    print(f"[更新] {SERVER_VERSION} → {new_ver}，來自 {client_ip}，"
-          f"備份 {os.path.basename(backup)}，即將重啟", flush=True)
-
-    def _restart():
-        # 等回應送出去再換掉自己。os.execv 直接替換行程映像，
-        # 保留同一個 PID 與 detached session，不需要 systemd 之類的看門狗。
-        time.sleep(1.0)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-
-    threading.Thread(target=_restart, daemon=True).start()
-    return {"status": "updating", "from": SERVER_VERSION, "to": new_ver,
-            "backup": os.path.basename(backup), "restart_in_sec": 1}
+    try:
+        shutil.copy2(me, backup)
+        os.replace(pend["path"], me)
+        _prune_backups(me)
+    except Exception as e:
+        return _abort(f"換檔失敗：{e}")
+    print(f"[更新] {SERVER_VERSION} → {pend['to']}，來自 {pend['client_ip']}，"
+          f"備份 {os.path.basename(backup)}，重啟", flush=True)
+    # 讓「立即換版」那次請求的回應先送出去。兩條線都關著、都是空的，
+    # 這段時間進來的請求只會拿到 503，不會有作業被砍到一半。
+    time.sleep(1.0)
+    # os.execv 直接替換行程映像，保留同一個 PID——systemd 看不出差別
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 @app.get("/v1/status")
@@ -902,6 +1022,7 @@ def status():
         "disk_free_gb": round(disk.free / (1024 ** 3), 1),
         "disk_total_gb": round(disk.total / (1024 ** 3), 1),
         "queue": {name: lane.snapshot() for name, lane in _LANES.items()},
+        "update_pending": _update_pending_info(),
     }
     if running is not None:
         result["task"] = running
@@ -976,6 +1097,12 @@ async def transcribe(
     lane = _LANES["batch"] if (is_stream or len(content) > _REALTIME_MAX_BYTES) \
         else _LANES["realtime"]
     ticket = lane.enter("transcribe", model, language, client_ip)
+    if ticket is None:   # 更新排定中，這條線已關門
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return _updating_response()
     stream_handed_off = False   # 串流回應交出後，清理改由 background 負責
     if is_noisy:
         print(f"[{client_ip}] noisy=1 → 寬鬆參數")
@@ -1219,6 +1346,12 @@ async def diarize(
 
     lane = _LANES["batch"]
     ticket = lane.enter("diarize", "resemblyzer", "", client_ip)
+    if ticket is None:   # 更新排定中，這條線已關門
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return _updating_response()
     ahead = lane.position(ticket)
     if ahead > 0:
         print(f"[排隊] {client_ip} 的講者辨識排入隊伍，前面 {ahead} 件", flush=True)
@@ -1284,7 +1417,8 @@ if __name__ == "__main__":
     if args.selftest:
         # 走到這裡代表模組層級的 import 與後端偵測都已經跑完沒有出錯。
         # 再確認幾個實際會被呼叫到的東西存在，避免「import 得起來但端點壞掉」。
-        missing = [n for n in ("health", "status", "admin_update", "_diarize")
+        missing = [n for n in ("health", "status", "admin_update", "_diarize",
+                               "_update_worker", "_update_pending_info")
                    if n not in globals()]
         if missing:
             print(f"[selftest] 失敗：缺少 {missing}", file=sys.stderr)

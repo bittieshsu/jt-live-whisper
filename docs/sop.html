@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<!-- site-nav：由 tools/site_nav.py 產生，請改那支 -->
 <nav>
   <div class="wrap nav-in">
     <a class="brand" href="index.html" style="text-decoration:none">
@@ -23,14 +24,18 @@
       jt-live-whisper
     </a>
     <div class="nav-links">
-      <a href="index.html">首頁</a>
-      <a href="features.html">功能詳解</a>
-      <a href="usage.html">安裝與使用</a>
-      <a href="sop.html">完整手冊</a>
+      <a class="nav-page" href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
+      <a class="nav-page" href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a>
+      <a class="nav-page" href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a class="btn btn-ghost btn-sm" href="sop.html" aria-current="page"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
       <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
+      <button class="btn btn-ghost btn-sm" id="langBtn" type="button">English</button>
     </div>
   </div>
 </nav>
+<div class="page-nav lang-note en"><div class="wrap page-nav-in">The full manual is available in Traditional Chinese only. The <a href="usage.html">Docs</a> and <a href="features.html">Features</a> pages are available in English.</div></div>
+<!-- /site-nav -->
 <div class="wrap doc-layout">
   <aside class="doc-toc">
     <div class="toc-title">目錄</div>
@@ -108,7 +113,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.21.7 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.21.8 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -962,13 +967,46 @@ systemctl restart jt-whisper-server@8978
 <td><code>selftest_failed</code></td>
 <td>壞掉的更新</td>
 </tr>
-<tr>
-<td>是否有作業正在執行</td>
-<td><code>busy</code></td>
-<td>中斷你或別人正在跑的辨識</td>
-</tr>
 </tbody></table>
 <p>舊版會備份成 <code>server.py.bak-&lt;時間&gt;</code>，只保留最近 5 份。</p>
+<p><strong>有作業正在跑時：排定，等做完才換（v2.21.8 起）。</strong> 以前是直接拒絕（<code>busy</code>），伺服器一直有人在用就永遠更新不了。現在驗證全部通過後：</p>
+<table>
+<thead>
+<tr>
+<th>情況</th>
+<th>伺服器怎麼做</th>
+<th>使用者看到</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>沒有作業</td>
+<td>立即換版（約 1 秒後重啟）</td>
+<td><code>[完成] 已更新到 vX</code></td>
+</tr>
+<tr>
+<td>有作業在跑或排隊</td>
+<td><strong>排定</strong>：新版先存起來；已經在跑、在排隊的照樣做完，做完才換</td>
+<td><code>[已排定] 伺服器有 N 件作業在跑，已排定做完後更新到 vX</code></td>
+</tr>
+<tr>
+<td>排定期間送來的離線辨識／講者辨識</td>
+<td>不收（回 503），等換完</td>
+<td>「GPU 伺服器更新中，稍候…」，換完<strong>自動送出</strong>，不會改用本機</td>
+</tr>
+<tr>
+<td>排定期間的即時字幕</td>
+<td>照常辨識，到換版前一刻才停</td>
+<td>字幕只中斷重啟的那幾秒</td>
+</tr>
+<tr>
+<td>30 分鐘內作業還沒做完</td>
+<td>放棄這次更新、恢復收件（避免一件卡住的作業讓伺服器一直不收件）</td>
+<td>版本不變，下次連線會再推一次</td>
+</tr>
+</tbody></table>
+<blockquote>
+<p><strong>換版的順序是「先關門、再等清空、最後換檔」。</strong> v2.21.7 以前是「確認沒作業 → 1 秒後重啟」，這 1 秒內送進來的作業會在跑到一半時被換掉——而用戶端還把被切斷的結果當成「0 段、處理完成」。兩個問題 v2.21.8 都修掉了：伺服器不再有空窗，用戶端收到不完整的結果會等伺服器回來重送，等不到才改用本機。</p>
+</blockquote>
 <blockquote>
 <p><strong>這些檢查分兩類，不要混為一談。</strong> 只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它<strong>擋得住壞掉的更新、擋不住惡意的更新</strong>。<strong>密鑰是唯一的安全邊界，請當成密碼保管。</strong></p>
 </blockquote>

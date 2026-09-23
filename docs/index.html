@@ -9,9 +9,10 @@
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<!-- site-nav：由 tools/site_nav.py 產生，請改那支 -->
 <nav>
   <div class="wrap nav-in">
-    <span class="brand">
+    <a class="brand" href="index.html" style="text-decoration:none">
       <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
         <defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2c3e50"/><stop offset="1" stop-color="#3498db"/></linearGradient></defs>
         <rect width="64" height="64" rx="14" fill="url(#bm)"/>
@@ -21,21 +22,27 @@
         </g>
       </svg>
       jt-live-whisper
-    </span>
+    </a>
     <div class="nav-links">
-      <a href="#why"><span class="zh">為什麼</span><span class="en">Why</span></a>
-      <a href="#features"><span class="zh">核心功能</span><span class="en">Features</span></a>
-      <a href="#deploy"><span class="zh">部署</span><span class="en">Deploy</span></a>
-      <a href="#screens"><span class="zh">畫面</span><span class="en">Screenshots</span></a>
-      <a href="#install"><span class="zh">安裝</span><span class="en">Install</span></a>
-      <a href="features.html"><span class="zh">功能詳解</span><span class="en">All features</span></a>
-      <a href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
-      <a href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
+      <a class="nav-page" href="index.html" aria-current="page"><span class="zh">首頁</span><span class="en">Home</span></a>
+      <a class="nav-page" href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a>
+      <a class="nav-page" href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a class="btn btn-ghost btn-sm" href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
       <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
       <button class="btn btn-ghost btn-sm" id="langBtn" type="button">English</button>
     </div>
   </div>
 </nav>
+<div class="page-nav"><div class="wrap page-nav-in">
+    <span class="page-nav-label"><span class="zh">本頁</span><span class="en">On this page</span></span>
+    <a href="#why"><span class="zh">為什麼</span><span class="en">Why</span></a>
+    <a href="#features"><span class="zh">核心功能</span><span class="en">Features</span></a>
+    <a href="#deploy"><span class="zh">部署</span><span class="en">Deploy</span></a>
+    <a href="#screens"><span class="zh">畫面</span><span class="en">Screenshots</span></a>
+    <a href="#install"><span class="zh">安裝</span><span class="en">Install</span></a>
+</div></div>
+<!-- /site-nav -->
 
 <header class="hero">
   <div class="wrap">
