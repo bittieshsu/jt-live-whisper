@@ -170,10 +170,10 @@
 <section id="deploy" class="alt">
   <div class="wrap">
     <div class="sec-head">
-      <h2><span class="zh">兩種部署方式</span><span class="en">Two ways to deploy</span></h2>
-      <p><span class="zh">一台電腦就能跑；要更快，再加一台 GPU 伺服器。兩種模式可隨時切換、自動降級。</span><span class="en">Run on one machine, or add a GPU server for speed. Switch anytime — it auto-falls back.</span></p>
+      <h2><span class="zh">三種部署方式</span><span class="en">Three ways to deploy</span></h2>
+      <p><span class="zh">一台電腦就能跑；要更快，再加一台 GPU 伺服器；要給整個團隊用，架成伺服器。</span><span class="en">Run on one machine, add a GPU server for speed, or host it as a server for your whole team.</span></p>
     </div>
-    <div class="grid g2">
+    <div class="grid g3">
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span><span class="zh">單機模式</span><span class="en">Single machine</span></h3>
         <p style="margin-bottom:10px"><span class="zh">一台 Mac、Windows PC 或 Linux 桌機即可完成所有處理，不需要額外硬體。</span><span class="en">One Mac, Windows PC or Linux desktop handles everything — no extra hardware.</span></p>
         <ul style="margin:0;padding-left:18px;font-size:14px;color:var(--body);line-height:1.8">
@@ -189,6 +189,14 @@
           <li><span class="zh">離線辨識快 <b>5–10 倍</b>，即時辨識約 <b>0.3–0.5 秒</b></span><span class="en">Offline <b>5–10× faster</b>; live recognition ~<b>0.3–0.5 s</b></span></li>
           <li><span class="zh">伺服器可為 DGX Spark 或裝有 NVIDIA GPU 的 Linux 主機（RTX 4090 / 5090 亦可）</span><span class="en">DGX Spark or any Linux box with an NVIDIA GPU (RTX 4090 / 5090 work too)</span></li>
           <li><span class="zh"><b>伺服器離線自動降級為本機處理</b>，不中斷使用</span><span class="en"><b>Auto-falls back to local</b> if the server is offline — no interruption</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></span><span class="zh">伺服器模式</span><span class="en">Server mode</span></h3>
+        <p style="margin-bottom:10px"><span class="zh">裝在無桌面的 Linux 主機（<code class="nb">install.sh --server</code>），WebUI 與 REST API 常駐，區網內的電腦用瀏覽器、其他系統用 API 送錄音處理。</span><span class="en">Install on a headless Linux host (<code class="nb">install.sh --server</code>): the Web UI and REST API run as services for browsers and other systems on your LAN.</span></p>
+        <ul style="margin:0;padding-left:18px;font-size:14px;color:var(--body);line-height:1.8">
+          <li><span class="zh"><b>搭配 GPU 伺服器（建議）</b>：2 vCPU、4 GB 記憶體、30 GB 磁碟即可——辨識與講者辨識都在 GPU 伺服器上（實測 37 分鐘會議，記憶體峰值約 0.4 GB）</span><span class="en"><b>With a GPU server (recommended)</b>: 2 vCPU, 4 GB RAM, 30 GB disk is enough — recognition and diarization run on the GPU server (measured: 37-min meeting peaks at ~0.4 GB RAM)</span></li>
+          <li><span class="zh"><b>不搭配 GPU 伺服器</b>：改在 CPU 上辨識，建議 8 核、8 GB 以上；長錄音要花數倍於錄音長度的時間</span><span class="en"><b>Without a GPU server</b>: CPU recognition — 8 cores and 8 GB+ RAM recommended; long recordings take several times their length</span></li>
+          <li><span class="zh">已與<a href="https://jasoncheng7115.github.io/jt-doc-tools/" target="_blank" rel="noopener">文件工具箱</a>串接</span><span class="en">Already integrated with <a href="https://jasoncheng7115.github.io/jt-doc-tools/" target="_blank" rel="noopener">Document Toolkit</a></span></li>
         </ul>
       </div>
     </div>
