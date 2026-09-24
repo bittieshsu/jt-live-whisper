@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.22.0 (by Jason Cheng)
+即時英翻中字幕系統 v2.22.1 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [使用流程總結](#五使用流程總結) · [常見問題](#六常見問題) · [檔案說明](#七檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -813,7 +813,8 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 | `--moonshine-model MODEL` | Moonshine 模型 (medium / small / tiny) | medium |
 | `-s`, `--scene SCENE` | 使用場景 (`meeting` / `training` / `presentation` / `subtitle`)，僅 Whisper 即時模式 | `training` |
 | `--topic TOPIC` | 會議主題（提升翻譯品質，例：`--topic 'ZFS 儲存管理'`）。僅翻譯模式有效 | |
-| `-d`, `--device ID` | 音訊裝置 ID (數字) | 自動偵測 ScreenCaptureKit 或 BlackHole (macOS) / WASAPI Loopback (Windows) |
+| `-d`, `--device ID` | 音訊裝置 ID (數字，由 `--list-devices` 查詢)。雙向模式時是「系統音訊」那一路（v2.22.1 起才生效，先前會被忽略） | 自動偵測 ScreenCaptureKit 或 BlackHole (macOS) / WASAPI Loopback (Windows) / PipeWire (Linux) |
+| `--mic-device ID` | 麥克風裝置 ID，用於 `--mic` 與雙向模式 | 系統預設麥克風 |
 | `-e`, `--engine ENGINE` | 翻譯引擎 (llm / argos / nllb) | llm |
 | `--llm-model NAME` | LLM 翻譯模型名稱（思考模式必須可關閉，見下方說明） | gemma4:26b（伺服器沒有時改用 qwen2.5:14b） |
 | `--llm-host HOST` | LLM 伺服器位址，自動偵測 Ollama 或 OpenAI 相容 (支援 host:port 格式) | 無（需設定） |

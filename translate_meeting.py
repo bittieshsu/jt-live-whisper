@@ -537,6 +537,34 @@ def _detect_bidi_devices():
     return None
 
 
+
+def _bidi_device_name(dev_id):
+    """雙向模式裝置代號 → 顯示名稱（含 WASAPI／SCK／PulseAudio 的 sentinel）"""
+    if dev_id == WASAPI_LOOPBACK_ID:
+        return "WASAPI Loopback"
+    if dev_id == SCK_LOOPBACK_ID:
+        return "ScreenCaptureKit 系統音訊"
+    if dev_id == PULSE_LOOPBACK_ID:
+        return _pulse_label()
+    import sounddevice as sd
+    return sd.query_devices(dev_id)["name"]
+
+
+def _bidi_apply_device_args(bidi, device=None, mic_device=None):
+    """把使用者指定的 -d（系統音訊）與 --mic-device（麥克風）套到雙向模式的自動偵測結果上。
+    v2.22.1 前雙向模式只看 --mic-device，-d 完全被忽略（WebUI 選了 BlackHole 仍用 SCK）。
+    兩個都指定時，自動偵測失敗（bidi 為 None）也照樣可用。"""
+    if bidi is None:
+        if device is None or mic_device is None:
+            return None
+        bidi = (None, None, None, None)
+    lb_id, lb_name, mic_id, mic_name = bidi
+    if device is not None:
+        lb_id, lb_name = device, _bidi_device_name(device)
+    if mic_device is not None:
+        mic_id, mic_name = mic_device, _bidi_device_name(mic_device)
+    return (lb_id, lb_name, mic_id, mic_name)
+
 class _WasapiLoopbackStream:
     """包裝 pyaudiowpatch stream，介面對齊 sd.InputStream。
     callback 簽名：(numpy_array, frames, time_info, status)"""
@@ -1638,7 +1666,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.22.0"
+APP_VERSION = "2.22.1"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2868,17 +2896,18 @@ def select_mode():
     def _dw(s):
         return sum(2 if '\u4e00' <= c <= '\u9fff' else 1 for c in s)
     col = max(_dw(name) for _, name, _ in MODE_PRESETS) + 2
-    _group_headers = {0: "單向翻譯", 4: "雙向翻譯", 6: "轉錄", 9: "其他"}
+    # 分組標題依模式代號定位，不可寫死索引（v2.22.0 插入韓文單向模式後標題錯位）
+    _group_headers = {"en2zh": "單向翻譯", "en_zh": "雙向翻譯", "en": "轉錄", "nan": "其他"}
     for i, (key, name, desc) in enumerate(MODE_PRESETS):
-        if i in _group_headers:
-            hdr = _group_headers[i]
+        if key in _group_headers:
+            hdr = _group_headers[key]
             hdr_w = _dw(hdr)
             print(f"{C_DIM}{'─' * 12} {hdr} {'─' * (60 - 13 - hdr_w)}{RESET}")
         padded = name + ' ' * (col - _dw(name))
         if i == default_idx:
-            print(f"  {C_HIGHLIGHT}{BOLD}[{i}] {padded}{RESET} {C_WHITE}{desc}{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
+            print(f"  {C_HIGHLIGHT}{BOLD}[{i:>2}] {padded}{RESET} {C_WHITE}{desc}{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
         else:
-            print(f"  {C_DIM}[{i}]{RESET} {C_WHITE}{padded}{RESET} {C_DIM}{desc}{RESET}")
+            print(f"  {C_DIM}[{i:>2}]{RESET} {C_WHITE}{padded}{RESET} {C_DIM}{desc}{RESET}")
     print(f"{C_DIM}{'─' * 60}{RESET}")
     print(f"{C_WHITE}按 Enter 使用預設，或輸入編號：{RESET}", end=" ")
 
@@ -5491,17 +5520,17 @@ def _input_interactive_menu(args):
 
         print(f"\n\n{C_TITLE}{BOLD}▎ 功能模式{RESET}")
         col = max(_dw(name) for _, name, _ in input_modes) + 2
-        _input_group_headers = {0: "單向翻譯", 4: "雙向翻譯", 6: "轉錄"}
+        _input_group_headers = {"en2zh": "單向翻譯", "en_zh": "雙向翻譯", "en": "轉錄"}
         for i, (key, name, desc) in enumerate(input_modes):
-            if i in _input_group_headers:
-                hdr = _input_group_headers[i]
+            if key in _input_group_headers:
+                hdr = _input_group_headers[key]
                 hdr_w = _dw(hdr)
                 print(f"{C_DIM}{'─' * 12} {hdr} {'─' * (60 - 13 - hdr_w)}{RESET}")
             padded = name + ' ' * (col - _dw(name))
             if i == default_mode:
-                print(f"  {C_HIGHLIGHT}{BOLD}[{i}] {padded}{RESET} {C_WHITE}{desc}{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
+                print(f"  {C_HIGHLIGHT}{BOLD}[{i:>2}] {padded}{RESET} {C_WHITE}{desc}{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
             else:
-                print(f"  {C_DIM}[{i}]{RESET} {C_WHITE}{padded}{RESET} {C_DIM}{desc}{RESET}")
+                print(f"  {C_DIM}[{i:>2}]{RESET} {C_WHITE}{padded}{RESET} {C_DIM}{desc}{RESET}")
         print(f"{C_DIM}{'─' * 60}{RESET}")
         print(f"{C_WHITE}按 Enter 使用預設，或輸入編號：{RESET}", end=" ")
 
@@ -5800,7 +5829,8 @@ def _input_interactive_menu(args):
                 print(f"  {C_HIGHLIGHT}{BOLD}[{i}] {padded}{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
             else:
                 print(f"  {C_DIM}[{i}]{RESET} {C_WHITE}{padded}{RESET}")
-        print(f"  {C_HIGHLIGHT}* 若講者超過 2 位，建議選 [2] 指定人數以提升辨識正確率{RESET}")
+        # 舊提示「講者超過 2 位建議指定人數以提升正確率」與 v2.21.2 實測相反（見 SOP 常見問題）
+        print(f"  {C_DIM}* 指定人數會強制分成那麼多群；不確定時用自動偵測{RESET}")
         print(f"{C_DIM}{'─' * 60}{RESET}")
         print(f"{C_WHITE}按 Enter 使用預設，或輸入編號：{RESET}", end=" ")
 
@@ -15818,16 +15848,12 @@ def main():
                 print("[錯誤] 雙向模式不支援 Argos 離線翻譯（僅支援英翻中單向）", file=sys.stderr)
                 sys.exit(1)
 
-            bidi = _detect_bidi_devices()
+            bidi = _bidi_apply_device_args(_detect_bidi_devices(), args.device,
+                                           getattr(args, 'mic_device', None))
             if bidi is None:
                 print("[錯誤] 找不到系統音訊裝置或麥克風", file=sys.stderr)
                 sys.exit(1)
             _bidi_lb_id, _bidi_lb_name, _bidi_mic_id, _bidi_mic_name = bidi
-            # --mic-device 覆蓋自動偵測的麥克風
-            if getattr(args, 'mic_device', None) is not None:
-                import sounddevice as _sd_md
-                _bidi_mic_id = args.mic_device
-                _bidi_mic_name = _sd_md.query_devices(_bidi_mic_id)["name"]
             print(f"  {C_OK}系統音訊: {_bidi_lb_name}{RESET}")
             print(f"  {C_OK}麥克風:   {_bidi_mic_name}{RESET}")
 
@@ -16260,7 +16286,8 @@ def main():
 
         # ── 雙向翻譯模式（en_zh / ja_zh）：獨立路徑 ──
         if mode in _BIDI_MODES:
-            bidi = _detect_bidi_devices()
+            bidi = _bidi_apply_device_args(_detect_bidi_devices(), args.device,
+                                           getattr(args, 'mic_device', None))
             if bidi is None:
                 print(f"{C_ERR}[錯誤] 找不到系統音訊裝置或麥克風{RESET}")
                 if IS_MACOS:
@@ -16271,11 +16298,6 @@ def main():
                     print(f"  {C_WHITE}{_pulse_missing_hint() if not _pulse_available() else '請確認有可用的麥克風（arecord -l / pactl list short sources）'}{RESET}")
                 sys.exit(1)
             _bidi_lb_id, _bidi_lb_name, _bidi_mic_id, _bidi_mic_name = bidi
-            # --mic-device 覆蓋自動偵測的麥克風
-            if getattr(args, 'mic_device', None) is not None:
-                import sounddevice as _sd_md
-                _bidi_mic_id = args.mic_device
-                _bidi_mic_name = _sd_md.query_devices(_bidi_mic_id)["name"]
             print(f"  {C_OK}系統音訊: {_bidi_lb_name}{RESET}")
             print(f"  {C_OK}麥克風:   {_bidi_mic_name}{RESET}")
 

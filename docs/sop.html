@@ -113,7 +113,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.22.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.22.1 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1225,8 +1225,13 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td><code>-d</code>, <code>--device ID</code></td>
-<td>音訊裝置 ID (數字)</td>
-<td>自動偵測 ScreenCaptureKit 或 BlackHole (macOS) / WASAPI Loopback (Windows)</td>
+<td>音訊裝置 ID (數字，由 <code>--list-devices</code> 查詢)。雙向模式時是「系統音訊」那一路（v2.22.1 起才生效，先前會被忽略）</td>
+<td>自動偵測 ScreenCaptureKit 或 BlackHole (macOS) / WASAPI Loopback (Windows) / PipeWire (Linux)</td>
+</tr>
+<tr>
+<td><code>--mic-device ID</code></td>
+<td>麥克風裝置 ID，用於 <code>--mic</code> 與雙向模式</td>
+<td>系統預設麥克風</td>
 </tr>
 <tr>
 <td><code>-e</code>, <code>--engine ENGINE</code></td>
