@@ -82,7 +82,7 @@ body.lang-en .lang-note.en{display:block}
 .pill:nth-child(6n+4)::before{background:#f39c12}
 .pill:nth-child(6n+5)::before{background:#ec4899}
 .pill:nth-child(6n+6)::before{background:#22d3ee}
-.hero-shot{margin:36px auto 0;max-width:980px}
+.hero-shot{margin:36px auto 0;max-width:760px}
 
 /* sections */
 section{padding:60px 0}
