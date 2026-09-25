@@ -113,7 +113,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.22.1 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.22.2 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -2428,11 +2428,23 @@ cd C:\jt-live-whisper
 <td>這四頁<strong>寫死只有本機能用</strong>，裡面有密碼與轉發用的 token</td>
 </tr>
 <tr>
-<td>開始 / 停止作業、看狀態</td>
-<td>需要密碼</td>
+<td>上傳錄音檔、開始 / 停止 / 暫停作業</td>
+<td>需要<strong>管理密碼</strong></td>
 <td><code>config.json</code> 的 <code>webui_passwords.admin</code>；沒設會回「未啟用遠端管理功能」</td>
 </tr>
+<tr>
+<td>看畫面、列出錄音檔、開啟逐字稿與摘要</td>
+<td>設了<strong>唯讀密碼</strong>才需要</td>
+<td>沒設唯讀密碼時不限制（真正的邊界是下面的來源 IP 允許清單）</td>
+</tr>
 </tbody></table>
+<ul>
+<li>上傳只接受音訊／影片副檔名，檔名只取檔案名稱本身（不能帶路徑），單檔上限預設 4096 MB，
+可用環境變數 <code>JTLW_WEBUI_MAX_UPLOAD_MB</code> 調整</li>
+<li><strong>v2.22.2 之前的版本有安全漏洞</strong>：上傳不需密碼且可以寫到 <code>recordings/</code> 以外的位置、
+逐字稿與摘要（<code>/logs/</code>）不需密碼、即時連線（WebSocket）不受來源 IP 允許清單限制。
+伺服器版請務必升級</li>
+</ul>
 <p><strong>而設定密碼的那一頁本身也是本機限定</strong>，所以第一次一定要在伺服器本機上設，
 或用 SSH 通道讓連線看起來來自本機：</p>
 <pre><code class="language-bash">ssh -L 19781:127.0.0.1:19781 &lt;帳號&gt;@&lt;伺服器&gt;

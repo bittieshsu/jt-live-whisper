@@ -649,7 +649,7 @@ const uz=$('uploadZone'),ui=$('uploadInput');
 uz.addEventListener('dragover',e=>{e.preventDefault();uz.classList.add('drag')});uz.addEventListener('dragleave',()=>uz.classList.remove('drag'));
 uz.addEventListener('drop',e=>{e.preventDefault();uz.classList.remove('drag');uploadFiles(e.dataTransfer.files)});
 ui.addEventListener('change',()=>{if(ui.files.length)uploadFiles(ui.files)});
-async function uploadFiles(files){for(const f of files){const fd=new FormData();fd.append('file',f);uz.textContent='上傳中: '+f.name+'...';try{const r=await fetch('/api/upload-file',{method:'POST',body:fd});const d=await r.json();if(d.ok){showToast(d.name+' 上傳成功（'+d.size+' MB）','ok');loadFiles()}else{showToast('上傳失敗: '+d.error,'err')}}catch(e){showToast('上傳失敗: '+e.message,'err')}}uz.textContent='拖曳音訊/影片檔案到此處，或點按選擇檔案'}
+async function uploadFiles(files){for(const f of files){const fd=new FormData();fd.append('file',f);uz.textContent='上傳中: '+f.name+'...';try{const r=await fetch('/api/upload-file',{method:'POST',body:fd,headers:_authToken?{'X-Auth-Token':_authToken}:{}});const d=await r.json();if(d.ok){showToast(d.name+' 上傳成功（'+d.size+' MB）','ok');loadFiles()}else{showToast('上傳失敗: '+d.error,'err')}}catch(e){showToast('上傳失敗: '+e.message,'err')}}uz.textContent='拖曳音訊/影片檔案到此處，或點按選擇檔案'}
 let _llmQueried=false;
 let _allEngines=[];
 function _setSecTitle(el,text){
@@ -837,7 +837,7 @@ function showDisconnected(msg){
     });
     sorted.forEach(f=>{
       const ext=f.name.split('.').pop().toLowerCase();
-      const href='/'+f.path.replace(/\\/g,'/');
+      const href='/'+f.path.replace(/\\/g,'/')+(_authToken?'?token='+encodeURIComponent(_authToken):'');
       const isSummary=f.name.includes('摘要');
       const isSub=ext==='srt'||ext==='vtt';
       const tag=isSummary?'摘要':(isSub?'字幕':'逐字');
