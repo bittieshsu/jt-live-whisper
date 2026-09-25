@@ -11,6 +11,7 @@
 import argparse
 import asyncio
 import json
+import re
 import os
 import signal
 import subprocess
@@ -309,9 +310,27 @@ async def _ip_allowlist(request, call_next):
     return await call_next(request)
 
 # ─── 靜態檔案服務（logs/ 子目錄，供 WebUI 開啟逐字稿/摘要 HTML）───
-_logs_dir = BASE_DIR / "logs"
-if _logs_dir.is_dir():
-    app.mount("/logs", StaticFiles(directory=str(_logs_dir)), name="logs")
+# v2.22.2 前是 app.mount(StaticFiles)——**完全不經授權**，區網內知道檔名（時間戳可推）就能讀逐字稿與摘要。
+# 改成路由：read 權限；瀏覽器點連結帶不了標頭，所以**只有這條**接受 ?token=。
+@app.get("/logs/{rel:path}")
+async def serve_logs(request: Request, rel: str):
+    token = ""
+    if not _is_local(request) and _webui_passwords["read"]:
+        # 逐字稿 HTML 用相對路徑載入同資料夾的音檔，那個請求帶不了 ?token=：
+        # 第一次用 ?token= 驗過後發一個只限 /logs 的 cookie，後續請求靠它
+        token = (request.headers.get("X-Auth-Token", "") or request.query_params.get("token", "")
+                 or request.cookies.get("jtlw_logs", ""))
+        if not (_pw_match(token, _webui_passwords["read"]) or _pw_match(token, _webui_passwords["admin"])):
+            return JSONResponse({"ok": False, "error": "需要密碼"}, status_code=403)
+    logs_dir = (BASE_DIR / "logs").resolve()
+    target = (logs_dir / rel).resolve()
+    if logs_dir not in target.parents or not target.is_file():
+        return JSONResponse({"ok": False, "error": "找不到檔案"}, status_code=404)
+    from fastapi.responses import FileResponse
+    resp = FileResponse(str(target))
+    if token and request.query_params.get("token"):
+        resp.set_cookie("jtlw_logs", token, path="/logs", httponly=True, samesite="strict")
+    return resp
 
 # ─── WebSocket 連線管理 ──────────────────────────────────────
 connected_clients: list[WebSocket] = []
@@ -679,7 +698,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.22.1",
+        "last": last, "version": "2.22.2",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1023,12 +1042,38 @@ async def api_files(request: Request):
 from fastapi import UploadFile, File as FastFile
 
 
+# 上傳：必須 admin（上傳就是為了接著處理，而開始處理本來就要 admin）。
+# v2.22.2 前這個端點**完全沒有授權**，且直接用用戶端送來的檔名組路徑：
+# 檔名是 "../../translate_meeting.py" 或絕對路徑時會寫到 recordings/ 外面（任意檔案覆寫 → 可執行任意程式碼）；
+# 也沒有大小上限（整檔讀進記憶體）。盤點測試當時沒抓到，是因為它往下 30 行掃到了下一個端點的 _check_auth。
+_UPLOAD_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".webm", ".avi"}
+_UPLOAD_MAX_MB = int(os.environ.get("JTLW_WEBUI_MAX_UPLOAD_MB", "4096"))
+
+
+def _safe_upload_name(name):
+    """只取檔名本身（去掉任何目錄成分，含 Windows 的反斜線），副檔名必須是音訊/影片。
+    不合格回傳 None。"""
+    base = os.path.basename((name or "").replace("\\", "/")).strip()
+    if not base or base in (".", "..") or base.startswith("."):
+        return None
+    if os.path.splitext(base)[1].lower() not in _UPLOAD_EXTS:
+        return None
+    return base
+
+
 @app.post("/api/upload-file")
-async def api_upload_file(file: UploadFile = FastFile(...)):
+async def api_upload_file(request: Request, file: UploadFile = FastFile(...)):
     """上傳音訊/影片檔案到 recordings/"""
-    rec_dir = BASE_DIR / "recordings"
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    name = _safe_upload_name(file.filename)
+    if not name:
+        return JSONResponse({"ok": False, "error": "檔名或副檔名不允許（只接受音訊／影片檔）"},
+                            status_code=400)
+    rec_dir = (BASE_DIR / "recordings").resolve()
     rec_dir.mkdir(exist_ok=True)
-    dest = rec_dir / file.filename
+    dest = rec_dir / name
     # 避免覆蓋
     if dest.exists():
         stem, ext = dest.stem, dest.suffix
@@ -1036,10 +1081,24 @@ async def api_upload_file(file: UploadFile = FastFile(...)):
         while dest.exists():
             dest = rec_dir / f"{stem}_{i}{ext}"
             i += 1
-    content = await file.read()
-    dest.write_bytes(content)
-    size_mb = round(len(content) / 1048576, 1)
-    return JSONResponse({"ok": True, "name": dest.name, "size": size_mb, "path": str(dest)})
+    if dest.resolve().parent != rec_dir:       # 雙重保險：最後的路徑一定在 recordings/ 裡
+        return JSONResponse({"ok": False, "error": "路徑不允許"}, status_code=400)
+    limit, size = _UPLOAD_MAX_MB * 1048576, 0
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(1048576)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > limit:
+                    raise ValueError(f"檔案超過上限 {_UPLOAD_MAX_MB} MB")
+                f.write(chunk)
+    except ValueError as e:
+        dest.unlink(missing_ok=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=413)
+    return JSONResponse({"ok": True, "name": dest.name, "size": round(size / 1048576, 1),
+                         "path": str(dest)})
 
 
 @app.post("/api/sck-permission")
@@ -1267,16 +1326,30 @@ async def api_status(request: Request):
     return {"running": running}
 
 
+def _ws_level(ws):
+    """WebSocket 的權限等級：'admin'／'read'／None（拒絕）。規則與 HTTP 的 _check_auth 相同"""
+    if _is_local(ws):
+        return "admin"
+    token = ws.query_params.get("token", "")
+    if _webui_passwords["admin"] and _pw_match(token, _webui_passwords["admin"]):
+        return "admin"
+    if not _webui_passwords["read"]:
+        return "read"
+    return "read" if _pw_match(token, _webui_passwords["read"]) else None
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    # WS auth：遠端需要 token query param
-    client_host = ws.client.host if ws.client else ""
-    is_local = client_host in ("127.0.0.1", "::1", "localhost", "0.0.0.0")
-    if not is_local and _webui_passwords["read"]:
-        token = ws.query_params.get("token", "")
-        if token != _webui_passwords["read"] and token != _webui_passwords["admin"]:
-            await ws.close(code=4001, reason="需要密碼")
-            return
+    # v2.22.2 前這裡自己寫一套授權：(1) 拿 token 直接比對設定檔裡的**雜湊**（正確密碼被拒、雜湊本身反而能登入）；
+    # (2) 自己判斷本機、沒走 _client_ip → 反向代理後面全部當本機；(3) HTTP middleware 管不到 WebSocket，
+    # allowed_ips 對 /ws 無效；(4) 停止／暫停／靜音只要唯讀（沒設唯讀密碼時任何人都行）。一律改用共用函式。
+    if not _ip_allowed(_client_ip(ws)):
+        await ws.close(code=4003, reason="來源位址不在允許清單內")
+        return
+    level = _ws_level(ws)
+    if level is None:
+        await ws.close(code=4001, reason="需要密碼")
+        return
     await ws.accept()
     connected_clients.append(ws)
     try:
@@ -1284,12 +1357,15 @@ async def websocket_endpoint(ws: WebSocket):
             data = await ws.receive_text()
             try:
                 msg = json.loads(data)
+                if msg.get("action") in ("stop", "mute", "pause", "resume") and level != "admin":
+                    await ws.send_text(json.dumps({"type": "error", "error": "需要管理密碼"}))
+                    continue
                 if msg.get("action") == "stop":
                     await asyncio.to_thread(_stop_proc)
                     await broadcast(json.dumps({"type": "stopped"}))
                 elif msg.get("action") == "mute":
                     # 寫入靜音 flag 檔案，translate_meeting.py 的 audio callback 會檢查
-                    device = msg.get("device", "")
+                    device = re.sub(r"[^0-9A-Za-z_-]", "", str(msg.get("device", "")))[:32]
                     muted = msg.get("muted", False)
                     flag_path = BASE_DIR / f".mute_{device}"
                     if muted:
