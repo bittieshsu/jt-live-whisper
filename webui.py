@@ -698,7 +698,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.22.2",
+        "last": last, "version": "2.22.3",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1326,6 +1326,19 @@ async def api_status(request: Request):
     return {"running": running}
 
 
+def _remote_access_warnings():
+    """啟動時的安全提醒（v2.22.3）：既有部署不自動改設定，但要讓管理者知道現況。
+    WebUI 綁 0.0.0.0，別台電腦連得進來；沒有唯讀密碼又沒有來源限制時，
+    同網段任何人都能看畫面、列出錄音、讀逐字稿與摘要。"""
+    out = []
+    if not _webui_passwords["read"]:
+        out.append("未設定唯讀密碼：" + ("允許清單內的電腦" if _allowed_nets else "任何連得到這台的電腦")
+                   + "都能看畫面、讀逐字稿與摘要。請在本機開 WebUI → 安全設定，設一組唯讀密碼")
+    if not _webui_passwords["admin"]:
+        out.append("未設定管理密碼：遠端無法上傳或開始作業（本機不受影響）")
+    return out
+
+
 def _ws_level(ws):
     """WebSocket 的權限等級：'admin'／'read'／None（拒絕）。規則與 HTTP 的 _check_auth 相同"""
     if _is_local(ws):
@@ -1497,6 +1510,8 @@ def main():
     print(f"\n  jt-live-whisper WebUI")
     print(f"  {scheme}://localhost:{args.port}")
     print(f"  請在瀏覽器中操作\n")
+    for line in _remote_access_warnings():
+        print(f"  [安全提醒] {line}")
     # **一定要 flush**：systemd 下 stdout 是區塊緩衝，不 flush 的話上面這段
     # （包含憑證指紋）會卡在緩衝區，要等之後的輸出把它填滿才一起吐出來。
     # 管理者重啟後馬上看 journalctl 會看到「什麼都沒有」，而指紋正是那時

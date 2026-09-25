@@ -40,6 +40,7 @@
   <aside class="doc-toc">
     <div class="toc-title">目錄</div>
       <a class="" href="#一系統架構">一、系統架構</a>
+      <a class="lv3" href="#三種部署方式">三種部署方式</a>
       <a class="" href="#二事前準備音訊設定">二、事前準備：音訊設定</a>
       <a class="lv3" href="#macos-音訊設定">macOS 音訊設定</a>
       <a class="lv3" href="#windows-音訊設定">Windows 音訊設定</a>
@@ -113,7 +114,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.22.2 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.22.3 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -138,10 +139,44 @@
 </li>
 <li><p><strong>本機 + GPU 伺服器模式</strong>：本機負責音訊擷取與介面操作，語音辨識和講者辨識交由區域網路內的 GPU 伺服器處理（系統音訊和麥克風兩路都可送遠端）。離線辨識速度快 5-10 倍，即時辨識約 0.3-0.5 秒。仍然是全地端架構，資料僅在區域網路內傳輸。適合需要處理大量音訊或追求最佳即時辨識品質的場景。GPU 伺服器可以是 DGX Spark、安裝有 NVIDIA GPU 的 Ubuntu/Linux 主機，搭消費級 RTX 4090/5090 之類亦可（需已安裝 CUDA）。</p>
 </li>
+<li><p><strong>伺服器模式</strong>：裝在無桌面的 Linux 主機（<code>install.sh --server</code>），WebUI 常駐，區網內的電腦用瀏覽器上傳錄音處理，從別台電腦操作需要密碼。搭配 GPU 伺服器時 2 vCPU、4 GB 記憶體、30 GB 磁碟即可。見「三種部署方式」。</p>
+</li>
 </ul>
-<p>兩種模式可隨時切換，GPU 伺服器離線時自動降級為本機處理，不中斷使用。</p>
+<p>單機與 GPU 伺服器兩種模式可隨時切換，GPU 伺服器離線時自動降級為本機處理，不中斷使用。</p>
 <hr>
 <h2 id="一系統架構">一、系統架構</h2>
+<h3 id="三種部署方式">三種部署方式</h3>
+<table>
+<thead>
+<tr>
+<th>方式</th>
+<th>適合</th>
+<th>怎麼裝</th>
+<th>建議規格</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>單機模式</strong></td>
+<td>個人使用：一台 Mac／Windows／Linux 桌機完成所有處理</td>
+<td><code>install.sh</code>／<code>install.ps1</code></td>
+<td>見「硬體建議」</td>
+</tr>
+<tr>
+<td><strong>本機＋GPU 伺服器</strong></td>
+<td>要更快：本機負責擷取音訊與介面，辨識與講者辨識交給區網內的 GPU 伺服器；伺服器離線時自動改回本機處理</td>
+<td>本機照常安裝，安裝時填 GPU 伺服器位址</td>
+<td>GPU 伺服器見「GPU 伺服器建議」</td>
+</tr>
+<tr>
+<td><strong>伺服器模式</strong></td>
+<td>給團隊共用：裝在無桌面的 Linux 主機，WebUI 常駐，區網內的電腦用瀏覽器上傳錄音處理</td>
+<td><code>install.sh --server</code>（見 3-1）</td>
+<td>搭配 GPU 伺服器時 <strong>2 vCPU、4 GB 記憶體、30 GB 磁碟</strong>即可；不搭配時改在 CPU 上辨識，建議 8 核、8 GB 以上</td>
+</tr>
+</tbody></table>
+<p>伺服器模式的規格是實測來的：37 分鐘的中文會議（辨識＋講者辨識＋校正）在搭配 GPU 伺服器時，
+伺服器本身記憶體峰值約 0.4 GB、CPU 時間約 9 秒。從別台電腦操作需要密碼，見
+「伺服器版的 WebUI 能從別台電腦操作到什麼程度」。</p>
 <p><strong>即時模式：</strong></p>
 <pre><code>系統音訊（macOS: ScreenCaptureKit 或 BlackHole 2ch / Windows: WASAPI Loopback / Linux: PipeWire・PulseAudio monitor）
   → 擷取一份音訊給程式（macOS 由系統元件或虛擬裝置提供，Windows 與 Linux 直接擷取系統播放）
@@ -606,7 +641,12 @@ bash install.sh
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
 bash install.sh --server
 </code></pre>
-<p><code>install.sh</code> 偵測到 Linux 時會自動改用 <code>install-linux.sh</code>，也可以直接執行它。可用參數：</p>
+<p><code>install.sh</code> 偵測到 Linux 時會自動改用 <code>install-linux.sh</code>，也可以直接執行它。</p>
+<blockquote>
+<p><strong>請用一般帳號安裝，不要用 root</strong>。服務會以「執行 <code>sudo</code> 的原始帳號」或「安裝資料夾的擁有者」執行（v2.22.3 起）；
+兩者都是 root 時才以 root 執行，安裝程式會出現警告。WebUI 對區網開放，以 root 執行時任何漏洞都等於整台主機的最高權限。</p>
+</blockquote>
+<p>可用參數：</p>
 <table>
 <thead>
 <tr>
@@ -620,7 +660,7 @@ bash install.sh --server
 </tr>
 <tr>
 <td><code>--server</code></td>
-<td>伺服器版：不安裝桌面相關套件，建立 <code>jt-live-whisper-webui</code> systemd 服務（開機自動啟動）</td>
+<td>伺服器版：不安裝桌面相關套件，建立 <code>jt-live-whisper-webui</code> systemd 服務（開機自動啟動）；第一次安裝時自動產生<strong>管理密碼與唯讀密碼</strong>並各印出一次（v2.22.3 起加上唯讀密碼）</td>
 </tr>
 <tr>
 <td><code>--upgrade</code></td>
@@ -2451,10 +2491,15 @@ cd C:\jt-live-whisper
 # 瀏覽器開 http://127.0.0.1:19781 → 四頁設定全部可用
 </code></pre>
 <p>這個做法不必改任何設定，也是安全性最好的一種（不必把管理介面暴露在網路上）。</p>
-<h4 id="遠端管理密碼">遠端管理密碼</h4>
-<p><code>install.sh --server</code> 第一次安裝時會<strong>自動產生一組管理密碼並印出來一次</strong>，
+<h4 id="遠端管理密碼與唯讀密碼">遠端管理密碼與唯讀密碼</h4>
+<p><code>install.sh --server</code> 第一次安裝時會<strong>自動產生管理密碼與唯讀密碼（v2.22.3 起）並各印出來一次</strong>，
 請當下記下來。存的是 sha256 雜湊，設定檔裡沒有明文，<strong>遺失只能重設</strong>
-（在伺服器本機開 WebUI → 安全設定）。升級時不會覆蓋已經設好的密碼。</p>
+（在伺服器本機開 WebUI → 安全設定）。</p>
+<ul>
+<li><strong>升級或重新安裝不會覆蓋、也不會新增密碼</strong>：已經設過管理密碼的部署一律不動</li>
+<li>既有部署沒有唯讀密碼時，安裝程式與 WebUI 啟動時都會提醒：這時同網段（或允許清單內）
+任何人都能看畫面、列出錄音、讀逐字稿與摘要</li>
+</ul>
 <h4 id="限制哪些位址可以連-webui">限制哪些位址可以連 WebUI</h4>
 <p><code>config.json</code>：</p>
 <pre><code class="language-json">&quot;webui&quot;: { &quot;allowed_ips&quot;: [&quot;192.168.1.0/24&quot;, &quot;10.0.0.5&quot;] }
@@ -2509,7 +2554,8 @@ cd C:\jt-live-whisper
 加進去，是把<strong>音檔網址的主機</strong>加進去。</p>
 </blockquote>
 <h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
-<p>伺服器版另外提供一組 REST API，讓別的系統送音檔進來、取回逐字稿與講者標記。</p>
+<p>與特定系統串接時，會另外部署一組 REST API（<code>jtlw_api/</code>），讓別的系統送音檔進來、取回逐字稿與講者標記。
+<strong>這個模組不包含在公開發行內容裡，<code>install.sh --server</code> 不會安裝它</strong>（見本節後段說明）。</p>
 <h3 id="已上線的整合jason-tools-文件工具箱">已上線的整合：Jason Tools 文件工具箱</h3>
 <p><strong>Jason Tools 文件工具箱</strong>（<a href="https://jasoncheng7115.github.io/jt-doc-tools/">https://jasoncheng7115.github.io/jt-doc-tools/</a>）已經接上 jt-live-whisper。完整流程：</p>
 <table>
@@ -3126,8 +3172,8 @@ cd C:\jt-live-whisper
 <td>安裝程式自動安裝 CUDA 版 PyTorch，faster-whisper 走 CUDA 加速，建議 large-v3-turbo</td>
 </tr>
 <tr>
-<td>無桌面伺服器</td>
-<td><code>./install.sh --server</code>：離線處理 + WebUI 常駐服務，供區域網路其他電腦使用</td>
+<td>無桌面伺服器（伺服器模式）</td>
+<td><code>./install.sh --server</code>：離線處理 + WebUI 常駐服務，供區域網路其他電腦用瀏覽器上傳錄音。搭配 GPU 伺服器時 2 vCPU／4 GB／30 GB 即可（實測 37 分鐘會議記憶體峰值約 0.4 GB）；不搭配時建議 8 核、8 GB 以上</td>
 </tr>
 </tbody></table>
 <h3 id="gpu-伺服器建議選配語音辨識加速用">GPU 伺服器建議（選配，語音辨識加速用）</h3>
