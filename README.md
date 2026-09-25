@@ -1,4 +1,4 @@
-# jt-live-whisper v2.22.2
+# jt-live-whisper v2.22.3
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -89,6 +89,8 @@ Author: Jason Cheng (Jason Tools)
   - **Windows / Linux 無 GPU、macOS Intel**：CPU 辨識，搭配 small 模型可用
 
 - **本機 + GPU 伺服器模式**：本機負責音訊擷取與介面操作，語音辨識和講者辨識交由區域網路內的 GPU 伺服器處理（系統音訊和麥克風兩路都可送遠端）。離線辨識速度快 5-10 倍，即時辨識約 0.3-0.5 秒。適合需要處理大量音訊或追求最佳即時辨識品質的場景。GPU 伺服器可以是 DGX Spark、安裝有 NVIDIA GPU 的 Ubuntu/Linux 主機，搭消費級 RTX 4090/5090 之類亦可（需已安裝 CUDA）。
+
+- **伺服器模式**：裝在無桌面的 Linux 主機（`install.sh --server`），WebUI 常駐，區網內的電腦用瀏覽器上傳錄音處理；從別台電腦操作需要密碼（安裝時自動產生管理密碼與唯讀密碼）。搭配 GPU 伺服器時 2 vCPU、4 GB 記憶體、30 GB 磁碟即可（實測 37 分鐘會議記憶體峰值約 0.4 GB）。
 
 兩種模式可隨時切換，伺服器離線時自動降級為本機處理，不中斷使用。
 
@@ -231,7 +233,7 @@ Author: Jason Cheng (Jason Tools)
 - Ubuntu 22.04 / Debian 12 以上（其他發行版可用，但系統套件需自行安裝）
 - Python 3.10+（含 `python3-venv`）
 - 桌面版：PipeWire 或 PulseAudio（Ubuntu 桌面版預設即有），**不需要安裝虛擬音效卡**
-- 伺服器版（無桌面）：可做離線處理，WebUI 以 systemd 服務常駐
+- 伺服器版（無桌面）：可做離線處理，WebUI 以 systemd 服務常駐；搭配 GPU 伺服器時 2 vCPU／4 GB／30 GB 即可
 - 安裝腳本會以 `sudo apt` 自動補齊 ffmpeg、PortAudio、pulseaudio-utils、中文字型等系統套件
 
 **共通：**
@@ -311,6 +313,9 @@ bash install.sh --server
 ```
 
 `install.sh` 偵測到 Linux 會自動改用 `install-linux.sh`。安裝完成後可執行 `./install.sh --doctor` 檢查音訊、套件、GPU 與伺服器連線是否正常。
+
+伺服器版第一次安裝時會**自動產生管理密碼（上傳、開始／停止作業）與唯讀密碼（看畫面、讀逐字稿）並各印出一次**，請當下記下來。
+**請用一般帳號安裝**：服務會以該帳號執行；用 root 安裝時會以 root 執行並出現警告。
 
 **Windows：**
 
@@ -838,7 +843,7 @@ WebUI 瀏覽器介面（./start.sh --webui）：
 |------|------|
 | 純 CPU | 即時模式建議 base.en / small 模型，或搭配 GPU 伺服器；離線處理可用但較慢 |
 | NVIDIA GPU（6 GB VRAM 以上） | 安裝程式自動裝 CUDA 版 PyTorch，faster-whisper 直接走 CUDA，建議 large-v3-turbo |
-| 無桌面伺服器 | `./install.sh --server`：離線處理 + WebUI 常駐服務，供區域網路其他電腦使用 |
+| 無桌面伺服器（伺服器模式） | `./install.sh --server`：離線處理 + WebUI 常駐服務，供區域網路其他電腦用瀏覽器上傳錄音。搭配 GPU 伺服器時 2 vCPU／4 GB／30 GB 即可；不搭配時建議 8 核、8 GB 以上 |
 
 > Linux 的即時辨識一律使用 faster-whisper（不編譯 whisper.cpp）。ARM64 主機（如 DGX Spark）的 CTranslate2 預建套件不含 CUDA，安裝程式會自動在本機編譯 CUDA 版（約 20～40 分鐘）。GPU 伺服器同時要跑 LLM 等工作時，建議另備一台 Linux 伺服器安裝 jt-live-whisper，辨識交給 GPU 伺服器。`./install.sh --upgrade` 會在更新後自動補齊相依套件。
 

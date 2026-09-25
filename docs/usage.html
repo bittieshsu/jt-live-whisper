@@ -111,6 +111,7 @@ curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main
 <pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
 <span class="g">bash</span> install.sh --server</pre>
+    <p class="note"><span class="zh"><strong>伺服器版：</strong>第一次安裝會自動產生<b>管理密碼</b>（上傳、開始／停止作業）與<b>唯讀密碼</b>（看畫面、讀逐字稿），各只顯示一次，請當下記下。請用一般帳號安裝，服務會以該帳號執行。</span><span class="en"><strong>Server install:</strong> the first install generates an <b>admin password</b> (upload, start/stop jobs) and a <b>read-only password</b> (view, read transcripts), each shown once — note them down. Install as a regular user; the service runs as that user.</span></p>
     <p class="note"><span class="zh">兩種安裝都可用 <code>./install.sh --doctor</code> 檢查音訊、套件、GPU 與伺服器連線；<code>--upgrade</code> 升級、<code>--uninstall</code> 移除。</span><span class="en">Both support <code>./install.sh --doctor</code> (audio, packages, GPU, server connectivity), <code>--upgrade</code> and <code>--uninstall</code>.</span></p>
     <div class="cmd-label">Windows (PowerShell)</div>
 <pre>mkdir C:\jt-live-whisper -Force | Out-Null; cd C:\jt-live-whisper
@@ -445,7 +446,7 @@ webui.py (FastAPI + WebSocket)
       <tbody>
         <tr><td><span class="zh">純 CPU</span><span class="en">CPU only</span></td><td><span class="zh">即時模式建議 base.en / small（程式自動推薦），或搭 GPU 伺服器</span><span class="en">Live: base.en / small (auto-recommended), or pair a GPU server</span></td></tr>
         <tr><td><span class="zh">NVIDIA GPU（6 GB 以上）</span><span class="en">NVIDIA GPU (6 GB+)</span></td><td><span class="zh">自動安裝 CUDA 版 PyTorch，faster-whisper 走 CUDA，建議 large-v3-turbo</span><span class="en">CUDA PyTorch installed automatically; faster-whisper on CUDA, large-v3-turbo</span></td></tr>
-        <tr><td><span class="zh">無桌面伺服器</span><span class="en">Headless server</span></td><td><span class="zh"><code>./install.sh --server</code>：離線處理 + WebUI 常駐服務</span><span class="en"><code>./install.sh --server</code>: offline processing + always-on WebUI</span></td></tr>
+        <tr><td><span class="zh">無桌面伺服器（伺服器模式）</span><span class="en">Headless server (server mode)</span></td><td><span class="zh"><code>./install.sh --server</code>：離線處理 + WebUI 常駐服務。搭配 GPU 伺服器時 2 vCPU／4 GB／30 GB 即可（實測 37 分鐘會議記憶體峰值約 0.4 GB）；不搭配時建議 8 核、8 GB 以上</span><span class="en"><code>./install.sh --server</code>: offline processing + always-on WebUI. With a GPU server, 2 vCPU / 4 GB / 30 GB is enough (measured: ~0.4 GB peak for a 37-min meeting); without one, 8 cores and 8 GB+ recommended</span></td></tr>
       </tbody>
     </table></div>
 

@@ -376,8 +376,17 @@ install_systemd_service() {
         check_notice "需要系統管理員權限才能安裝服務，已略過"
         return 0
     fi
+    # 服務帳號：v2.22.3 前直接用 id -un，用 root 或 sudo 安裝時 WebUI 就以 root 執行——
+    # 任何一個 WebUI 漏洞都會變成整台機器的最高權限（192.168.1.223 實際就是這樣）。
+    # 改成：sudo 的原始使用者 → 安裝目錄的擁有者；兩者都是 root 才用 root，並大聲警告。
     local run_user
-    run_user="$(id -un)"
+    run_user="${SUDO_USER:-}"
+    if [ -z "$run_user" ] || [ "$run_user" = "root" ]; then
+        run_user="$(stat -c %U "$SCRIPT_DIR" 2>/dev/null || id -un)"
+    fi
+    if [ "$run_user" = "root" ]; then
+        check_notice "WebUI 服務將以 root 身分執行：建議改用一般帳號安裝（把程式放在該帳號的目錄下）"
+    fi
     local unit
     unit=$(cat <<EOF
 [Unit]
@@ -427,16 +436,18 @@ EOF
 }
 
 
-# ─── 伺服器版：第一次安裝時產生 admin 密碼 ───────────────
+# ─── 伺服器版：第一次安裝時產生密碼（管理＋唯讀）───────────────
 # **沒有這一段，--server 裝完是不能遠端操作的**：/api/start 需要 admin 密碼，
 # 而設定密碼的那一頁本身就只有本機能開 —— 雞生蛋。無頭伺服器正是裝 --server
 # 的理由，總不能叫人先接螢幕。
-# 只在「完全沒設過」時產生，已經有密碼就不動（升級不會蓋掉使用者設的）。
+# v2.22.3 起**同時產生唯讀密碼**：沒有唯讀密碼時，同網段任何人都能看畫面、列出錄音、讀逐字稿與摘要。
+# 只在「兩個都沒設過」＝全新安裝時產生；已有 admin 密碼的既有部署一律不動（升級不改變既有行為），
+# 只提醒。
 seed_admin_password() {
     local cfg="${SCRIPT_DIR}/config.json"
     command -v python3 >/dev/null 2>&1 || return 0
-    local pw
-    pw=$(SCRIPT_DIR="$SCRIPT_DIR" python3 - <<'PYEOF'
+    local out
+    out=$(SCRIPT_DIR="$SCRIPT_DIR" python3 - <<'PYEOF'
 import hashlib, json, os, pathlib, secrets, sys
 p = pathlib.Path(os.environ["SCRIPT_DIR"]) / "config.json"
 try:
@@ -444,24 +455,40 @@ try:
 except Exception:
     sys.exit(0)                       # 設定檔壞掉時不要亂動它
 wp = cfg.get("webui_passwords") or {}
-if wp.get("admin_sha256") or wp.get("admin"):
-    sys.exit(0)                       # 已經設過，不覆蓋
-pw = secrets.token_urlsafe(12)
-wp["admin_sha256"] = hashlib.sha256(pw.encode("utf-8")).hexdigest()
+has_admin = bool(wp.get("admin_sha256") or wp.get("admin"))
+has_read = bool(wp.get("read_sha256") or wp.get("read"))
+if has_admin:                         # 既有部署：不覆蓋、不新增，只回報狀態
+    print("EXISTING" + ("" if has_read else " NO_READ"))
+    sys.exit(0)
+out = []
+for role in ("admin", "read"):
+    if role == "read" and has_read:
+        continue
+    pw = secrets.token_urlsafe(12)
+    wp[f"{role}_sha256"] = hashlib.sha256(pw.encode("utf-8")).hexdigest()
+    out.append(f"{role.upper()} {pw}")
 cfg["webui_passwords"] = wp
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-print(pw)
+print("\n".join(out))
 PYEOF
 )
-    if [ -n "$pw" ]; then
+    local admin_pw read_pw
+    admin_pw=$(echo "$out" | awk '$1=="ADMIN"{print $2}')
+    read_pw=$(echo "$out" | awk '$1=="READ"{print $2}')
+    if [ -n "$admin_pw" ]; then
         echo
-        echo -e "  ${C_WARN}${BOLD}遠端管理密碼（只顯示這一次，請立刻記下來）${NC}"
-        echo -e "      ${C_OK}${BOLD}${pw}${NC}"
+        echo -e "  ${C_WARN}${BOLD}WebUI 密碼（只顯示這一次，請立刻記下來）${NC}"
+        echo -e "      管理密碼（上傳、開始／停止作業）：${C_OK}${BOLD}${admin_pw}${NC}"
+        [ -n "$read_pw" ] && echo -e "      唯讀密碼（看畫面、讀逐字稿）  ：${C_OK}${BOLD}${read_pw}${NC}"
         echo -e "  ${C_DIM}存的是 sha256 雜湊，設定檔裡沒有明文，遺失只能重設${NC}"
         echo -e "  ${C_DIM}要更換：在伺服器本機開 WebUI → 安全設定（那一頁只有本機能開）${NC}"
         echo -e "  ${C_DIM}建議同時設定 webui.allowed_ips 限制來源網段${NC}"
-    else
+    elif echo "$out" | grep -q "NO_READ"; then
         echo -e "  ${C_DIM}遠端管理密碼已設定過，未變更${NC}"
+        echo -e "  ${C_WARN}注意：尚未設定唯讀密碼——同網段任何人都能看畫面、讀逐字稿與摘要。${NC}"
+        echo -e "  ${C_WARN}建議在伺服器本機開 WebUI → 安全設定，設一組唯讀密碼（或以 webui.allowed_ips 限制來源）${NC}"
+    else
+        echo -e "  ${C_DIM}WebUI 密碼已設定過，未變更${NC}"
     fi
 }
 
