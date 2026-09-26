@@ -65,6 +65,11 @@ try:
         _BUILTIN_TRANSLATE_MODELS as _TM_TRANSLATE_MODELS,
         DEFAULT_TRANSLATE_MODEL as _TM_DEFAULT_TRANSLATE_MODEL,
     SUMMARY_DEFAULT_MODEL as _TM_SUMMARY_DEFAULT_MODEL,
+    QWEN_MODEL as _TM_QWEN_MODEL,
+    _qwen_server_ready as _tm_qwen_server_ready,
+    _ZH_INPUT_MODES as _TM_ZH_MODES,
+    _EN_INPUT_MODES as _TM_EN_MODES,
+    _KO_INPUT_MODES as _TM_KO_MODES,
 )
 except Exception:
     _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
@@ -290,6 +295,10 @@ async def lifespan(app):
     t = threading.Thread(target=_tcp_receiver, daemon=True)
     t.start()
     asyncio.create_task(_event_dispatcher())
+    try:
+        _qwen_available()            # 一啟動就先查 GPU 伺服器有沒有 Qwen3-ASR（背景，不擋啟動）
+    except Exception:
+        pass
     yield
     # shutdown: kill subprocess
     _stop_proc()
@@ -523,6 +532,28 @@ def _start_proc(args: list):
     return _proc.pid
 
 
+# Qwen3-ASR（實驗）：GPU 伺服器上就緒才列進模型選單。背景查、快取 60 秒，
+# 不可以在 /api/config 裡同步去打伺服器（伺服器連不上時頁面會卡住幾秒，v2.16.1 才處理過冷啟動）
+_QWEN_PROBE = {"ok": False, "t": -1e9, "running": False}
+
+
+def _qwen_available():
+    if time.monotonic() - _QWEN_PROBE["t"] > 60 and not _QWEN_PROBE["running"]:
+        _QWEN_PROBE["running"] = True
+
+        def _probe():
+            ok = False
+            try:
+                rw = json.loads(CONFIG_FILE.read_text(encoding="utf-8")).get("remote_whisper") \
+                    if CONFIG_FILE.exists() else None
+                ok = bool(rw) and _tm_qwen_server_ready(rw)[0]
+            except Exception:
+                ok = False
+            _QWEN_PROBE.update(ok=ok, t=time.monotonic(), running=False)
+        threading.Thread(target=_probe, daemon=True).start()
+    return _QWEN_PROBE["ok"]
+
+
 def _get_config():
     """讀取可用選項（從 translate_meeting.py 的常數 + config.json）"""
     modes = [
@@ -555,6 +586,12 @@ def _get_config():
         models = [{"value": n, "label": f"{n}（{d}）"} for n, _, d in _TM_WHISPER_MODELS]
         # Breeze-ASR-26：台語專用，華語模式也可選用（台灣華語夾雜台語時），固定本機辨識
         models.append({"value": "breeze-asr-26", "label": "breeze-asr-26（台灣華語／台語，較慢，固定本機）"})
+        if _qwen_available():
+            # 使用限制由後端給，前端照 limits 停用（不在前端寫死模型名稱）
+            models.append({"value": _TM_QWEN_MODEL,
+                           "label": f"{_TM_QWEN_MODEL}（實驗：中文會議、中英夾雜明顯更準）",
+                           "limits": {"file_only": True, "remote_only": True,
+                                      "modes": list(_TM_ZH_MODES + _TM_EN_MODES + _TM_KO_MODES)}})
     except Exception:
         models = [
             {"value": "base.en", "label": "base.en（最快，準確度一般）"},
@@ -698,7 +735,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.22.3",
+        "last": last, "version": "2.23.0",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }

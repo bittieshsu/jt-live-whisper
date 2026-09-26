@@ -466,8 +466,15 @@ function _updateModelRec(mode){
   const _mOrder={'base.en':0,'base':1,'small.en':2,'small':3,'large-v3-turbo':4,'large-v3':5};
   const recIdx=_mOrder[recM]??6;
   const isNan=['nan','nan2en'].includes(mode),breezeOk=['zh','zh2en','zh2ja','zh2ko','nan','nan2en'].includes(mode);
+  const isFile=cselVal($('iSource'))==='file',isGpu=cselVal($('iAsrLoc'))==='gpu';
+  // 後端給的使用限制（例：Qwen3-ASR 限錄音檔、需 GPU 伺服器、限中英韓單向）→ 不適用就停用並說明
+  const limitTag=m=>{const L=m.limits;if(!L)return '';
+    if(L.file_only&&!isFile)return '僅限錄音檔';
+    if(L.remote_only&&!isGpu)return '需選 GPU 伺服器';
+    if(L.modes&&!L.modes.includes(mode))return '不支援此模式';return ''};
   cselSetItems($('iModel'),_cfgModels.map(m=>{
     const isEnOnly=m.value.endsWith('.en'),isBreeze=m.value==='breeze-asr-26';
+    const lt=limitTag(m);if(lt)return{value:m.value,label:m.label,tag:lt,disabled:true};
     if(isNoEng&&isEnOnly)return{value:m.value,label:m.label,tag:'不支援此模式',disabled:true};
     // 台語只能用 Breeze-ASR-26；Breeze-ASR-26 只支援台語與華語輸入模式
     if(isNan&&!isBreeze)return{value:m.value,label:m.label,tag:'台語僅支援 breeze-asr-26',disabled:true};
@@ -482,13 +489,14 @@ function _updateModelRec(mode){
   if(isNoEng&&curVal.endsWith('.en'))cselSetValue($('iModel'),recM);
   else if(isNan&&curVal!=='breeze-asr-26')cselSetValue($('iModel'),'breeze-asr-26');
   else if(!breezeOk&&curVal==='breeze-asr-26')cselSetValue($('iModel'),_recModels[mode]||'large-v3-turbo');
+  else if(_cfgModels.some(m=>m.value===curVal&&limitTag(m)))cselSetValue($('iModel'),isGpu?'large-v3-turbo':recM);   // 同命令列：有 GPU 伺服器退伺服器預設
   else cselSetValue($('iModel'),curVal);
 }
 const _modeLabels={'en2zh':'英翻中字幕','zh2en':'中翻英字幕','ja2zh':'日翻中字幕','zh2ja':'中翻日字幕','ko2zh':'韓翻中字幕','zh2ko':'中翻韓字幕','en_zh':'英中雙向字幕','ja_zh':'日中雙向字幕','ko_zh':'韓中雙向字幕','en':'英文轉錄','zh':'中文轉錄','ja':'日文轉錄','ko':'韓文轉錄','nan':'台語轉錄','nan2en':'台翻英字幕','record':'純錄音'};
 const _spkColors=['#ffa550','#64c8ff','#ff96b4','#b4e664','#bea0ff','#fff064','#64f0c8','#ffb4a0'];
 /* Custom Select */
 function cselInit(el){const d=document.createElement('div');d.className='csel-display';d.textContent='選擇...';const dr=document.createElement('div');dr.className='csel-drop';el.appendChild(d);el.appendChild(dr);d.addEventListener('click',e=>{e.stopPropagation();document.querySelectorAll('.csel.open').forEach(s=>{if(s!==el)s.classList.remove('open')});el.classList.toggle('open')})}
-function cselSetItems(el,items,groups){const dr=el.querySelector('.csel-drop');dr.innerHTML='';const add=(item)=>{const d=document.createElement('div');d.className='csel-item';if(item.disabled)d.classList.add('disabled');if(el.dataset.value===item.value&&!item.disabled)d.classList.add('active');let h=item.label;if(item.tag){const tc=item.tag==='不支援此模式'?'tag-disabled':(item.tag==='前次使用'?'tag-last':'tag-default');h+='<span class="tag '+tc+'">'+item.tag+'</span>';}d.innerHTML=h;d.dataset.value=item.value;if(!item.disabled)d.addEventListener('click',()=>{cselSetValue(el,item.value,item.label);el.classList.remove('open');el.dispatchEvent(new Event('change'))});dr.appendChild(d)};if(groups){groups.forEach(g=>{const gh=document.createElement('div');gh.className='csel-group';gh.textContent=g.label;dr.appendChild(gh);g.items.forEach(add)})}else{items.forEach(add)}}
+function cselSetItems(el,items,groups){const dr=el.querySelector('.csel-drop');dr.innerHTML='';const add=(item)=>{const d=document.createElement('div');d.className='csel-item';if(item.disabled)d.classList.add('disabled');if(el.dataset.value===item.value&&!item.disabled)d.classList.add('active');let h=item.label;if(item.tag){const tc=(item.disabled||item.tag==='不支援此模式')?'tag-disabled':(item.tag==='前次使用'?'tag-last':'tag-default');h+='<span class="tag '+tc+'">'+item.tag+'</span>';}d.innerHTML=h;d.dataset.value=item.value;if(!item.disabled)d.addEventListener('click',()=>{cselSetValue(el,item.value,item.label);el.classList.remove('open');el.dispatchEvent(new Event('change'))});dr.appendChild(d)};if(groups){groups.forEach(g=>{const gh=document.createElement('div');gh.className='csel-group';gh.textContent=g.label;dr.appendChild(gh);g.items.forEach(add)})}else{items.forEach(add)}}
 function cselSetValue(el,value,label){el.dataset.value=value;const d=el.querySelector('.csel-display');if(label){d.textContent=label}else{const item=el.querySelector('.csel-item[data-value="'+CSS.escape(value)+'"]');if(item){const c=item.cloneNode(true);c.querySelectorAll('.tag').forEach(t=>t.remove());d.textContent=c.textContent.trim()}else d.textContent=value}el.querySelectorAll('.csel-item').forEach(i=>{i.classList.toggle('active',i.dataset.value===value)})}
 function cselAddItem(el,v,l){const dr=el.querySelector('.csel-drop');if(dr.querySelector('[data-value="'+CSS.escape(v)+'"]'))return;const d=document.createElement('div');d.className='csel-item';d.textContent=l||v;d.dataset.value=v;d.addEventListener('click',()=>{cselSetValue(el,v,l);el.classList.remove('open');el.dispatchEvent(new Event('change'))});dr.appendChild(d)}
 function cselVal(el){return el.dataset.value||''}
@@ -565,7 +573,7 @@ async function loadCfg(){
   if(c.summary_descs)_sumDescs=c.summary_descs;
   if(c.default_summary_model)_sumDefault=c.default_summary_model;
   _updateSumModels(c.llm_models.map(m=>m.value));cselSetValue($('iSumModel'),L.summary_model||'');
-  engChg();$('iMode').addEventListener('change',()=>{engChg();_updateModelRec(cselVal($('iMode')))});$('iEngine').addEventListener('change',engChg);$('iAsrLoc').addEventListener('change',()=>{const v=cselVal($('iAsrLoc'));if(v&&!['en_zh','ja_zh'].includes(cselVal($('iMode'))))_asrLastVal=v;engChg()});
+  engChg();$('iMode').addEventListener('change',()=>{engChg();_updateModelRec(cselVal($('iMode')))});$('iEngine').addEventListener('change',engChg);$('iAsrLoc').addEventListener('change',()=>{const v=cselVal($('iAsrLoc'));if(v&&!['en_zh','ja_zh'].includes(cselVal($('iMode'))))_asrLastVal=v;engChg();_updateModelRec(cselVal($('iMode')))});
   const st=await(await fetch('/api/status',{headers:_authHeaders()})).json();
   if(_authRole==='read'){
     // 唯讀模式：有在執行就直接進字幕頁，否則顯示等待畫面
@@ -624,7 +632,7 @@ async function requestSckPerm(){
   }catch(e){msg.textContent=e.message;showToast('授權失敗: '+e.message,'err')}
   btn.disabled=false;
 }
-function onSourceChg(){const isFile=cselVal($('iSource'))==='file';$('fileArea').classList.toggle('show',isFile);$('rDevices').style.display=isFile?'none':'';$('rScene').style.display=isFile?'none':'';$('rOffline').style.display=isFile?'':'none';$('rAsrLoc').style.display=isFile?'':'';$('iDenoise').parentElement.style.display=isFile?'none':'';$('iRec').parentElement.style.display=isFile?'none':'';$('iMic').parentElement.style.display=isFile?'none':'';$('asrHint').textContent=isFile?'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。':'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。場景的緩衝長度越長句子越完整，越短反應越即時。';if(isFile)loadFiles()}
+function onSourceChg(){const isFile=cselVal($('iSource'))==='file';$('fileArea').classList.toggle('show',isFile);$('rDevices').style.display=isFile?'none':'';$('rScene').style.display=isFile?'none':'';$('rOffline').style.display=isFile?'':'none';$('rAsrLoc').style.display=isFile?'':'';$('iDenoise').parentElement.style.display=isFile?'none':'';$('iRec').parentElement.style.display=isFile?'none':'';$('iMic').parentElement.style.display=isFile?'none':'';$('asrHint').textContent=isFile?'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。':'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。場景的緩衝長度越長句子越完整，越短反應越即時。';if(isFile)loadFiles();_updateModelRec(cselVal($('iMode')))}
 function onDiarizeChg(){$('rNumSpk').style.display=$('iDiarize').checked?'':'none'}
 function onSummarizeChg(){const on=$('iSummarize').checked;$('rSumModel').style.display=on?'':'none';$('iSumRounds').disabled=!on;$('rSumRoundsHint').style.display=on&&parseInt($('iSumRounds').value)>1?'':'none'}
 $('iSumRounds').addEventListener('change',onSummarizeChg);
@@ -899,7 +907,7 @@ const _tips={
   // 語音辨識
   iMode:'選擇翻譯方向或轉錄語言。雙向模式建議使用耳麥',
   iAsrLoc:'GPU 伺服器辨識速度快；本機不需網路但較慢',
-  iModel:'較大的模型準確度較高但速度較慢。標有「此裝置適合」的為推薦',
+  iModel:'較大的模型準確度較高但速度較慢。標有「此裝置適合」的為推薦。標「實驗」的模型只在符合條件時可選（例：Qwen3-ASR 限錄音檔、GPU 伺服器、中英韓單向），灰色項目右側會寫原因',
   iScene:'緩衝長度越長句子越完整，越短反應越即時',
   // 語言翻譯
   iEngine:'LLM 品質最好需伺服器，NLLB/Argos 為本機離線',

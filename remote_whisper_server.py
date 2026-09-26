@@ -29,6 +29,117 @@ import tempfile
 import threading
 import time
 
+# ── Qwen3-ASR worker（v2.23.0，實驗）──────────────────────────────
+# vLLM 0.14 鎖 torch 2.9.1，這支服務的 venv 是 torch 2.10 → Qwen 必須在**獨立 venv 的子行程**跑。
+# 伺服器自動更新只推 server.py 一個檔案，所以 worker 也寫在這裡，以 `--qwen-worker <port>` 啟動；
+# 放在所有第三方 import 之前，worker 的 venv 不需要有這支服務的其他套件。
+# 實測（2026-09-25，tools/asr_bench/）：中文 20 場會議 CER 28.78% → 15.75%；中英夾雜少數語言召回 2~3 倍
+QWEN_ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
+QWEN_ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
+QWEN_GPU_MEM = 0.06     # E6：0.06 可跑（行程 5.4 GB），0.04 以下起不來；共用機不要給多
+
+
+def _qwen_worker_main():
+    """只聽 127.0.0.1。POST /transcribe {path, windows, language} → {texts, stamps}（每窗文字＋對齊器逐字時間）"""
+    import http.server
+    import signal
+    port = int(sys.argv[sys.argv.index("--qwen-worker") + 1])
+    parent = os.getppid()
+
+    def _die():
+        try:
+            os.killpg(0, signal.SIGKILL)       # 連 vLLM 的 EngineCore 子行程一起收掉，不留孤兒佔 GPU
+        finally:
+            os._exit(0)
+
+    def _watch():
+        while True:
+            time.sleep(5)
+            if os.getppid() != parent:          # 主服務結束了
+                _die()
+    threading.Thread(target=_watch, daemon=True).start()
+    state = {"ready": False}
+    lock = threading.Lock()
+
+    def work(req):
+        wav, _ = librosa.load(req["path"], sr=16000, mono=True)
+        chunks = [wav[max(0, int(a * 16000)):int(b * 16000)] for a, b in req["windows"]]
+        lang = req["language"]
+        texts = [""] * len(chunks)
+        # 極短的窗（<0.2 秒）不送模型：沒有內容可辨識，還可能讓前處理出錯
+        live = [k for k, c in enumerate(chunks) if len(c) >= 3200]
+        for k0 in range(0, len(live), 32):
+            ks = live[k0:k0 + 32]
+            r = asr.transcribe(audio=[(chunks[k], 16000) for k in ks], language=[lang] * len(ks))
+            for k, x in zip(ks, r):
+                texts[k] = x.text
+        stamps = [[] for _ in texts]
+        idx = [k for k, t in enumerate(texts) if t.strip()]
+        align_failed = 0
+        for k0 in range(0, len(idx), 8):
+            ks = idx[k0:k0 + 8]
+            try:
+                r = fa.align(audio=[(chunks[k], 16000) for k in ks], text=[texts[k] for k in ks],
+                             language=[lang] * len(ks))
+            except Exception as e:           # 對齊失敗：這幾窗沒有逐字時間，文字照樣回（主服務切句時不丟字）
+                align_failed += len(ks)
+                print(f"[qwen-worker] 對齊失敗 {len(ks)} 窗：{type(e).__name__}: {e}", flush=True)
+                continue
+            for k, xs in zip(ks, r):
+                stamps[k] = [[x.text, float(x.start_time), float(x.end_time)] for x in xs]
+        return {"texts": texts, "stamps": stamps, "align_failed": align_failed}
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, obj):
+            b = json.dumps(obj, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_GET(self):
+            if self.path != "/health":
+                return self._send(404, {"error": "not found"})
+            # 載入中回 503：主服務只把 200 當成就緒
+            self._send(200, {"ok": True, "model": QWEN_ASR_MODEL}) if state["ready"] \
+                else self._send(503, {"ok": False, "loading": True})
+
+        def do_POST(self):
+            if self.path != "/transcribe":
+                return self._send(404, {"error": "not found"})
+            if not state["ready"]:
+                return self._send(503, {"error": "Qwen3-ASR worker 載入中"})
+            try:
+                req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                with lock:                      # 一次一件（主服務本來就排隊，這裡是保險）
+                    out = work(req)
+            except Exception as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
+            self._send(200, out)
+
+    # **先綁埠號再載入模型**（約 7 GB、1~3 分鐘）：同一個埠已有 worker 時這裡立刻失敗退出，
+    # 不會白白載一份模型；主服務在載入期間也看得出埠被佔（2026-09-26 實測：原本載完才綁，兩個 worker 同時載入）
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    import librosa
+    import torch as _torch
+    from qwen_asr import Qwen3ASRModel, Qwen3ForcedAligner
+    asr = Qwen3ASRModel.LLM(model=QWEN_ASR_MODEL, gpu_memory_utilization=QWEN_GPU_MEM, max_model_len=4096,
+                            max_inference_batch_size=32, max_new_tokens=512)
+    fa = Qwen3ForcedAligner.from_pretrained(QWEN_ALIGNER_MODEL, dtype=_torch.bfloat16, device_map="cuda")
+    state["ready"] = True
+    print(f"[qwen-worker] 就緒 127.0.0.1:{port}（{QWEN_ASR_MODEL}）", flush=True)
+    threading.Event().wait()
+
+
+if __name__ == "__main__" and "--qwen-worker" in sys.argv:
+    _qwen_worker_main()
+    sys.exit(0)
+
 # 原始碼編譯的 CTranslate2 將 libctranslate2.so 安裝到 /usr/local/lib
 # 需在 import ctranslate2 前確保 LD_LIBRARY_PATH 包含此路徑
 if "/usr/local/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
@@ -46,7 +157,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.22.3"
+SERVER_VERSION = "2.23.0"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -362,12 +473,362 @@ try:
     _HAS_DIARIZE = True
     print(f"[講者辨識] resemblyzer + spectralcluster 可用 (device={_torch_device})")
 except ImportError:
-    print("[講者辨識] resemblyzer/spectralcluster 未安裝，diarize API 停用")
+    print("[講者辨識] resemblyzer/spectralcluster 未安裝")
+
+# Nemotron 3 Diarization：transformers 內建 nemotron3_diarization（5.18 起）才有
+_HAS_NEMO = False
+try:
+    from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES as _CMN
+    _HAS_NEMO = "nemotron3_diarization" in _CMN
+    print(f"[講者辨識] Nemotron {'可用' if _HAS_NEMO else '不可用（transformers 版本太舊，需要 5.18 以上）'}")
+except Exception:
+    print("[講者辨識] Nemotron 不可用（未安裝 transformers）")
+if not (_HAS_DIARIZE or _HAS_NEMO):
+    print("[講者辨識] 沒有可用的方法，diarize API 停用")
 
 
 # ── Diarization 核心函式 ──
 
-def _diarize(wav_path, segments, num_speakers=None):
+# ── Qwen3-ASR：主服務這一側（切窗、呼叫 worker、切句）──
+# 切窗與用戶端 _nan_vad_windows **是同一支**（台語已在用，≤28 秒）；tools/test_qwen_server.py 逐一比對
+_NAN_WINDOW_SEC = 28.0
+_NAN_VAD_SILENCE_MS = 500
+_QWEN_MODELS = ("qwen3-asr-0.6b",)
+_QWEN_LANG = {"zh": "Chinese", "en": "English", "ko": "Korean"}     # 日文實測長檔較差（E3），先不開
+_QWEN_SENT_END = "。？！?!"
+_QWEN_FILLERS = set("嗯啊呃唔哦喔欸誒呀哈") | {"um", "uh", "mm", "hmm", "mhm"}
+_QWEN = {"proc": None, "port": None, "ready": False, "error": "", "restarts": 0, "stopping": False}
+_QWEN_MAX_RESTARTS = 3          # 一小時內最多自動重啟幾次（起不來時不要無限重試、一直佔 GPU 載入）
+
+
+def _nan_vad_windows(audio, samplerate=16000):
+    """（與 translate_meeting._nan_vad_windows 相同）依語音活動切成 ≤28 秒視窗，回傳 [(起, 迄)] 秒"""
+    total = len(audio) / float(samplerate)
+    try:
+        from faster_whisper.vad import get_speech_timestamps, VadOptions
+        regions = get_speech_timestamps(
+            audio, VadOptions(min_silence_duration_ms=_NAN_VAD_SILENCE_MS),
+            sampling_rate=samplerate)
+    except Exception:
+        regions = []
+
+    if not regions:
+        out, t = [], 0.0
+        while t < total:
+            out.append((t, min(t + _NAN_WINDOW_SEC, total)))
+            t += _NAN_WINDOW_SEC
+        return out or [(0.0, total)]
+
+    windows = []
+    cur_start = cur_end = None
+    for r in regions:
+        rs, re_ = r["start"] / float(samplerate), r["end"] / float(samplerate)
+        if cur_start is None:
+            cur_start, cur_end = rs, re_
+        elif re_ - cur_start <= _NAN_WINDOW_SEC:
+            cur_end = re_
+        else:
+            windows.append((cur_start, cur_end))
+            cur_start, cur_end = rs, re_
+        while cur_end - cur_start > _NAN_WINDOW_SEC:
+            windows.append((cur_start, cur_start + _NAN_WINDOW_SEC))
+            cur_start += _NAN_WINDOW_SEC
+    if cur_start is not None:
+        windows.append((cur_start, cur_end))
+    return windows
+
+
+def _qwen_core(s):
+    return re.sub(r"[\W_]+", "", s)
+
+
+def _qwen_filler_only(text):
+    """一窗只有語氣詞（嗯／啊／um…）→ 丟掉。E3：60 秒靜音、雜訊、和弦、嗡嗡聲 Qwen 會吐「嗯。」"""
+    words = re.findall(r"[a-z]+", text.lower())
+    cjk = [c for c in _qwen_core(text) if not ("a" <= c.lower() <= "z")]
+    return bool(words or cjk) and all(w in _QWEN_FILLERS for w in words) and all(c in _QWEN_FILLERS for c in cjk)
+
+
+def _qwen_sentences(text, stamps, off, win_end):
+    """一窗的文字依句末標點切句，用對齊器的逐字時間定起訖（E2 方案 A）。
+    對齊器的 token 沒有標點 → 用「去掉標點後的字數」對回去。**不丟字**：
+    對齊結果不夠時，剩下的文字照樣成一段（時間用到窗尾）；只有標點的尾巴接回前一句"""
+    tc = [(s, e) for tk, s, e in stamps for _ in _qwen_core(tk)]
+    out, buf, n, pos = [], "", 0, 0
+
+    def flush():
+        nonlocal buf, n, pos
+        if n:
+            if pos < len(tc):
+                s0, e0 = off + tc[pos][0], off + tc[min(pos + n, len(tc)) - 1][1]
+            else:
+                s0, e0 = (out[-1]["end"] if out else off), win_end
+            out.append({"start": round(s0, 3), "end": round(max(e0, s0), 3), "text": buf.strip()})
+        elif buf.strip() and out:
+            out[-1]["text"] += buf.strip()
+        pos += n
+        buf, n = "", 0
+
+    for i, ch in enumerate(text):
+        buf += ch
+        if _qwen_core(ch):
+            n += 1
+        # 英文／韓文的句點：後面是空白或結尾、前一個字不是數字（「3.5」不切）才算句末
+        if ch in _QWEN_SENT_END or (ch == "." and (i + 1 == len(text) or text[i + 1].isspace())
+                                    and not (i and text[i - 1].isdigit())):
+            flush()
+    flush()
+    return out
+
+
+def _qwen_python():
+    p = os.environ.get("JT_QWEN_PYTHON") or os.path.expanduser("~/jt-whisper-server/venv-qwen/bin/python")
+    return p if os.path.exists(p) else None
+
+
+def _qwen_start(port):
+    """有 Qwen 的 venv 才啟動 worker（背景載入，約 1~3 分鐘；就緒前 /health 不列 Qwen）。
+    worker 意外結束時自動重啟（一小時內最多 _QWEN_MAX_RESTARTS 次）"""
+    import signal
+    import subprocess
+    import urllib.request
+    py = _qwen_python()
+    if not py or not torch.cuda.is_available():
+        return
+    if _qwen_port_busy(port):
+        _QWEN.update(proc=None, port=port, ready=False,
+                     error=f"埠號 {port} 已被佔用（可能是上一次沒收乾淨的 worker），Qwen3-ASR 停用；設 JT_QWEN_PORT 換一個")
+        print(f"[Qwen3-ASR] {_QWEN['error']}")
+        return
+    env = dict(os.environ)
+    if os.path.exists("/usr/local/cuda/bin/ptxas"):
+        env.setdefault("TRITON_PTXAS_PATH", "/usr/local/cuda/bin/ptxas")   # GB10（sm_121a）Triton 內建的不認得
+    log = open(os.path.join(tempfile.gettempdir(), f"jt-qwen-worker-{port}.log"), "ab")
+    proc = subprocess.Popen([py, os.path.abspath(__file__), "--qwen-worker", str(port)],
+                            stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env,
+                            start_new_session=True)
+    _QWEN.update(proc=proc, port=port, ready=False, error="")
+    print(f"[Qwen3-ASR] worker 啟動中（pid {proc.pid}，127.0.0.1:{port}）")
+
+    def _wait():
+        t0 = time.monotonic()
+        while proc.poll() is None:                 # 不設死線：第一次啟動可能在下載模型（約 4 GB）
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3):
+                    _QWEN.update(ready=True, error="")
+                    print(f"[Qwen3-ASR] 就緒（{time.monotonic() - t0:.0f}s）")
+                    break
+            except Exception:
+                if time.monotonic() - t0 > 900 and not _QWEN["error"]:
+                    _QWEN["error"] = "載入超過 15 分鐘（第一次啟動可能在下載模型），仍在等待"
+                time.sleep(3)
+        while proc.poll() is None:                 # 就緒後守著：意外結束就重啟
+            time.sleep(5)
+        _QWEN["ready"] = False
+        # worker 意外結束（被 kill -9、當掉）時，它底下 vLLM 的 EngineCore **不會跟著走**，
+        # 會變成孤兒繼續佔約 5 GB 顯示記憶體（2026-09-26 實測，重啟兩次就疊到 10 GB）。
+        # 它還留在 worker 的行程群組裡，整個群組一起收
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            pass
+        if _QWEN["stopping"]:
+            return
+        now = time.time()
+        recent = [t for t in _QWEN.setdefault("restart_times", []) if now - t < 3600]
+        _QWEN["restart_times"] = recent
+        if len(recent) >= _QWEN_MAX_RESTARTS:
+            _QWEN["error"] = (f"worker 一小時內結束 {len(recent) + 1} 次，不再自動重啟；"
+                              f"見 {log.name}，排除後重啟服務")
+            print(f"[Qwen3-ASR] {_QWEN['error']}")
+            return
+        _QWEN["error"] = f"worker 結束（代碼 {proc.returncode}），30 秒後重啟；見 {log.name}"
+        print(f"[Qwen3-ASR] {_QWEN['error']}")
+        time.sleep(30)
+        if _QWEN["stopping"]:
+            return
+        _QWEN["restart_times"].append(time.time())
+        _QWEN["restarts"] += 1
+        _qwen_start(port)
+    threading.Thread(target=_wait, daemon=True).start()
+
+
+def _qwen_port_busy(port):
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as so:
+        so.settimeout(1)
+        return so.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _qwen_stop(wait=0.0):
+    """收掉 worker 整個行程群組（含 vLLM 的 EngineCore）。wait>0 時等它真的結束，逾時就 SIGKILL"""
+    import signal
+    _QWEN["stopping"] = True
+    p = _QWEN.get("proc")
+    if p is None or p.poll() is not None:
+        return
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+    except Exception:
+        pass
+    t0 = time.monotonic()
+    while wait and p.poll() is None and time.monotonic() - t0 < wait:
+        time.sleep(0.2)
+    if wait and p.poll() is None:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait(5)
+        except Exception:
+            pass
+
+
+def _qwen_ready():
+    p = _QWEN.get("proc")
+    return bool(_QWEN.get("ready") and p is not None and p.poll() is None)
+
+
+def _transcribe_qwen(wav_path, language):
+    """切窗 → worker 辨識＋對齊 → 切句。回傳 (segments, duration, proc_time)"""
+    import librosa
+    import urllib.error
+    import urllib.request
+    t0 = time.monotonic()
+    wav, _ = librosa.load(wav_path, sr=16000, mono=True)
+    windows = _nan_vad_windows(wav, 16000)
+    body = json.dumps({"path": wav_path, "windows": windows, "language": _QWEN_LANG[language]}).encode()
+    req = urllib.request.Request(f"http://127.0.0.1:{_QWEN['port']}/transcribe", data=body,
+                                 headers={"Content-Type": "application/json"})
+    # 逾時依音訊長度（vLLM 約 50 倍即時，這裡給到 1 倍即時＋5 分鐘，只擋真的卡死）
+    try:
+        with urllib.request.urlopen(req, timeout=300 + len(wav) / 16000) as r:
+            res = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Qwen3-ASR worker 回報錯誤：{e.read().decode(errors='replace')[:200]}") from e
+    except Exception as e:
+        # 原始訊息（例：Remote end closed connection）轉給用戶端會看起來像主服務斷線，講清楚是 worker
+        raise RuntimeError(f"Qwen3-ASR worker 中途沒有回應（{type(e).__name__}），它會自動重啟") from e
+    if res.get("align_failed"):
+        print(f"[Qwen3-ASR] {res['align_failed']} 窗對齊失敗，這些段落的時間以整窗估計")
+    segs = []
+    for (ws, we), txt, st in zip(windows, res["texts"], res["stamps"]):
+        if not txt.strip() or _qwen_filler_only(txt):
+            continue
+        segs += _qwen_sentences(txt, st, ws, we)
+    return segs, len(wav) / 16000, round(time.monotonic() - t0, 1)
+
+
+# ── Nemotron 3 Diarization ──
+# **與 translate_meeting.py 的同名函式是同一套邏輯**（這支伺服器自動更新只推單一檔案，不能共用模組）。
+# tools/test_diarizer.py 逐一比對兩邊輸出；改一邊一定要改另一邊。實測數據見那邊的註解。
+NEMO_DIAR_MODEL = "nvidia/Nemotron-3-Diarization"
+_NEMO_FRAME = 0.01
+_NEMO_CHANNELS = 8
+_NEMO_CACHE = {}
+
+
+def _recommended_diarizer(num_speakers=None, engine="auto"):
+    """回傳 (engine, 原因)，engine 為 "nemotron" 或 "legacy"（伺服器版：不必判斷 Intel Mac）"""
+    if engine == "legacy":
+        return "legacy", "指定使用現行方法"
+    if num_speakers and num_speakers > _NEMO_CHANNELS:
+        return "legacy", f"指定 {num_speakers} 人，超過 Nemotron 上限 {_NEMO_CHANNELS} 人"
+    if not _HAS_NEMO:
+        return "legacy", "伺服器的 transformers 不支援 Nemotron"
+    return "nemotron", ""
+
+
+def _nemo_span(probs_len, seg):
+    a = int(seg["start"] / _NEMO_FRAME)
+    b = max(a + 1, int(seg["end"] / _NEMO_FRAME))
+    b = min(b, probs_len)
+    a = min(a, b - 1)
+    return max(a, 0), max(b, 1)
+
+
+def _nemo_segment_labels(probs, segments):
+    import numpy as np
+    out = []
+    for s in segments:
+        a, b = _nemo_span(len(probs), s)
+        out.append(int(np.asarray(probs[a:b], dtype="float32").sum(axis=0).argmax()))
+    return out
+
+
+def _nemo_saturated(segments, labels):
+    used = {l for s, l in zip(segments, labels) if s["end"] - s["start"] >= _DIAR_MIN_CLUSTER_SEC}
+    return len(used) >= _NEMO_CHANNELS
+
+
+def _nemo_limit_speakers(probs, segments, labels, k):
+    import numpy as np
+    sec = {}
+    for s, l in zip(segments, labels):
+        sec[l] = sec.get(l, 0.0) + (s["end"] - s["start"])
+    if len(sec) <= k:
+        return list(labels)
+    keep = sorted(sec, key=lambda l: (-sec[l], l))[:k]
+    out = []
+    for s, l in zip(segments, labels):
+        if l in keep:
+            out.append(l)
+            continue
+        a, b = _nemo_span(len(probs), s)
+        tot = np.asarray(probs[a:b], dtype="float32").sum(axis=0)
+        out.append(max(keep, key=lambda c: tot[c]))
+    return out
+
+
+def _renumber_first_seen(labels):
+    m = {}
+    return [m.setdefault(l, len(m)) for l in labels]
+
+
+def _nemo_probs(wav_path):
+    import librosa
+    import numpy as np
+    from transformers import AutoModelForAudioFrameClassification, AutoProcessor
+    if "model" not in _NEMO_CACHE:
+        proc = AutoProcessor.from_pretrained(NEMO_DIAR_MODEL)
+        model = AutoModelForAudioFrameClassification.from_pretrained(NEMO_DIAR_MODEL).to(_torch_device).eval()
+        _NEMO_CACHE.update(proc=proc, model=model)
+    proc, model = _NEMO_CACHE["proc"], _NEMO_CACHE["model"]
+    wav, _ = librosa.load(wav_path, sr=16000, mono=True)
+    inp = {k: (v.to(_torch_device) if hasattr(v, "to") else v) for k, v in proc(wav, sampling_rate=16000).items()}
+    with torch.inference_mode():
+        lg = model(**inp).logits[0].float().cpu().numpy()
+    return lg if (lg.min() >= 0 and lg.max() <= 1) else 1 / (1 + np.exp(-lg))
+
+
+def _nemotron_diarize(wav_path, segments, num_speakers=None):
+    try:
+        probs = _nemo_probs(wav_path)
+    except Exception as e:
+        return None, f"Nemotron 執行失敗（{type(e).__name__}: {e}）"
+    labels = _nemo_segment_labels(probs, segments)
+    if not num_speakers and _nemo_saturated(segments, labels):
+        return None, f"{_NEMO_CHANNELS} 位講者全部用滿，可能超過 Nemotron 上限"
+    if num_speakers:
+        labels = _nemo_limit_speakers(probs, segments, labels, num_speakers)
+    return _renumber_first_seen(labels), ""
+
+
+def _diarize(wav_path, segments, num_speakers=None, engine="auto"):
+    """講者辨識入口，回傳 (labels, 實際用的方法, 說明)。labels 失敗為 None"""
+    choice, why = _recommended_diarizer(num_speakers, engine)
+    if choice == "nemotron":
+        labels, why = _nemotron_diarize(wav_path, segments, num_speakers)
+        if labels is not None:
+            print(f"[diarize] Nemotron（{_torch_device}）{len(set(labels))} 位講者")
+            return labels, "nemotron", ""
+        print(f"[diarize] 改用現行方法：{why}")
+    if not _HAS_DIARIZE:
+        return None, "legacy", why or "resemblyzer/spectralcluster 未安裝"
+    note = why if (engine == "nemotron" or choice == "nemotron"
+                   or (num_speakers and num_speakers > _NEMO_CHANNELS)) else ""
+    return _diarize_legacy(wav_path, segments, num_speakers=num_speakers), "legacy", note
+
+
+def _diarize_legacy(wav_path, segments, num_speakers=None):
     """用 resemblyzer + spectralcluster 辨識講者。
     segments: list of dict，每個含 start, end, text
     回傳: list of int（講者編號 0-based），失敗回傳 None
@@ -787,7 +1248,13 @@ def health():
         "gpu": _device == "cuda",
         "device": _device,
         "backend": _backend,
-        "diarize": _HAS_DIARIZE,
+        "diarize": _HAS_DIARIZE or _HAS_NEMO,
+        # Qwen3-ASR（實驗）：null＝這台沒裝；ready=false＝載入中或啟動失敗（見 error）
+        "qwen": ({"ready": _qwen_ready(), "model": "qwen3-asr-0.6b", "languages": list(_QWEN_LANG),
+                  "error": _QWEN["error"], "restarts": _QWEN["restarts"]}
+                 if (_QWEN["proc"] is not None or _QWEN["error"]) else None),
+        # 講者辨識可用的方法；auto 時優先 nemotron
+        "diar_engines": [e for e, ok in (("nemotron", _HAS_NEMO), ("legacy", _HAS_DIARIZE)) if ok],
         # 用戶端用這個判斷「能不能自動更新」，不必試了才知道
         "can_update": bool(UPDATE_TOKEN),
         # v2.21.7 起一次一件、其餘排隊；用戶端據此決定要不要問「等候／改用本機」
@@ -1000,6 +1467,9 @@ def _update_worker():
     # 讓「立即換版」那次請求的回應先送出去。兩條線都關著、都是空的，
     # 這段時間進來的請求只會拿到 503，不會有作業被砍到一半。
     time.sleep(1.0)
+    # **先收掉 Qwen worker 再換**：execv 保留同一個 PID，atexit 不會跑、worker 的看門狗也看不出主服務換了，
+    # 不收的話舊 worker 會一直佔著埠號與約 7 GB 顯示記憶體，新服務的 worker 綁不到埠（2026-09-26 審查時發現）
+    _qwen_stop(wait=20)
     # os.execv 直接替換行程映像，保留同一個 PID——systemd 看不出差別
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
@@ -1053,6 +1523,8 @@ def list_models():
         for f in os.listdir(whisper_cache):
             if f.endswith(".pt"):
                 cached.add(f[:-3])
+    if _qwen_ready():
+        cached.update(_QWEN_MODELS)
     return {"models": sorted(cached)}
 
 
@@ -1094,6 +1566,22 @@ async def transcribe(
             pass
         raise
 
+    is_qwen = model in _QWEN_MODELS
+    if is_qwen:
+        err = None
+        if not is_stream:
+            err = (400, "Qwen3-ASR 只支援離線辨識（stream=true）")
+        elif not _qwen_ready():
+            err = (503, f"Qwen3-ASR 尚未就緒（{_QWEN['error'] or ('載入中' if _QWEN['proc'] else '這台沒有安裝')}）")
+        elif language not in _QWEN_LANG:
+            err = (400, f"Qwen3-ASR 不支援 language={language}（支援 {'／'.join(_QWEN_LANG)}）")
+        if err:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return JSONResponse(status_code=err[0], content={"error": err[1]})
+
     lane = _LANES["batch"] if (is_stream or len(content) > _REALTIME_MAX_BYTES) \
         else _LANES["realtime"]
     ticket = lane.enter("transcribe", model, language, client_ip)
@@ -1125,7 +1613,46 @@ async def transcribe(
                     yield _queued_event(lane, ticket)
                     lane.wait(ticket, 2.0)
 
-            if _backend == "faster-whisper":
+            if is_qwen:
+                # Qwen3-ASR：worker 做完整件才回（切窗、辨識、對齊），期間每 2 秒心跳
+                def generate():
+                    import concurrent.futures
+                    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    cancelled = False
+                    try:
+                        yield from _wait_turn()
+                        t0 = time.monotonic()
+                        future = pool.submit(_transcribe_qwen, tmp_path, language)
+                        try:
+                            while not future.done():
+                                yield json.dumps({"type": "heartbeat",
+                                                  "elapsed": round(time.monotonic() - t0, 1)}) + "\n"
+                                concurrent.futures.wait([future], timeout=2)
+                            segments, duration, proc_time = future.result()
+                            for i, seg in enumerate(segments):
+                                yield json.dumps({"type": "segment", "index": i, "start": seg["start"],
+                                                  "end": seg["end"], "text": seg["text"],
+                                                  "duration": round(duration, 1)}, ensure_ascii=False) + "\n"
+                            yield json.dumps({"type": "done", "total_segments": len(segments),
+                                              "duration": round(duration, 1), "processing_time": proc_time,
+                                              "device": "cuda", "engine": "qwen3-asr"}) + "\n"
+                        except GeneratorExit:
+                            cancelled = True
+                            print("[取消] 客戶端中斷連線，等 Qwen3-ASR 這件做完才讓出隊伍...")
+                            pool.shutdown(wait=True)
+                            return
+                        except Exception as e:
+                            print(f"[錯誤] Qwen3-ASR 失敗（{client_ip}）：{e}", flush=True)
+                            yield json.dumps({"type": "error", "detail": str(e)}, ensure_ascii=False) + "\n"
+                    finally:
+                        if not cancelled:
+                            pool.shutdown(wait=False)
+                        lane.leave(ticket)
+                        try:
+                            os.unlink(tmp_path)
+                        except OSError:
+                            pass
+            elif _backend == "faster-whisper":
                 def generate():
                     try:
                         yield from _wait_turn()
@@ -1301,8 +1828,10 @@ async def diarize(
     segments: str = Form(...),
     num_speakers: int = Form(0),
     stream: str = Form("false"),
+    engine: str = Form("auto"),
 ):
     """接收音訊檔 + segments JSON，回傳講者辨識結果。
+    engine：auto（能用 Nemotron 就用）／nemotron／legacy（resemblyzer）。回應的 engine 是實際用的方法
 
     走 batch 線排隊。**回應是「前導空白 + JSON」的串流**：排隊與計算期間每 5 秒
     送一個空白字元保持連線（用戶端的讀取逾時是 300 秒，排在一場長會議後面
@@ -1311,11 +1840,13 @@ async def diarize(
     排隊之後才發生的錯誤改放在 JSON 的 `error` 欄位。"""
     from fastapi.responses import JSONResponse
 
-    if not _HAS_DIARIZE:
+    if not (_HAS_DIARIZE or _HAS_NEMO):
         return JSONResponse(
             status_code=500,
-            content={"error": "resemblyzer/spectralcluster 未安裝，無法執行講者辨識"},
+            content={"error": "沒有可用的講者辨識方法（resemblyzer 與 Nemotron 都不可用）"},
         )
+    if engine not in ("auto", "nemotron", "legacy"):
+        return JSONResponse(status_code=400, content={"error": f"engine 必須是 auto／nemotron／legacy，收到 {engine!r}"})
 
     # 解析 segments JSON
     try:
@@ -1346,7 +1877,7 @@ async def diarize(
         raise
 
     lane = _LANES["batch"]
-    ticket = lane.enter("diarize", "resemblyzer", "", client_ip)
+    ticket = lane.enter("diarize", _recommended_diarizer(num_speakers or None, engine)[0], "", client_ip)
     if ticket is None:   # 更新排定中，這條線已關門
         try:
             os.unlink(tmp.name)
@@ -1386,14 +1917,14 @@ async def diarize(
                 await asyncio.sleep(0.3)
             t0 = time.monotonic()
             work = asyncio.ensure_future(
-                asyncio.to_thread(_diarize, tmp.name, seg_list, num_speakers=ns))
+                asyncio.to_thread(_diarize, tmp.name, seg_list, num_speakers=ns, engine=engine))
             while not work.done():
                 await asyncio.wait({work}, timeout=5)
                 if not work.done():
                     yield (_line({"type": "heartbeat", "elapsed": round(time.monotonic() - t0, 1)})
                            if ndjson else b" ")
             try:
-                speaker_labels = work.result()
+                speaker_labels, used, note = work.result()
             except Exception as e:
                 print(f"[錯誤] diarize 失敗: {e}")
                 err = {"error": f"講者辨識失敗: {e}"}
@@ -1407,6 +1938,8 @@ async def diarize(
                 "num_speakers": len(set(speaker_labels)),
                 "processing_time": round(time.monotonic() - t0, 2),
                 "device": _torch_device,
+                "engine": used,
+                "note": note,
             }
             yield _line({"type": "result", **res}) if ndjson else json.dumps(res).encode()
         finally:
@@ -1431,7 +1964,8 @@ if __name__ == "__main__":
     if args.selftest:
         # 走到這裡代表模組層級的 import 與後端偵測都已經跑完沒有出錯。
         # 再確認幾個實際會被呼叫到的東西存在，避免「import 得起來但端點壞掉」。
-        missing = [n for n in ("health", "status", "admin_update", "_diarize",
+        missing = [n for n in ("health", "status", "admin_update", "_diarize", "_diarize_legacy",
+                               "_nemotron_diarize", "_transcribe_qwen", "_qwen_worker_main",
                                "_update_worker", "_update_pending_info")
                    if n not in globals()]
         if missing:
@@ -1453,4 +1987,7 @@ if __name__ == "__main__":
     print(f"[jt-whisper-server] v{SERVER_VERSION} 啟動 {args.host}:{args.port} "
           f"(backend={_backend}, device={_device}"
           f"{', 可遠端更新' if UPDATE_TOKEN else ''})")
+    import atexit
+    _qwen_start(int(os.environ.get("JT_QWEN_PORT") or args.port + 11))
+    atexit.register(_qwen_stop)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

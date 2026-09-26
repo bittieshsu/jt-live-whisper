@@ -1432,6 +1432,54 @@ def _enforce_nan_model(mode, model_name, quiet=False):
     return model_name
 
 
+# ── Qwen3-ASR（v2.23.0，實驗）──────────────────────────────────
+# 2026-09-25 實測（tools/asr_bench/）：中文 20 場真實會議 CER 28.78% → 15.75%、中英夾雜少數語言召回 2~3 倍、
+# 低音量 21% → 14%、韓文長檔 13.35% → 3.54%；**日文長檔較差**（8.38% vs 6.97%）、台語遠不如 Breeze → 這兩種不開。
+# 目前只在 GPU 伺服器上跑（vLLM worker，見 remote_whisper_server.py）；只支援離線處理。
+QWEN_MODEL = "qwen3-asr-0.6b"
+
+
+def _qwen_server_ready(rw_cfg):
+    """回傳 (能不能用, 原因)：GPU 伺服器 /health 的 qwen.ready"""
+    if not rw_cfg:
+        return False, "沒有設定 GPU 伺服器（Qwen3-ASR 目前只在 GPU 伺服器上跑）"
+    try:
+        url = f"http://{rw_cfg['host']}:{rw_cfg.get('whisper_port', REMOTE_WHISPER_DEFAULT_PORT)}/health"
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=5) as r:
+            q = json.loads(r.read().decode()).get("qwen")
+    except Exception as e:
+        return False, f"GPU 伺服器連不上（{type(e).__name__}）"
+    if not q:
+        return False, "GPU 伺服器沒有安裝 Qwen3-ASR"
+    if not q.get("ready"):
+        return False, f"GPU 伺服器的 Qwen3-ASR 尚未就緒（{q.get('error') or '載入中'}）"
+    return True, ""
+
+
+def _enforce_qwen_model(mode, model_name, rw_cfg=None, quiet=False):
+    """選了 Qwen3-ASR 但這個模式／環境不適用時，改用該模式的推薦模型並說明原因（比照 _enforce_nan_model）。
+    未選 Qwen3-ASR 時原樣回傳"""
+    if model_name != QWEN_MODEL:
+        return model_name
+    if mode in _NAN_INPUT_MODES or _is_nan_mode(mode):
+        why = "台語請用 Breeze-ASR-26（實測 Qwen3-ASR 遠不如它）"
+    elif mode in _BIDI_MODES:
+        why = "雙向模式尚未支援"
+    elif mode not in _ZH_INPUT_MODES + _EN_INPUT_MODES + _KO_INPUT_MODES:
+        # 用明確的清單放行，不靠 _mode_whisper_lang 的預設值（它對純錄音等模式也回 zh，2026-09-26 測試抓到）
+        why = "目前只支援中文、英文、韓文輸入（日文實測長檔較差）"
+    else:
+        ok, why = _qwen_server_ready(rw_cfg)
+        if ok:
+            return model_name
+    # 有 GPU 伺服器就退回伺服器的預設（large-v3-turbo）；沒有才依本機硬體推薦
+    # （2026-09-26 實測：原本一律用本機推薦，有 GPU 伺服器的人被退到 small）
+    fallback = "large-v3-turbo" if rw_cfg else _recommended_whisper_model(mode)
+    if not quiet:
+        print(f"  {C_HIGHLIGHT}[提示] Qwen3-ASR 無法使用：{why}，已改用 {fallback}{RESET}")
+    return fallback
+
+
 def _mode_whisper_lang(mode):
     """依模式決定要傳給 Whisper 的語言代碼"""
     if _is_nan_mode(mode):
@@ -1666,7 +1714,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.22.3"
+APP_VERSION = "2.23.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -5046,7 +5094,8 @@ def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout
 
 
 def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
-                    progress_callback=None, on_upload_done=None, _attempt=0, on_event=None):
+                    progress_callback=None, on_upload_done=None, _attempt=0, on_event=None,
+                    engine=None):
     """POST 音訊 + segments 到伺服器 /v1/audio/diarize
     回傳 (speaker_labels, proc_time) 或失敗回傳 (None, 0)。
     伺服器正在更新（503 updating、或回應被重啟切斷）時等它換完再送，最多 3 次。"""
@@ -5057,7 +5106,7 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         return _remote_diarize(rw_cfg, wav_path, segments, num_speakers=num_speakers,
                                progress_callback=progress_callback,
                                on_upload_done=on_upload_done, _attempt=_attempt + 1,
-                               on_event=on_event)
+                               on_event=on_event, engine=engine)
     host = rw_cfg["host"]
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
     url = f"http://{host}:{port}/v1/audio/diarize"
@@ -5110,6 +5159,13 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         f"--{boundary}\r\n"
         f"Content-Disposition: form-data; name=\"num_speakers\"\r\n\r\n"
         f"{ns_val}\r\n"
+    )
+
+    # engine 欄位：auto／nemotron／legacy。舊版伺服器不認得，會忽略（照舊用 resemblyzer）
+    body_parts.append(
+        f"--{boundary}\r\n"
+        f"Content-Disposition: form-data; name=\"engine\"\r\n\r\n"
+        f"{engine or _diarize_engine}\r\n"
     )
 
     # stream 欄位（v2.21.9 起）：伺服器改回 NDJSON，排隊時送 queued 事件，
@@ -5196,7 +5252,11 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
     proc_time = data.get("processing_time", 0)
     n_spk = data.get("num_speakers", 0)
     device = data.get("device", "unknown")
-    print(f"  {C_DIM}[伺服器 diarize] {n_spk} 位講者, {proc_time}s ({device}){RESET}")
+    used = data.get("engine")                    # 舊版伺服器沒有這個欄位
+    print(f"  {C_DIM}[伺服器 diarize] {n_spk} 位講者, {proc_time}s ({device}"
+          f"{', ' + ('Nemotron' if used == 'nemotron' else '現行方法') if used else ''}){RESET}")
+    if data.get("note"):
+        print(f"  {C_HIGHLIGHT}[伺服器 diarize] {data['note']}{RESET}")
     return speaker_labels, proc_time
 
 
@@ -5612,6 +5672,11 @@ def _input_interactive_menu(args):
                 available_models.append((name, desc))
             if mode_key in _BREEZE_OPTIONAL_MODES:
                 available_models.append((BREEZE_MODEL, "台灣華語／台語混用，較慢（固定本機辨識）"))
+            # Qwen3-ASR（實驗）：選了 GPU 伺服器、伺服器上已就緒（就緒才會出現在模型清單）、
+            # 而且是單向的中／英／韓輸入才列出；其他情況選單裡不出現（不支援的地方不讓人選到）
+            if (use_remote_whisper and remote_cached_models and QWEN_MODEL in remote_cached_models
+                    and mode_key in _ZH_INPUT_MODES + _EN_INPUT_MODES + _KO_INPUT_MODES):
+                available_models.append((QWEN_MODEL, "（實驗）中文會議、中英夾雜明顯更準"))
         # 預設：GPU 伺服器推薦 large-v3-turbo，本機按 CPU 推薦
         if use_remote_whisper:
             recommended = "large-v3-turbo"
@@ -11738,7 +11803,175 @@ def _format_timestamp(seconds):
         return f"{m:02d}:{s:02d}"
 
 
-def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None):
+# ── 講者辨識：NVIDIA Nemotron 3 Diarization ─────────────────────────
+# 2026-09-24~25 實測（tools/diar_bench/）：同一批真實 ASR 段落，段落講者搞錯
+#   中文 AISHELL-4 20 場 18.52% → 3.07%、英文 AMI 16 場 12.31% → 4.65%，人數判對 2/20 → 17/20。
+# CUDA／MPS／CPU 三種跑法結果逐幀一致（Linux GPU、Mac M5、Windows CPU 都驗過）。
+# 需要 transformers 內建的 nemotron3_diarization（5.18 起）；沒有就沿用 resemblyzer，行為與先前完全相同。
+# **這一段在 remote_whisper_server.py 有一份同樣的**（伺服器自動更新只推單一檔案，不能共用模組），
+# tools/test_diarizer.py 會逐一比對兩邊的輸出。
+NEMO_DIAR_MODEL = "nvidia/Nemotron-3-Diarization"
+_NEMO_FRAME = 0.01              # 模型每格 10 毫秒
+_NEMO_CHANNELS = 8              # 最多 8 位講者
+_DIARIZE_ENGINES = ("auto", "nemotron", "legacy")
+_diarize_engine = "auto"        # --diarize-engine
+_NEMO_CACHE = {}
+
+
+def _nemo_platform_ok():
+    """Intel Mac 不支援（使用者 2026-09-25 決定；PyTorch 2.3 起沒有 x86_64 macOS 版本）"""
+    return not (IS_MACOS and not _is_apple_silicon())
+
+
+def _nemo_available():
+    """回傳 (能不能用, 不能用的原因)。只看平台與套件，不載入模型"""
+    if not _nemo_platform_ok():
+        return False, "Intel Mac 不支援 Nemotron"
+    return _nemo_transformers_ok()
+
+
+@lru_cache(maxsize=1)
+def _nemo_transformers_ok():
+    try:
+        import importlib.util
+        if importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None:
+            return False, "未安裝 transformers"
+        from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES
+    except Exception as e:
+        return False, f"transformers 無法載入（{type(e).__name__}）"
+    if "nemotron3_diarization" not in CONFIG_MAPPING_NAMES:
+        return False, "transformers 版本太舊（Nemotron 需要 5.18 以上）"
+    return True, ""
+
+
+def _recommended_diarizer(num_speakers=None, engine="auto"):
+    """決定講者辨識用哪個方法，回傳 (engine, 原因)，engine 為 "nemotron" 或 "legacy"。
+    **所有平台與條件判斷都在這裡**（比照 _recommended_mic_engine），不要散落到呼叫端"""
+    if engine == "legacy":
+        return "legacy", "指定使用現行方法"
+    if num_speakers and num_speakers > _NEMO_CHANNELS:
+        return "legacy", f"指定 {num_speakers} 人，超過 Nemotron 上限 {_NEMO_CHANNELS} 人"
+    ok, why = _nemo_available()
+    if not ok:
+        return "legacy", why
+    return "nemotron", ""
+
+
+def _nemo_span(probs_len, seg):
+    """段落對應的格數範圍 [a, b)，至少一格、不超出音檔"""
+    a = int(seg["start"] / _NEMO_FRAME)
+    b = max(a + 1, int(seg["end"] / _NEMO_FRAME))
+    b = min(b, probs_len)
+    a = min(a, b - 1)
+    return max(a, 0), max(b, 1)
+
+
+def _nemo_segment_labels(probs, segments):
+    """每段的講者＝段落時間內 8 個通道活動機率加總最大的那個（實測時用的就是這個規則）"""
+    import numpy as np
+    out = []
+    for s in segments:
+        a, b = _nemo_span(len(probs), s)
+        out.append(int(np.asarray(probs[a:b], dtype="float32").sum(axis=0).argmax()))
+    return out
+
+
+def _nemo_saturated(segments, labels):
+    """8 個通道都有實質發言（≥1.6 秒的段落）→ 可能超過上限。
+    E5 實測：原本 36 場（≤7 人）0 場觸發；合成的 11 人、15 人都觸發"""
+    used = {l for s, l in zip(segments, labels) if s["end"] - s["start"] >= _DIAR_MIN_CLUSTER_SEC}
+    return len(used) >= _NEMO_CHANNELS
+
+
+def _nemo_limit_speakers(probs, segments, labels, k):
+    """使用者指定 k 人（≤8）：**當上限**，不硬拆成 k 群（實測指定正確人數反而更差）。
+    偵測到的人比 k 多時，保留發言秒數最多的 k 個通道，其餘段落改判給保留通道裡機率加總最大的"""
+    import numpy as np
+    sec = {}
+    for s, l in zip(segments, labels):
+        sec[l] = sec.get(l, 0.0) + (s["end"] - s["start"])
+    if len(sec) <= k:
+        return list(labels)
+    keep = sorted(sec, key=lambda l: (-sec[l], l))[:k]
+    out = []
+    for s, l in zip(segments, labels):
+        if l in keep:
+            out.append(l)
+            continue
+        a, b = _nemo_span(len(probs), s)
+        tot = np.asarray(probs[a:b], dtype="float32").sum(axis=0)
+        out.append(max(keep, key=lambda c: tot[c]))
+    return out
+
+
+def _renumber_first_seen(labels):
+    """依首次出現順序重新編號（與現行方法的輸出一致：第一個開口的是 0）"""
+    m = {}
+    return [m.setdefault(l, len(m)) for l in labels]
+
+
+def _nemo_device():
+    import torch
+    if torch.cuda.is_available():
+        return "cuda"
+    if _is_apple_silicon() and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _nemo_probs(wav_path):
+    """整檔跑一次 Nemotron，回傳 (格數, 8) 的講者活動機率"""
+    import librosa
+    import numpy as np
+    import torch
+    from transformers import AutoModelForAudioFrameClassification, AutoProcessor
+    if "model" not in _NEMO_CACHE:
+        dev = _nemo_device()
+        proc = _call_with_ssl_retry(AutoProcessor.from_pretrained, NEMO_DIAR_MODEL)
+        model = _call_with_ssl_retry(AutoModelForAudioFrameClassification.from_pretrained, NEMO_DIAR_MODEL)
+        _NEMO_CACHE.update(proc=proc, model=model.to(dev).eval(), dev=dev)
+    proc, model, dev = _NEMO_CACHE["proc"], _NEMO_CACHE["model"], _NEMO_CACHE["dev"]
+    wav, _ = librosa.load(wav_path, sr=16000, mono=True)
+    inp = {k: (v.to(dev) if hasattr(v, "to") else v) for k, v in proc(wav, sampling_rate=16000).items()}
+    with torch.inference_mode():
+        lg = model(**inp).logits[0].float().cpu().numpy()
+    return lg if (lg.min() >= 0 and lg.max() <= 1) else 1 / (1 + np.exp(-lg))
+
+
+def _nemotron_diarize(wav_path, segments, num_speakers=None):
+    """回傳 (labels, 原因)。labels 為 None 表示要退回現行方法，原因說明為什麼"""
+    try:
+        probs = _nemo_probs(wav_path)
+    except Exception as e:
+        return None, f"Nemotron 執行失敗（{type(e).__name__}: {e}）"
+    labels = _nemo_segment_labels(probs, segments)
+    if not num_speakers and _nemo_saturated(segments, labels):
+        return None, f"{_NEMO_CHANNELS} 位講者全部用滿，可能超過 Nemotron 上限"
+    if num_speakers:
+        labels = _nemo_limit_speakers(probs, segments, labels, num_speakers)
+    return _renumber_first_seen(labels), ""
+
+
+def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=None):
+    """講者辨識入口：能用 Nemotron 就用，否則（或它退回時）用現行 resemblyzer。
+    回傳 list of int（講者編號 0-based），失敗回傳 None"""
+    engine = engine or _diarize_engine
+    choice, why = _recommended_diarizer(num_speakers, engine)
+    if choice == "nemotron" and segments:
+        if sbar:
+            sbar.set_task("講者辨識（Nemotron）")
+        labels, why = _nemotron_diarize(wav_path, segments, num_speakers)
+        if labels is not None:
+            print(f"  {C_DIM}[講者辨識] Nemotron（{_NEMO_CACHE.get('dev')}）{len(set(labels))} 位講者{RESET}")
+            return labels
+    # 自動模式下「沒裝」不提示（那就是先前的行為）；指定了 Nemotron、或試過才退回的，要講清楚
+    if why and (engine == "nemotron" or choice == "nemotron"
+                or (num_speakers and num_speakers > _NEMO_CHANNELS)):
+        print(f"  {C_HIGHLIGHT}[講者辨識] 改用現行方法：{why}{RESET}")
+    return _diarize_segments_legacy(wav_path, segments, num_speakers=num_speakers, sbar=sbar)
+
+
+def _diarize_segments_legacy(wav_path, segments, num_speakers=None, sbar=None):
     """用 resemblyzer + spectralcluster 辨識講者。
 
     segments: list of dict，每個含 start, end, text
@@ -12139,12 +12372,27 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             sbar.set_progress("等待伺服器回應...")
 
         try:
-            r_segments, r_duration, r_proc_time, r_device = _remote_whisper_transcribe(
-                remote_whisper_cfg, asr_wav_path, model_size, lang,
-                progress_callback=_upload_progress,
-                on_upload_done=_on_upload_done,
-                noisy=use_loose,
-            )
+            try:
+                r_segments, r_duration, r_proc_time, r_device = _remote_whisper_transcribe(
+                    remote_whisper_cfg, asr_wav_path, model_size, lang,
+                    progress_callback=_upload_progress,
+                    on_upload_done=_on_upload_done,
+                    noisy=use_loose,
+                )
+            except _RemoteUpdating:
+                raise
+            except Exception as qe:
+                if model_size != QWEN_MODEL:
+                    raise
+                # Qwen3-ASR 失敗（worker 剛好掛掉、重啟中…）：伺服器本身多半還好，先用伺服器的 Whisper，
+                # 不要直接退到本機 CPU（慢很多）
+                model_size = "large-v3-turbo"
+                print(f"  {C_HIGHLIGHT}[降級] Qwen3-ASR 失敗（{qe}），改用 GPU 伺服器的 {model_size}{RESET}")
+                sbar.set_task("GPU 伺服器 辨識中（large-v3-turbo）", reset_timer=False)
+                r_segments, r_duration, r_proc_time, r_device = _remote_whisper_transcribe(
+                    remote_whisper_cfg, asr_wav_path, model_size, lang,
+                    progress_callback=_upload_progress, noisy=use_loose,
+                )
             raw_segments = r_segments
             used_remote = True
             sbar.set_task(f"伺服器辨識完成（{len(r_segments)} 段，{r_proc_time:.1f}s，{r_device}）", reset_timer=False)
@@ -12158,6 +12406,9 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             remote_whisper_cfg = None  # fallback
 
     if not used_remote:
+        if model_size == QWEN_MODEL:              # 本機還沒有 Qwen3-ASR：伺服器失敗時改用推薦模型
+            model_size = _recommended_whisper_model(mode)
+            print(f"  {C_HIGHLIGHT}[降級] Qwen3-ASR 目前只在 GPU 伺服器上跑，本機改用 {model_size}{RESET}")
         # 本機 faster-whisper
         try:
             from faster_whisper import WhisperModel
@@ -14689,6 +14940,7 @@ def parse_args():
         (f"{_sc} --input meeting.mp3 --diarize --mode zh", "中文逐字稿 + 講者辨識"),
         (f"{_sc} --input meeting.mp3 --mode zh --summarize", "中文逐字稿 + 摘要修正"),
         (f"{_sc} --input meeting.mp3 --diarize --num-speakers 3", "指定 3 位講者"),
+        (f"{_sc} --input meeting.mp3 --mode zh -m {QWEN_MODEL}", "中文會議用 Qwen3-ASR（實驗，需 GPU 伺服器）"),
         (f"{_sc} --input meeting.mp3 --diarize --summarize", "辨識 + 翻譯 + 摘要"),
         (f"{_sc} --input m.mp3 --diarize --mode zh --summarize", "中文辨識 + 講者 + 摘要"),
         (f"{_sc} --input meeting.mp3 --local-asr", "強制本機 辨識"),
@@ -14702,7 +14954,7 @@ def parse_args():
         epilog=epilog,
     )
     mode_names = list(MODE_MAP.keys())
-    model_names = [name for name, _, _ in WHISPER_MODELS] + [BREEZE_MODEL]
+    model_names = [name for name, _, _ in WHISPER_MODELS] + [BREEZE_MODEL, QWEN_MODEL]
     scene_names = list(SCENE_MAP.keys())
     moonshine_model_names = [name for name, _, _ in MOONSHINE_MODELS]
     parser.add_argument(
@@ -14714,7 +14966,8 @@ def parse_args():
     parser.add_argument(
         "-m", "--model", choices=model_names, metavar="MODEL",
         help=f"語音辨識模型 ({' / '.join(model_names)}，--input 預設 large-v3-turbo，中日文品質最好用 -m large-v3；"
-             f"{BREEZE_MODEL} 限台語與華語模式，台灣華語夾雜台語時可選用)")
+             f"{BREEZE_MODEL} 限台語與華語模式，台灣華語夾雜台語時可選用；"
+             f"{QWEN_MODEL}（實驗）限離線中／英／韓，需 GPU 伺服器)")
     parser.add_argument(
         "--moonshine-model", choices=moonshine_model_names, metavar="MMODEL",
         help=f"Moonshine 模型 ({' / '.join(moonshine_model_names)}，預設 medium)")
@@ -14772,6 +15025,9 @@ def parse_args():
     parser.add_argument(
         "--num-speakers", type=int, metavar="N",
         help="指定講者人數（預設自動偵測 2~8，需搭配 --diarize）")
+    parser.add_argument(
+        "--diarize-engine", choices=_DIARIZE_ENGINES, default="auto",
+        help="講者辨識方法：auto（能用 Nemotron 就用，預設）、nemotron、legacy（resemblyzer）")
     parser.add_argument(
         "--mic", action="store_true",
         help="同時轉錄麥克風語音（ASR 負載加倍，改用 faster-whisper/mlx-whisper 雙路辨識）")
@@ -14965,7 +15221,12 @@ def _confirm_start(cli_cmd):
 
 
 def main():
+    global _diarize_engine
     args = parse_args()
+    _diarize_engine = args.diarize_engine
+    if args.model == QWEN_MODEL and not args.input:
+        print(f"{C_HIGHLIGHT}[提示] Qwen3-ASR 只支援離線處理（--input），即時模式改用推薦模型{RESET}")
+        args.model = None
 
     # macOS ScreenCaptureKit：權限授權 / 來源指定
     if getattr(args, "sck_permission", False):
@@ -15098,6 +15359,7 @@ def main():
              server_type, use_remote_whisper, meeting_topic,
              summary_mode, engine) = _input_interactive_menu(args)
             fw_model = _enforce_nan_model(mode, fw_model)
+            fw_model = _enforce_qwen_model(mode, fw_model, REMOTE_WHISPER_CONFIG if use_remote_whisper else None)
             if engine == "llm" and not server_type:
                 server_type = "ollama"
             # 雙向模式：確認已選檔案是否為配對，若否則重新選擇
@@ -15160,6 +15422,7 @@ def main():
             else:
                 _default_fw = "large-v3" if (mode in _NOENG_MODELS and (REMOTE_WHISPER_CONFIG or _has_local_gpu())) else "large-v3-turbo"
             fw_model = _enforce_nan_model(mode, args.model or _default_fw)
+            fw_model = _enforce_qwen_model(mode, fw_model, None if args.local_asr else REMOTE_WHISPER_CONFIG)
             host, port = _resolve_ollama_host(args)
             server_type = None  # CLI 模式稍後偵測
             need_translate_cli = mode in _TRANSLATE_MODES

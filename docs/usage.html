@@ -197,7 +197,9 @@ cd C:\jt-live-whisper
 <span class="c"># 講者辨識</span>
 ./start.sh --input meeting.mp3 --diarize
 <span class="c"># 指定講者人數（填「發言量足以辨認的人數」，不確定就不要填）</span>
-./start.sh --input meeting.mp3 --diarize --num-speakers 3 --summarize</pre>
+./start.sh --input meeting.mp3 --diarize --num-speakers 3 --summarize
+<span class="c"># 中文會議用 Qwen3-ASR（實驗，需 GPU 伺服器已安裝）</span>
+./start.sh --input meeting.mp3 --mode zh -m qwen3-asr-0.6b --diarize</pre>
     <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh"><b>不確定就不要填 <code>--num-speakers</code></b>。實測 7 人會議填「7」反而最差（講者搞錯 30.15%），不填是 22.90%——發言太短的人聲紋不足以成群，硬湊一群給他會把主要講者拆散。</span><span class="en"><b>When unsure, omit <code>--num-speakers</code>.</b> On a real 7-speaker meeting, passing "7" was the worst result (30.15% speaker confusion) versus 22.90% when omitted — people who barely speak can't form a reliable voiceprint, and forcing a cluster for them fragments the main speakers.</span></p>
 
     <div class="cmd-label"><span class="zh">批次摘要</span><span class="en">Batch summary</span></div>
@@ -266,14 +268,14 @@ journalctl -u jt-live-whisper-webui -f
         <div class="tbl-wrap"><table>
           <thead><tr><th>#</th><th><span class="zh">項目</span><span class="en">Step</span></th><th><span class="zh">說明</span><span class="en">Notes</span></th></tr></thead>
           <tbody>
-            <tr><td>1</td><td><span class="zh">功能模式</span><span class="en">Mode</span></td><td><span class="zh">9 種（不含純錄音）</span><span class="en">9 modes (no record-only)</span></td></tr>
+            <tr><td>1</td><td><span class="zh">功能模式</span><span class="en">Mode</span></td><td><span class="zh">15 種（不含純錄音）</span><span class="en">15 modes (no record-only)</span></td></tr>
             <tr><td>2</td><td><span class="zh">辨識位置</span><span class="en">Location</span></td><td><span class="zh">GPU 伺服器快 5–10 倍</span><span class="en">GPU server 5–10× faster</span></td></tr>
-            <tr><td>3</td><td><span class="zh">辨識模型</span><span class="en">Model</span></td><td><span class="zh">伺服器模式顯示快取標籤</span><span class="en">Cache tags in server mode</span></td></tr>
+            <tr><td>3</td><td><span class="zh">辨識模型</span><span class="en">Model</span></td><td><span class="zh">伺服器模式顯示快取標籤；GPU 伺服器已裝 Qwen3-ASR 且是中英韓單向模式時多一個 qwen3-asr-0.6b（實驗）</span><span class="en">Cache tags in server mode; adds qwen3-asr-0.6b (experimental) when the GPU server has it and the mode is Chinese/English/Korean one-way</span></td></tr>
             <tr><td>4</td><td><span class="zh">LLM 伺服器</span><span class="en">LLM server</span></td><td><span class="zh">翻譯模式才詢問，自動偵測類型</span><span class="en">Translate modes; auto-detect</span></td></tr>
             <tr><td>5</td><td><span class="zh">翻譯模型</span><span class="en">Translate model</span></td><td><span class="zh">伺服器模型 + 本機離線選項</span><span class="en">Server models + offline</span></td></tr>
             <tr><td>6</td><td><span class="zh">講者辨識</span><span class="en">Diarization</span></td><td><span class="zh">不辨識 / 自動 / 指定 2–20 人</span><span class="en">None / auto / 2–20 speakers</span></td></tr>
             <tr><td>7</td><td><span class="zh">摘要與校正</span><span class="en">Summary</span></td><td><span class="zh">摘要+校正 / 只摘要 / 只逐字稿</span><span class="en">Summary+correct / summary / transcript</span></td></tr>
-            <tr><td>8</td><td><span class="zh">摘要模型</span><span class="en">Summary model</span></td><td><span class="zh">推薦 120B 以上</span><span class="en">≥120B recommended</span></td></tr>
+            <tr><td>8</td><td><span class="zh">摘要模型</span><span class="en">Summary model</span></td><td><span class="zh">建議 27B 以上（預設 qwen3.8:27b）</span><span class="en">27B+ recommended (default qwen3.8:27b)</span></td></tr>
             <tr><td>9</td><td><span class="zh">會議主題</span><span class="en">Topic</span></td><td><span class="zh">選填，提升翻譯與摘要品質</span><span class="en">Optional</span></td></tr>
             <tr><td>10</td><td><span class="zh">確認啟動</span><span class="en">Confirm</span></td><td><span class="zh">顯示等效 CLI 與設定總覽</span><span class="en">Shows CLI &amp; summary</span></td></tr>
           </tbody>
@@ -292,7 +294,7 @@ journalctl -u jt-live-whisper-webui -f
         <tr><td><code>--webui</code></td><td><span class="zh">啟動 WebUI 瀏覽器介面</span><span class="en">Launch the Web UI</span></td><td></td></tr>
         <tr><td><code>--mode MODE</code></td><td><span class="zh">功能模式（en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record）</span><span class="en">Mode (en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record)</span></td><td><code>en2zh</code></td></tr>
         <tr><td><code>--asr ASR</code></td><td><span class="zh">辨識引擎（whisper / moonshine / faster-whisper）</span><span class="en">ASR engine</span></td><td><code>whisper</code></td></tr>
-        <tr><td><code>-m, --model</code></td><td><span class="zh">Whisper 模型（base.en … large-v3-turbo / large-v3）</span><span class="en">Whisper model</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
+        <tr><td><code>-m, --model</code></td><td><span class="zh">辨識模型（base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b）；qwen3-asr-0.6b 為實驗選項，限離線、中英韓單向、需 GPU 伺服器已安裝，不符合時說明原因並改用推薦模型</span><span class="en">Recognition model (base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b); qwen3-asr-0.6b is experimental: offline only, Chinese/English/Korean one-way, needs it installed on the GPU server — otherwise the reason is shown and the recommended model is used</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
         <tr><td><code>--moonshine-model</code></td><td><span class="zh">Moonshine 模型（medium / small / tiny）</span><span class="en">Moonshine model</span></td><td><code>medium</code></td></tr>
         <tr><td><code>-s, --scene</code></td><td><span class="zh">使用場景（meeting / training / presentation / subtitle）</span><span class="en">Scene</span></td><td><code>training</code></td></tr>
         <tr><td><code>-e, --engine</code></td><td><span class="zh">翻譯引擎（llm / nllb / argos）</span><span class="en">Translation engine</span></td><td><code>llm</code></td></tr>
@@ -303,9 +305,10 @@ journalctl -u jt-live-whisper-webui -f
         <tr><td><code>--list-devices</code></td><td><span class="zh">列出可用音訊裝置後離開</span><span class="en">List audio devices and exit</span></td><td></td></tr>
         <tr><td><code>--input FILE […]</code></td><td><span class="zh">離線處理音訊檔</span><span class="en">Offline-process audio files</span></td><td></td></tr>
         <tr><td><code>--diarize</code></td><td><span class="zh">啟用講者辨識（需 --input）</span><span class="en">Enable diarization (needs --input)</span></td><td></td></tr>
-        <tr><td><code>--num-speakers N</code></td><td><span class="zh">指定講者人數（需 --diarize）</span><span class="en">Speaker count (needs --diarize)</span></td><td><span class="zh">自動</span><span class="en">auto</span></td></tr>
+        <tr><td><code>--num-speakers N</code></td><td><span class="zh">指定講者人數（需 --diarize）；不確定時不要填，實測指定不會比自動偵測準</span><span class="en">Speaker count (needs --diarize); leave it empty if unsure — measured no better than auto</span></td><td><span class="zh">自動</span><span class="en">auto</span></td></tr>
+        <tr><td><code>--diarize-engine</code></td><td><span class="zh">講者辨識方法 auto / nemotron / legacy（Nemotron 需 transformers 5.18 以上才會啟用，目前一律用現行方法）</span><span class="en">Diarization method auto / nemotron / legacy (Nemotron activates with transformers 5.18+, not yet released; the current method is used until then)</span></td><td><code>auto</code></td></tr>
         <tr><td><code>--summarize [FILE …]</code></td><td><span class="zh">生成 AI 摘要</span><span class="en">Generate AI summary</span></td><td></td></tr>
-        <tr><td><code>--summary-model</code></td><td><span class="zh">摘要用 LLM 模型</span><span class="en">Summary LLM model</span></td><td><code>gpt-oss:120b</code></td></tr>
+        <tr><td><code>--summary-model</code></td><td><span class="zh">摘要用 LLM 模型</span><span class="en">Summary LLM model</span></td><td><code>qwen3.8:27b</code></td></tr>
         <tr><td><code>--mic</code></td><td><span class="zh">同時轉錄麥克風（即時模式）</span><span class="en">Also transcribe mic (live)</span></td><td></td></tr>
         <tr><td><code>--record</code></td><td><span class="zh">即時模式同時錄製音訊</span><span class="en">Record audio in live mode</span></td><td></td></tr>
         <tr><td><code>--rec-device ID</code></td><td><span class="zh">錄音裝置 ID</span><span class="en">Recording device ID</span></td><td></td></tr>
@@ -408,6 +411,32 @@ webui.py (FastAPI + WebSocket)
         <p><span class="zh"><strong>這些檢查分兩類。</strong>只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它擋得住<strong>壞掉的</strong>更新、擋不住<strong>惡意的</strong>更新——<strong>密鑰是唯一的安全邊界。</strong></span><span class="en"><strong>Two different kinds of check.</strong> Only the <strong>signature</strong> governs <em>who</em> may update; the rest govern <em>whether the update breaks the service</em>. <code>--selftest</code> runs the uploaded code, so it stops <strong>broken</strong> updates, not <strong>malicious</strong> ones — <strong>the key is the only security boundary.</strong></span></p>
         <p><span class="zh"><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害），無法偽造新的 payload。<br><strong>為什麼不接受降版</strong>：多個用戶端共用同一台伺服器時，若只比對「版本不同」，新舊用戶端會無限來回互相覆蓋，每次重啟都中斷別人的辨識。<br><strong>為什麼要先啟動一次</strong>：服務沒有 systemd 之類的看門狗，換上去起不來就直接消失、不會自動復原。</span><span class="en"><strong>Why sign instead of sending the key</strong>: this is plain HTTP — sending the key hands a reusable credential to anyone sniffing the LAN. With HMAC a sniffer can only replay the same payload (harmless), never forge a new one.<br><strong>Why downgrades are refused</strong>: with several clients sharing one server, matching on "different version" alone makes old and new clients overwrite each other forever, each restart killing someone's job.<br><strong>Why it must boot once first</strong>: there is no systemd-style watchdog — a build that won't start simply disappears.</span></p>
       </div>
+
+      <div class="feat-block" id="qwen">
+        <h3><span class="zh">GPU 伺服器的 Qwen3-ASR（實驗，v2.23.0 起）</span><span class="en">Qwen3-ASR on the GPU server (experimental, v2.23.0+)</span></h3>
+        <p><span class="zh">離線處理錄音檔時可選用的另一個辨識模型。與現行 large-v3-turbo 同條件實測：中文真實會議 20 場字錯率 <strong>28.78% → 15.75%</strong>；中英夾雜時少數語言找回比例提高 2~3 倍（中文為主的會議，英文詞 34.7% → 74.9%）；低音量 20.67% → 14.33%；韓文長檔 13.35% → 3.54%。日文長檔較差（6.97% → 8.38%）。</span><span class="en">An alternative recognition model for offline files. Measured against large-v3-turbo under identical conditions: 20 real Chinese meetings CER <strong>28.78% → 15.75%</strong>; 2–3× better recall of the minority language in Chinese–English code-switching (English words 34.7% → 74.9%); low volume 20.67% → 14.33%; Korean long-form 13.35% → 3.54%. Japanese long-form is worse (6.97% → 8.38%).</span></p>
+        <p style="margin-top:12px"><span class="zh"><strong>以下條件都符合才能用</strong>（不符合時選單與 WebUI 選不到；命令列指定會說明原因並改用推薦模型）：</span><span class="en"><strong>Available only when all of these hold</strong> (otherwise menus and the WebUI won't offer it; on the CLI the reason is shown and the recommended model is used):</span></p>
+        <ul>
+          <li><span class="zh">處理錄音檔（<code>--input</code> 或 WebUI 選檔案）——即時字幕不提供，WebUI 標「僅限錄音檔」</span><span class="en">Processing a file (<code>--input</code> or a file in the WebUI) — not for live captions; WebUI shows "file only"</span></li>
+          <li><span class="zh">辨識位置是 GPU 伺服器，且伺服器已安裝、已載入完成（啟動後約 1~3 分鐘）</span><span class="en">Recognition on the GPU server, installed and loaded (1–3 min after start)</span></li>
+          <li><span class="zh">中文、英文、韓文的單向模式——日文、台語、雙向不提供（台語請用 Breeze-ASR-26）</span><span class="en">Chinese / English / Korean one-way modes — not Japanese, Taiwanese Hokkien or two-way (use Breeze-ASR-26 for Hokkien)</span></li>
+        </ul>
+        <div class="cmd-label" style="margin-top:14px"><span class="zh">安裝（在 GPU 伺服器上，用執行辨識服務的帳號）</span><span class="en">Install (on the GPU server, as the service account)</span></div>
+<pre>cd ~/jt-whisper-server
+python3 -m venv venv-qwen
+venv-qwen/bin/pip install --upgrade pip
+venv-qwen/bin/pip install "qwen-asr[vllm]==0.0.6"
+venv-qwen/bin/pip install --force-reinstall torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+venv-qwen/bin/pip install "numpy&lt;2.3"
+systemctl restart jt-whisper-server@8978
+curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {"ready": true, ...}</span></pre>
+        <ul>
+          <li><span class="zh"><strong>資源</strong>：常駐約 7 GB 顯示記憶體（辨識 5.2 GB＋時間對齊 1.9 GB），磁碟約 14 GB（獨立環境 9.5 GB＋模型約 4 GB），建議 16 GB 以上的顯示卡</span><span class="en"><strong>Resources</strong>: ~7 GB VRAM resident (5.2 GB recognition + 1.9 GB alignment), ~14 GB disk (9.5 GB venv + ~4 GB models); 16 GB+ GPU recommended</span></li>
+          <li><span class="zh"><strong>為什麼要獨立環境</strong>：它需要的 PyTorch 版本與辨識服務不同，裝在一起會互相衝突；服務會自動帶起一個只聽本機的子行程，服務停止時一起結束</span><span class="en"><strong>Why a separate venv</strong>: it needs a different PyTorch version from the service; the service starts a localhost-only child process and stops it with the service</span></li>
+          <li><span class="zh"><strong>出錯時</strong>：處理途中失敗會自動改用 GPU 伺服器的 large-v3-turbo 重跑；伺服器上的 Qwen3-ASR 會自動重啟（一小時內最多 3 次）。狀態看 <code>/health</code> 的 <code>qwen</code> 欄位，記錄在 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code></span><span class="en"><strong>On errors</strong>: a failure mid-file reruns it with the GPU server's large-v3-turbo; Qwen3-ASR restarts itself (max 3 times per hour). Status: the <code>qwen</code> field of <code>/health</code>; log at <code>/tmp/jt-qwen-worker-&lt;port&gt;.log</code></span></li>
+          <li><span class="zh"><strong>移除</strong>：刪掉 <code>venv-qwen</code> 後重啟服務</span><span class="en"><strong>Remove</strong>: delete <code>venv-qwen</code> and restart the service</span></li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
@@ -459,6 +488,7 @@ webui.py (FastAPI + WebSocket)
         <tr><td>NVIDIA DGX Spark</td><td>128 GB</td><td>~10 <span class="zh">秒</span><span class="en">s</span></td><td><span class="zh">同時跑 Ollama LLM + Whisper，一機搞定</span><span class="en">Ollama LLM + Whisper on one box</span></td></tr>
       </tbody>
     </table></div>
+    <p class="note" style="margin-top:10px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「GPU 伺服器的 Qwen3-ASR」）。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR on the GPU server" above).</span></p>
 
     <div class="cmd-label" style="margin-top:18px"><span class="zh">LLM 伺服器（選配，翻譯 / 摘要）</span><span class="en">LLM server (optional)</span></div>
     <div class="tbl-wrap"><table>

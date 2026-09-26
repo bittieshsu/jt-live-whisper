@@ -1,4 +1,4 @@
-# jt-live-whisper v2.22.3
+# jt-live-whisper v2.23.0
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -51,11 +51,13 @@ Author: Jason Cheng (Jason Tools)
 | 語音辨識 (ASR) | **Whisper** (OpenAI) | **多語（中日韓英）** 主力辨識模型；base / small / large-v3-turbo / large-v3 可選 |
 | 語音辨識 (ASR) | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，直接輸出漢字 |
 | 語音辨識 (ASR) | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（不支援 Intel Mac） |
+| 語音辨識 (ASR) | **Qwen3-ASR 0.6B** (Alibaba Qwen) | **實驗選項（v2.23.0）**：離線處理錄音檔時選用，中文會議與中英夾雜明顯更準（中文真實會議 20 場字錯率 28.78% → 15.75%）；目前只在 GPU 伺服器執行、限中文／英文／韓文 |
 | 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯，透過地端 Ollama 或其他 LLM 伺服器執行；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
 | 摘要 / 逐字稿校正 (LLM) | 自架 LLM 伺服器，預設 **qwen3.8:27b** | 會議摘要與逐字稿校正（兩者共用同一個模型）；建議 27B 以上，可與翻譯用不同模型 |
 | 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯模型，支援中日韓英互譯（`en2zh`/`zh2en`/`ja2zh`/`zh2ja`/`ko2zh`/`zh2ko`） |
 | 翻譯 (離線備援) | **Argos Translate** | 完全離線的輕量翻譯模型，僅支援英翻中 |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + Google 頻譜分群演算法，可在本機或 GPU 伺服器執行 |
+| 講者辨識 | **Nemotron 3 Diarization** (NVIDIA) | v2.23.0 起程式已支援，需 transformers 5.18 以上才會啟用（尚未推出）；啟用前沿用上一列的方法 |
 
 所有模型皆在自有設備上推論（本機或區域網路內的 GPU 伺服器），**不需要任何第三方雲端 API**。
 
@@ -67,6 +69,7 @@ Author: Jason Cheng (Jason Tools)
 | **faster-whisper** (CTranslate2) | Windows / Linux 即時辨識、全平台離線處理、GPU 伺服器 | Whisper 全系列、Breeze-ASR-26 |
 | **mlx-whisper** | Apple Silicon GPU 加速（即時與台語離線） | Whisper 全系列、Breeze-ASR-26 |
 | **Moonshine** | 英文超低延遲串流 | Moonshine medium / small / tiny |
+| **vLLM** | GPU 伺服器的離線辨識（實驗） | Qwen3-ASR 0.6B |
 
 
 
@@ -117,6 +120,10 @@ Author: Jason Cheng (Jason Tools)
 
 ### 2. 離線音訊檔批次處理
 支援 mp3 / wav / m4a / flac 等格式，使用 faster-whisper AI 模型進行離線轉錄翻譯，適合會後補做逐字稿。
+
+> **v2.23.0 新增實驗選項 Qwen3-ASR**：GPU 伺服器裝好後，離線處理中文／英文／韓文錄音時可選 `qwen3-asr-0.6b`。
+> 中文真實會議字錯率 28.78% → 15.75%，中英夾雜時少數語言找回 2~3 倍。日文、台語、雙向、即時字幕不提供
+> （不適用時選單裡看不到，命令列指定會說明原因並改用推薦模型）。安裝方式見 SOP「GPU 伺服器的 Qwen3-ASR」。
 
 ![離線處理選單：模式與模型選擇](images/offline-menu-1.png)
 
@@ -555,6 +562,9 @@ cd C:\jt-live-whisper
 
 # 指定講者人數 + 摘要
 ./start.sh --input meeting.mp3 --diarize --num-speakers 3 --summarize
+
+# 中文會議用 Qwen3-ASR（實驗，需 GPU 伺服器已安裝）
+./start.sh --input meeting.mp3 --mode zh -m qwen3-asr-0.6b --diarize
 ```
 
 **產出檔案**（存於 `logs/<session>/`）：
@@ -596,7 +606,7 @@ cd C:\jt-live-whisper
 | 3 | 麥克風轉錄 | 是 / 否 | 轉錄模式（en/zh/ja）詢問是否同時轉錄麥克風 |
 | 4 | 辨識位置 | GPU 伺服器 / 本機 | 有設定 GPU 伺服器時才顯示 |
 | 5 | ASR 引擎 | Whisper / Moonshine | 英文模式可選 Moonshine（超低延遲），其他語言固定 Whisper |
-| 6 | 辨識模型 | large-v3-turbo / large-v3 / medium 等 | 依裝置效能自動推薦適合的模型大小 |
+| 6 | 辨識模型 | large-v3-turbo / large-v3 / small / base 等 | 依裝置效能自動推薦適合的模型大小 |
 | 7 | 翻譯引擎 | LLM 伺服器 / NLLB 離線 / Argos 離線 | 翻譯模式才顯示，自動偵測可用的 LLM 伺服器 |
 | 8 | 翻譯模型 | 伺服器上的模型清單 | 動態查詢 LLM 伺服器上已安裝的模型 |
 | 9 | 會議主題 | 自由輸入 | 選填，提升 LLM 翻譯專業術語的準確度 |
@@ -610,12 +620,12 @@ cd C:\jt-live-whisper
 |------|----------|------|------|
 | 1 | 功能模式 | 英文轉錄+中文翻譯 / 中文轉錄+英文翻譯 / 日文轉錄+中文翻譯 / 中文轉錄+日文翻譯 / 韓文轉錄+中文翻譯 / 中文轉錄+韓文翻譯 / 英中雙向 / 日中雙向 / 韓中雙向 / 台語轉錄 / 台翻英 / 純轉錄 | 15 種模式（不含純錄音） |
 | 2 | 辨識位置 | GPU 伺服器 / 本機 | GPU 伺服器辨識速度快 5-10 倍 |
-| 3 | 辨識模型 | large-v3-turbo / large-v3 / medium 等 | 依辨識位置推薦模型，伺服器模式顯示快取標籤 |
+| 3 | 辨識模型 | large-v3-turbo / large-v3 / small / base / breeze-asr-26 / qwen3-asr-0.6b（實驗） | 依辨識位置推薦模型，伺服器模式顯示快取標籤；qwen3-asr-0.6b 只在選 GPU 伺服器、伺服器已裝好、中英韓單向模式時出現 |
 | 4 | LLM 伺服器 | host:port | 翻譯模式才詢問，自動偵測伺服器類型 |
 | 5 | 翻譯模型 | 伺服器模型 / NLLB 離線 / Argos 離線 | 動態列出伺服器模型 + 本機離線選項 |
 | 6 | 講者辨識 | 不辨識 / 自動偵測 / 指定人數 | 自動偵測或手動指定 2~20 位講者 |
 | 7 | 摘要與校正 | 摘要+校正逐字稿 / 只摘要 / 只逐字稿 | 需 LLM 伺服器，無 LLM 時僅產出逐字稿 |
-| 8 | 摘要模型 | 伺服器模型清單 | 選了摘要才顯示，推薦 120B 以上 |
+| 8 | 摘要模型 | 伺服器模型清單 | 選了摘要才顯示，建議 27B 以上（預設 qwen3.8:27b） |
 | 9 | 會議主題 | 自由輸入 | 選填，提升翻譯與摘要品質 |
 | 10 | 確認啟動 | Y / n | 顯示等效 CLI 指令與設定總覽 |
 
@@ -636,7 +646,7 @@ cd C:\jt-live-whisper
 | `--webui` | 啟動 WebUI 瀏覽器介面 | |
 | `--mode MODE` | 功能模式 (`en2zh` / `zh2en` / `ja2zh` / `zh2ja` / `ko2zh` / `zh2ko` / `en_zh` / `ja_zh` / `ko_zh` / `en` / `zh` / `ja` / `ko` / `nan` / `nan2en` / `record`) | `en2zh` |
 | `--asr ASR` | 語音辨識引擎 (`whisper` / `moonshine` / `faster-whisper`) | `whisper` |
-| `-m`, `--model MODEL` | Whisper 模型 (`base.en` / `small.en` / `small` / `medium.en` / `medium` / `large-v3-turbo` / `large-v3`) | 依裝置推薦 |
+| `-m`, `--model MODEL` | 辨識模型 (`base.en` / `base` / `small.en` / `small` / `large-v3-turbo` / `large-v3` / `breeze-asr-26` / `qwen3-asr-0.6b`)；`qwen3-asr-0.6b` 為實驗選項，限離線、中英韓單向、需 GPU 伺服器已安裝 | 依裝置推薦 |
 | `--moonshine-model MODEL` | Moonshine 模型 (`medium` / `small` / `tiny`) | `medium` |
 | `-s`, `--scene SCENE` | 使用場景 (`meeting` / `training` / `presentation` / `subtitle`) | `training` |
 | `-e`, `--engine ENGINE` | 翻譯引擎 (`llm` / `nllb` / `argos`) | `llm` |
@@ -647,7 +657,8 @@ cd C:\jt-live-whisper
 | `--list-devices` | 列出可用音訊裝置後離開 | |
 | `--input FILE [...]` | 離線處理音訊檔 | |
 | `--diarize` | 啟用講者辨識（需搭配 `--input`） | |
-| `--num-speakers N` | 指定講者人數（需搭配 `--diarize`） | 自動偵測 |
+| `--num-speakers N` | 指定講者人數（需搭配 `--diarize`）；不確定時不要填，實測指定人數不會比自動偵測準 | 自動偵測 |
+| `--diarize-engine ENGINE` | 講者辨識方法 `auto` / `nemotron` / `legacy`（Nemotron 需 transformers 5.18 以上才會啟用，目前一律用現行方法） | `auto` |
 | `--summarize [FILE ...]` | 生成 AI 摘要（與 `--input` 合用時不需指定檔案） | |
 | `--summary-model MODEL` | 摘要用 LLM 模型 | `qwen3.8:27b` |
 | `--mic` | 同時轉錄麥克風語音（即時模式） | |
@@ -856,6 +867,8 @@ WebUI 瀏覽器介面（./start.sh --webui）：
 | RTX 4060 以上 | 8 GB+ | ~20-30 秒 | 消費級入門 |
 | RTX 4090 | 24 GB | ~10-15 秒 | 消費級旗艦 |
 | NVIDIA DGX Spark | 128 GB | ~10 秒 | 同時跑 Ollama LLM + Whisper 辨識，一機搞定 |
+
+> 要啟用 Qwen3-ASR（實驗）時需再多約 7 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡。
 
 ### LLM 伺服器（選配，翻譯/摘要用）
 
