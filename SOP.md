@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.22.3 (by Jason Cheng)
+即時英翻中字幕系統 v2.23.0 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [使用流程總結](#五使用流程總結) · [常見問題](#六常見問題) · [檔案說明](#七檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -100,7 +100,9 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 | 語音辨識 | **Whisper** (OpenAI) | **多語（中日韓英）** 主力辨識模型；base / small / large-v3-turbo / large-v3 可選 |
 | 語音辨識 | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，結果直接輸出漢字，不需另外翻譯 |
 | 語音辨識 | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（不支援 Intel Mac） |
+| 語音辨識 | **Qwen3-ASR 0.6B** (Alibaba Qwen) | **實驗選項（v2.23.0 起）**：離線處理錄音檔時選用，中文會議與中英夾雜明顯更準；目前只在 GPU 伺服器執行、限中文／英文／韓文輸入，見「GPU 伺服器的 Qwen3-ASR」 |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + 頻譜分群，可在本機或 GPU 伺服器執行 |
+| 講者辨識 | **Nemotron 3 Diarization** (NVIDIA) | v2.23.0 起程式已支援，**需 transformers 5.18 以上才會啟用**（尚未推出）；啟用前一律使用上一列的方法，行為不變 |
 | 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯（本機或區域網路 LLM 伺服器）；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
 | 摘要 / 逐字稿校正 (LLM) | 自架 LLM 伺服器，預設 **qwen3.8:27b** | 會議摘要與逐字稿校正（兩者共用同一個模型）；建議 27B 以上，可與翻譯用不同模型 |
 | 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯，支援中日韓英互譯，僅限本機 |
@@ -114,6 +116,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 | **faster-whisper** (CTranslate2) | Windows / Linux 即時辨識、全平台離線處理、GPU 伺服器 | Whisper 全系列、Breeze-ASR-26 |
 | **mlx-whisper** | Apple Silicon GPU 加速（即時與台語離線） | Whisper 全系列、Breeze-ASR-26 |
 | **Moonshine** | 英文超低延遲串流（延遲 ~300ms，僅限本機） | Moonshine medium / small / tiny |
+| **vLLM** | GPU 伺服器的離線辨識（獨立環境的子行程，實驗） | Qwen3-ASR 0.6B |
 
 你仍然可以正常從喇叭或耳機聽到聲音。macOS 13 以上使用系統內建的 ScreenCaptureKit 複製一份音訊給辨識程式（只需授權一次「螢幕錄製」，不必安裝驅動）；macOS 12 以下改用 BlackHole 虛擬音訊裝置；Windows 的 WASAPI Loopback 則直接擷取系統播放的音訊，同樣不需要安裝額外驅動；Linux 從 PipeWire / PulseAudio 的 monitor 來源擷取，也不需要虛擬音效卡。
 
@@ -551,6 +554,43 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 
 非 root 帳號或沒有 systemd 的伺服器不會建立服務，沿用原本「用戶端需要時再以 SSH 啟動」的方式，主機重開後要重新啟動服務。
 
+### GPU 伺服器的 Qwen3-ASR（實驗，v2.23.0 起）
+
+離線處理錄音檔時可選用的另一個辨識模型。用有標準答案的錄音實測（與現行 large-v3-turbo 同一段、同一份答案）：
+
+| 測試 | large-v3-turbo | Qwen3-ASR 0.6B |
+|---|---:|---:|
+| 中文真實會議 20 場（5~7 人，每場約 38 分）字錯率 | 28.78% | **15.75%** |
+| 中英夾雜（中文為主）：英文詞找回比例 | 34.7% | **74.9%** |
+| 中英夾雜（英文為主）：中文字找回比例 | 25.6% | **83.0%** |
+| 低音量錄音（-60 dBFS）字錯率 | 20.67% | **14.33%** |
+| 韓文長檔字錯率 | 13.35% | **3.54%** |
+| 日文長檔字錯率 | **6.97%** | 8.38% |
+
+- **限制**：只支援離線處理錄音檔、中文／英文／韓文**單向**模式（日文長檔實測較差、台語遠不如 Breeze-ASR-26，所以不開放）；
+  即時字幕、雙向模式仍用 Whisper。選了但不適用時，程式會說明原因並自動改用推薦模型
+- **目前只在 GPU 伺服器執行**（NVIDIA CUDA），伺服器沒有安裝時選單不會出現這個選項
+- **資源**：常駐約 7 GB 顯示記憶體（辨識 5.2 GB＋時間對齊 1.9 GB）；服務啟動後約 1~3 分鐘載入完成，載入完成前不會出現在選單
+
+**安裝（在 GPU 伺服器上，用執行辨識服務的同一個帳號）：**
+
+```bash
+cd ~/jt-whisper-server
+python3 -m venv venv-qwen
+venv-qwen/bin/pip install --upgrade pip
+venv-qwen/bin/pip install "qwen-asr[vllm]==0.0.6"
+venv-qwen/bin/pip install --force-reinstall torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
+venv-qwen/bin/pip install "numpy<2.3"
+systemctl restart jt-whisper-server@8978      # 或重新啟動服務
+curl -s http://localhost:8978/health           # 1~3 分鐘後 "qwen": {"ready": true, ...}
+```
+
+- 獨立的 `venv-qwen` 是必要的：它需要的 PyTorch 版本與辨識服務本身不同，裝在一起會互相衝突
+- 服務會自動用 `~/jt-whisper-server/venv-qwen/bin/python` 帶起一個只聽本機（127.0.0.1）的子行程；位置不同時設環境變數
+  `JT_QWEN_PYTHON`，埠號預設為服務埠號＋11（`JT_QWEN_PORT` 可改）。服務停止時子行程會一起結束，不會殘留佔用顯示記憶體
+- 載入失敗時看 `/health` 的 `qwen.error` 與 `/tmp/jt-qwen-worker-<埠號>.log`
+- 移除：刪掉 `venv-qwen` 資料夾後重啟服務
+
 ### GPU 伺服器的版本檢查與更新（v2.21.1 起）
 
 GPU 伺服器上跑的 `remote_whisper_server.py` 是一支獨立的服務，**不會跟著本機一起升級**。本機 `./install.sh --upgrade` 更新的是本機程式；伺服器上的服務還是舊的。
@@ -720,6 +760,7 @@ cd C:\jt-live-whisper
 - 離線處理各階段即時進度：辨識/講者辨識/輸出/LLM 校正/摘要（含 tokens 數與 t/s）
 - 講者辨識時顯示彩色 Speaker N 標籤
 - 辨識模型依裝置與模式自動推薦（「此裝置適合」標籤）
+- 實驗模型（Qwen3-ASR）只在 GPU 伺服器上已就緒時出現；即時字幕、選「本機」辨識、或不支援的模式時會變灰並寫出原因（「僅限錄音檔」「需選 GPU 伺服器」「不支援此模式」），已選的會自動換回推薦模型
 - 翻譯引擎依 config 自動推薦（有 LLM 伺服器預設 LLM，無則預設 NLLB）
 - 聊天模式與字幕模式切換
 - 即時辨識/翻譯進度顯示
@@ -828,7 +869,7 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 | `--webui` | 啟動 WebUI 瀏覽器介面（在瀏覽器中操作所有功能） | |
 | `--mode MODE` | 功能模式 (`en2zh` / `zh2en` / `ja2zh` / `zh2ja` / `ko2zh` / `zh2ko` / `en_zh` / `ja_zh` / `ko_zh` / `en` / `zh` / `ja` / `ko` / `nan` / `nan2en` / `record`) | `en2zh` |
 | `--asr ASR` | 語音辨識引擎 (`whisper` / `moonshine` / `faster-whisper`) | `whisper` |
-| `-m`, `--model MODEL` | Whisper 模型 (large-v3-turbo / large-v3 / small / small.en / base / base.en) | `en2zh`: large-v3-turbo / 中日韓文+有GPU: large-v3-turbo / 中日韓文+無GPU: small |
+| `-m`, `--model MODEL` | 辨識模型 (large-v3-turbo / large-v3 / small / small.en / base / base.en / breeze-asr-26 / qwen3-asr-0.6b)。`qwen3-asr-0.6b` 為實驗選項，限離線處理、中文／英文／韓文單向模式、需 GPU 伺服器已安裝；不符合時會說明原因並改用推薦模型 | `en2zh`: large-v3-turbo / 中日韓文+有GPU: large-v3-turbo / 中日韓文+無GPU: small |
 | `--moonshine-model MODEL` | Moonshine 模型 (medium / small / tiny) | medium |
 | `-s`, `--scene SCENE` | 使用場景 (`meeting` / `training` / `presentation` / `subtitle`)，僅 Whisper 即時模式 | `training` |
 | `--topic TOPIC` | 會議主題（提升翻譯品質，例：`--topic 'ZFS 儲存管理'`）。僅翻譯模式有效 | |
@@ -842,7 +883,8 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 | `--rec-device ID` | 錄音裝置 ID，可與 ASR 裝置不同（自動啟用 `--record`） | 自動選擇 |
 | `--input FILE [...]` | 離線處理音訊檔（用 faster-whisper 辨識）。不帶 `--mode` 時進入互動選單。指定兩個配對檔案時自動偵測並合併處理；指定單一檔案且檔名含「系統音訊」或「麥克風」時，自動尋找同時間戳配對檔並提示一起處理 | |
 | `--diarize` | 講者辨識（需搭配 --input，用 resemblyzer + spectralcluster，有 GPU 伺服器時自動伺服器執行） | |
-| `--num-speakers N` | 指定講者人數（需搭配 --diarize，預設自動偵測 2~8） | |
+| `--num-speakers N` | 指定講者人數（需搭配 --diarize，預設自動偵測 2~8）。現行方法會強制分成 N 群；Nemotron 啟用後改為**上限**（偵測到的人較多時合併發言最少的，不會硬拆）。實測指定人數不會比自動偵測準，不確定時不要填 | |
+| `--diarize-engine ENGINE` | 講者辨識方法（`auto` / `nemotron` / `legacy`）。`auto` 能用 Nemotron 就用，否則用現行方法；指定超過 8 人、或偵測到 8 人全滿時自動改用現行方法 | `auto` |
 | `--summarize [FILE ...]` | 摘要模式：讀取記錄檔生成摘要（與 --input 合用時不需指定檔案） | |
 | `--summary-model MODEL` | 摘要用的 LLM 模型 | qwen3.8:27b |
 | `--mic` | 同時轉錄麥克風語音（即時模式，ASR 負載加倍，見下方說明） | 不啟用 |
@@ -918,6 +960,9 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 
 # 離線處理 + 講者辨識
 ./start.sh --input meeting.mp3 --diarize
+
+# 離線處理 + Qwen3-ASR（實驗，需 GPU 伺服器已安裝）
+./start.sh --input meeting.mp3 --mode zh -m qwen3-asr-0.6b --diarize
 
 # 指定講者人數
 ./start.sh --input meeting.mp3 --diarize --num-speakers 3
@@ -1128,6 +1173,20 @@ CLI 用法：
 | **large-v3** | 最慢，中日文品質最好，有獨立 GPU 可選用 |
 
 > 英翻中模式預設使用 large-v3-turbo。中日文模式隱藏 .en 模型，顯示 base / small / large-v3-turbo / large-v3 四個多語言模型；有 GPU 時預設 large-v3-turbo，無 GPU 時預設 small。Windows faster-whisper 模式下所有模型均可選擇，首次使用時自動從 HuggingFace 下載。
+
+**Qwen3-ASR（實驗，v2.23.0 起，只在離線處理錄音檔時出現）**
+
+| 選項 | 說明 |
+|---|---|
+| qwen3-asr-0.6b | 中文會議、中英夾雜明顯更準（見「GPU 伺服器的 Qwen3-ASR」的實測表） |
+
+以下條件**全部符合**才會出現在清單裡，不符合時看不到、也選不到：
+- 處理的是錄音檔（`--input`），不是即時字幕
+- 辨識位置選「GPU 伺服器」，而且伺服器已安裝 Qwen3-ASR 並載入完成（服務啟動後約 1~3 分鐘）
+- 功能模式是中文、英文、韓文的**單向**模式（`zh`／`zh2en`／`zh2ja`／`zh2ko`／`en`／`en2zh`／`ko`／`ko2zh`）；日文、台語、雙向模式不提供
+
+用命令列 `-m qwen3-asr-0.6b` 強制指定但條件不符時，程式會說明原因並改用推薦模型（有 GPU 伺服器用 large-v3-turbo）。
+處理途中 Qwen3-ASR 出錯（例如伺服器上的 Qwen 剛好重啟），會自動改用 GPU 伺服器的 large-v3-turbo 重跑，不會中斷。
 
 **4) 使用場景**
 
@@ -1647,7 +1706,19 @@ ja_zh 模式輸出：
 [00:13-00:20] [Speaker 2] [中] 你能解釋一下認證的變更嗎？
 ```
 
-**處理流程：**
+**兩種方法（v2.23.0 起）：**
+
+| 方法 | 何時使用 | 說明 |
+|---|---|---|
+| 現行方法（resemblyzer＋spectralcluster） | 目前一律使用 | 下面「處理流程」描述的就是它 |
+| NVIDIA Nemotron 3 Diarization | 環境有 transformers 5.18 以上時自動使用（尚未推出，所以目前不會用到） | 實測段落標錯講者：中文 20 場 18.52% → 3.07%、英文 16 場 12.31% → 4.65%；最多 8 位講者 |
+
+- `--diarize-engine auto`（預設）：能用 Nemotron 就用，否則用現行方法；`legacy` 固定用現行方法；`nemotron` 指定使用，不能用時會說明原因並改用現行方法
+- Nemotron 啟用後：`--num-speakers N` 改為**上限**（偵測到的人較多時合併發言最少的，不會硬拆成 N 群）；
+  指定超過 8 人、或偵測到 8 位全滿（可能超過 8 人）時，自動改用現行方法並顯示原因
+- 畫面會顯示實際用了哪個方法（例：`[伺服器 diarize] 5 位講者, 0.64s (cuda, Nemotron)`）
+
+**處理流程（現行方法）：**
 
 1. faster-whisper 辨識所有語音段落（含 VAD 過濾，可在本機或 GPU 伺服器執行）
 2. resemblyzer 對每個段落提取 256 維聲紋向量（d-vector）
@@ -2041,6 +2112,7 @@ journalctl -u <服務名> | grep source.rejected
       [辨識模型]
           依辨識位置推薦模型
           顯示 [已快取] / [需下載] 標籤（有伺服器設定時）
+          GPU 伺服器已裝 Qwen3-ASR、且是中英韓單向模式時多一個 qwen3-asr-0.6b（實驗）
           |
           v
       (翻譯模式？) --> [LLM 伺服器] host:port --> [翻譯模型]
@@ -2162,6 +2234,32 @@ AirPods 已連線但在系統設定的「聲音 → 輸入」看不到麥克風�
 
 實務上這個數字很難估準，所以：**不確定就不要填**，讓它自己判斷。
 
+> 上面是現行方法的數據。改用 Nemotron（環境有 transformers 5.18 以上時自動啟用）後，人數判對由 20 場中 2 場提高到 17 場，
+> 指定人數也改為「上限」：偵測到的人比指定多才合併，不會為了湊滿人數去拆開同一個人。
+
+### Q: 選單或 WebUI 裡看不到 qwen3-asr-0.6b？
+
+它只在以下條件都符合時出現（v2.23.0 起的實驗選項）：
+1. 處理錄音檔（不是即時字幕）
+2. 辨識位置選 GPU 伺服器，而且那台伺服器**已安裝** Qwen3-ASR（見「GPU 伺服器的 Qwen3-ASR」）
+3. 伺服器上的 Qwen3-ASR **已載入完成**：服務啟動後約 1~3 分鐘，第一次啟動要先下載模型會更久
+4. 模式是中文、英文或韓文的單向模式
+
+確認伺服器狀態：`curl http://<GPU 伺服器>:8978/health`，看 `qwen` 欄位——
+`null` 表示沒有安裝；`"ready": false` 時 `error` 欄位會寫原因（載入中、埠號被佔用、一小時內反覆結束而停用等），
+詳細記錄在伺服器的 `/tmp/jt-qwen-worker-<埠號>.log`。
+
+### Q: Qwen3-ASR 為什麼不支援日文、台語、即時字幕？
+
+- **日文**：短句實測較好，但長檔（49 句接成一段）字錯率 8.38%，比現行 large-v3-turbo 的 6.97% 差（英文專有名詞會寫成片假名）
+- **台語**：它輸出台語漢字、也常聽錯，用語意評審比較遠不如 Breeze-ASR-26（1.10 vs 1.72，滿分 2）
+- **即時字幕**：它一次處理 28 秒的片段、還要另外對時間，適合整份錄音，不適合幾秒一段的即時字幕
+
+### Q: 用 Qwen3-ASR 處理到一半失敗了？
+
+程式會自動改用 GPU 伺服器的 large-v3-turbo 重跑那個檔案，畫面會出現「[降級] Qwen3-ASR 失敗（原因），改用 GPU 伺服器的 large-v3-turbo」。
+伺服器上的 Qwen3-ASR 會自己重啟（一小時內最多 3 次，超過就停用並在 `/health` 說明）。
+
 ### Q: 為什麼講者辨識不用 pyannote.audio？
 
 pyannote.audio 是目前最知名的講者辨識框架，準確度確實較高，但有以下限制：
@@ -2227,6 +2325,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 | `translate_meeting.py` | 主程式（跨平台，macOS / Windows / Linux 共用） |
 | `subtitle_overlay.py` | 懸浮字幕覆蓋視窗（PyQt6，啟用時由主程式自動啟動） |
 | `remote_whisper_server.py` | GPU 伺服器程式（FastAPI，由 install.sh 自動部署到伺服器） |
+| `~/jt-whisper-server/venv-qwen/`（GPU 伺服器上） | Qwen3-ASR 的獨立環境（選配，手動建立，見「GPU 伺服器的 Qwen3-ASR」）；記錄在 `/tmp/jt-qwen-worker-<埠號>.log` |
 | `whisper.cpp/` | Whisper 語音辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用） |
 | `venv/` | Python 虛擬環境（自動建立） |
 | `config.json` | 使用者設定檔（自動產生，含 LLM 伺服器位址、GPU 伺服器設定、錄音格式等） |
@@ -2291,6 +2390,9 @@ Windows 搭配 NVIDIA GPU（CUDA）可大幅加速 faster-whisper 語音辨識�
 | RTX 4060 以上 | 8 GB+ | ~20-30 秒 | 消費級入門 |
 | RTX 4090 | 24 GB | ~10-15 秒 | 消費級旗艦 |
 | NVIDIA DGX Spark | 128 GB | ~10 秒 | 同時跑 Ollama LLM + Whisper 辨識，一機搞定 |
+
+> 要啟用 Qwen3-ASR（實驗）時，伺服器需再多約 7 GB 顯示記憶體常駐（辨識 5.2 GB＋時間對齊 1.9 GB），
+> 建議 16 GB 以上的顯示卡；另需約 10 GB 磁碟放它的獨立環境（`venv-qwen`）與模型約 4 GB。
 
 ### LLM 伺服器建議（選配，翻譯/摘要用）
 
