@@ -431,9 +431,9 @@ venv-qwen/bin/pip install "numpy&lt;2.3"
 systemctl restart jt-whisper-server@8978
 curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {"ready": true, ...}</span></pre>
         <ul>
-          <li><span class="zh"><strong>資源</strong>：常駐約 7 GB 顯示記憶體（辨識 5.2 GB＋時間對齊 1.9 GB），磁碟約 14 GB（獨立環境 9.5 GB＋模型約 4 GB），建議 16 GB 以上的顯示卡</span><span class="en"><strong>Resources</strong>: ~7 GB VRAM resident (5.2 GB recognition + 1.9 GB alignment), ~14 GB disk (9.5 GB venv + ~4 GB models); 16 GB+ GPU recommended</span></li>
+          <li><span class="zh"><strong>資源</strong>：啟動後約 7 GB 顯示記憶體、處理長錄音時約 9 GB（一次處理的片段數 <code>JT_QWEN_BATCH</code> 預設 16，設 32 較快但約 12 GB），磁碟約 14 GB（獨立環境 9.5 GB＋模型約 4 GB），建議 16 GB 以上的顯示卡</span><span class="en"><strong>Resources</strong>: ~7 GB VRAM after start, ~9 GB while processing long files (batch <code>JT_QWEN_BATCH</code> defaults to 16; 32 is faster but ~12 GB), ~14 GB disk (9.5 GB venv + ~4 GB models); 16 GB+ GPU recommended</span></li>
           <li><span class="zh"><strong>為什麼要獨立環境</strong>：它需要的 PyTorch 版本與辨識服務不同，裝在一起會互相衝突；服務會自動帶起一個只聽本機的子行程，服務停止時一起結束</span><span class="en"><strong>Why a separate venv</strong>: it needs a different PyTorch version from the service; the service starts a localhost-only child process and stops it with the service</span></li>
-          <li><span class="zh"><strong>出錯時</strong>：處理途中失敗會自動改用 GPU 伺服器的 large-v3-turbo 重跑；伺服器上的 Qwen3-ASR 會自動重啟（一小時內最多 3 次）。狀態看 <code>/health</code> 的 <code>qwen</code> 欄位，記錄在 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code></span><span class="en"><strong>On errors</strong>: a failure mid-file reruns it with the GPU server's large-v3-turbo; Qwen3-ASR restarts itself (max 3 times per hour). Status: the <code>qwen</code> field of <code>/health</code>; log at <code>/tmp/jt-qwen-worker-&lt;port&gt;.log</code></span></li>
+          <li><span class="zh"><strong>出錯時</strong>：處理途中失敗會自動改用 GPU 伺服器的 large-v3-turbo 重跑；伺服器上的 Qwen3-ASR 會自動重啟（一小時內最多 3 次，超過就暫停到一小時後再試）。狀態看 <code>/health</code> 的 <code>qwen</code> 欄位，記錄在 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code></span><span class="en"><strong>On errors</strong>: a failure mid-file reruns it with the GPU server's large-v3-turbo; Qwen3-ASR restarts itself (max 3 times per hour, then pauses and retries after the hour). Status: the <code>qwen</code> field of <code>/health</code>; log at <code>/tmp/jt-qwen-worker-&lt;port&gt;.log</code></span></li>
           <li><span class="zh"><strong>移除</strong>：刪掉 <code>venv-qwen</code> 後重啟服務</span><span class="en"><strong>Remove</strong>: delete <code>venv-qwen</code> and restart the service</span></li>
         </ul>
       </div>
@@ -488,7 +488,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
         <tr><td>NVIDIA DGX Spark</td><td>128 GB</td><td>~10 <span class="zh">秒</span><span class="en">s</span></td><td><span class="zh">同時跑 Ollama LLM + Whisper，一機搞定</span><span class="en">Ollama LLM + Whisper on one box</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note" style="margin-top:10px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「GPU 伺服器的 Qwen3-ASR」）。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR on the GPU server" above).</span></p>
+    <p class="note" style="margin-top:10px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「GPU 伺服器的 Qwen3-ASR」）。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7–9 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR on the GPU server" above).</span></p>
 
     <div class="cmd-label" style="margin-top:18px"><span class="zh">LLM 伺服器（選配，翻譯 / 摘要）</span><span class="en">LLM server (optional)</span></div>
     <div class="tbl-wrap"><table>

@@ -37,6 +37,9 @@ import time
 QWEN_ASR_MODEL = "Qwen/Qwen3-ASR-0.6B"
 QWEN_ALIGNER_MODEL = "Qwen/Qwen3-ForcedAligner-0.6B"
 QWEN_GPU_MEM = 0.06     # E6：0.06 可跑（行程 5.4 GB），0.04 以下起不來；共用機不要給多
+# 一次送幾個窗：vLLM 的佔用會隨批次長大（2026-09-26 正式機 37 分鐘中文會議：32 → 49 秒、合計 12.3 GB；
+# 16 → 74 秒、8.9 GB）。共用 GPU 預設 16，顯示記憶體寬裕可設 JT_QWEN_BATCH=32
+QWEN_BATCH = max(1, int(os.environ.get("JT_QWEN_BATCH") or 16))
 
 
 def _qwen_worker_main():
@@ -68,8 +71,8 @@ def _qwen_worker_main():
         texts = [""] * len(chunks)
         # 極短的窗（<0.2 秒）不送模型：沒有內容可辨識，還可能讓前處理出錯
         live = [k for k, c in enumerate(chunks) if len(c) >= 3200]
-        for k0 in range(0, len(live), 32):
-            ks = live[k0:k0 + 32]
+        for k0 in range(0, len(live), QWEN_BATCH):
+            ks = live[k0:k0 + QWEN_BATCH]
             r = asr.transcribe(audio=[(chunks[k], 16000) for k in ks], language=[lang] * len(ks))
             for k, x in zip(ks, r):
                 texts[k] = x.text
@@ -116,7 +119,12 @@ def _qwen_worker_main():
             try:
                 req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
                 with lock:                      # 一次一件（主服務本來就排隊，這裡是保險）
-                    out = work(req)
+                    try:
+                        out = work(req)
+                    finally:
+                        # 對齊器的暫存不會自己還：正式機處理一個 7 分鐘檔後由 7.1 GB 漲到 10.5 GB（2026-09-26），
+                        # 共用 GPU 上要還回去
+                        _torch.cuda.empty_cache()
             except Exception as e:
                 return self._send(500, {"error": f"{type(e).__name__}: {e}"})
             self._send(200, out)
@@ -129,7 +137,7 @@ def _qwen_worker_main():
     import torch as _torch
     from qwen_asr import Qwen3ASRModel, Qwen3ForcedAligner
     asr = Qwen3ASRModel.LLM(model=QWEN_ASR_MODEL, gpu_memory_utilization=QWEN_GPU_MEM, max_model_len=4096,
-                            max_inference_batch_size=32, max_new_tokens=512)
+                            max_inference_batch_size=QWEN_BATCH, max_new_tokens=512)
     fa = Qwen3ForcedAligner.from_pretrained(QWEN_ALIGNER_MODEL, dtype=_torch.bfloat16, device_map="cuda")
     state["ready"] = True
     print(f"[qwen-worker] 就緒 127.0.0.1:{port}（{QWEN_ASR_MODEL}）", flush=True)
@@ -157,7 +165,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.23.0"
+SERVER_VERSION = "2.23.1"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -637,20 +645,33 @@ def _qwen_start(port):
         now = time.time()
         recent = [t for t in _QWEN.setdefault("restart_times", []) if now - t < 3600]
         _QWEN["restart_times"] = recent
-        if len(recent) >= _QWEN_MAX_RESTARTS:
-            _QWEN["error"] = (f"worker 一小時內結束 {len(recent) + 1} 次，不再自動重啟；"
-                              f"見 {log.name}，排除後重啟服務")
-            print(f"[Qwen3-ASR] {_QWEN['error']}")
-            return
-        _QWEN["error"] = f"worker 結束（代碼 {proc.returncode}），30 秒後重啟；見 {log.name}"
+        delay = _qwen_restart_delay(recent, now)
+        if delay > 60:
+            # 到上限不永久停用：共用 GPU 上的失敗多半是暫時的（2026-09-26 正式機第一次啟動就遇到：
+            # Ollama 在 vLLM 估算記憶體的那 20 秒內卸載模型，vLLM 判定估算失敗）。暫停到額度空出來再試
+            _QWEN["error"] = (f"worker 一小時內結束 {len(recent) + 1} 次，暫停自動重啟，約 {int(delay // 60) + 1} 分鐘後再試；"
+                              f"見 {log.name}")
+        else:
+            _QWEN["error"] = f"worker 結束（代碼 {proc.returncode}），{int(delay)} 秒後重啟；見 {log.name}"
         print(f"[Qwen3-ASR] {_QWEN['error']}")
-        time.sleep(30)
-        if _QWEN["stopping"]:
-            return
+        t_end = time.time() + delay
+        while time.time() < t_end:
+            if _QWEN["stopping"]:
+                return
+            time.sleep(min(5, max(0.1, t_end - time.time())))
         _QWEN["restart_times"].append(time.time())
         _QWEN["restarts"] += 1
         _qwen_start(port)
     threading.Thread(target=_wait, daemon=True).start()
+
+
+def _qwen_restart_delay(recent, now, limit=None, base=30.0):
+    """worker 意外結束後，多久再重啟（秒）。一小時內還沒到上限：30 秒；到上限：等到最舊那次滿一小時（額度空出來）"""
+    limit = _QWEN_MAX_RESTARTS if limit is None else limit
+    recent = sorted(t for t in recent if now - t < 3600)
+    if len(recent) < limit:
+        return base
+    return max(base, 3600 - (now - recent[len(recent) - limit]) + 5)
 
 
 def _qwen_port_busy(port):

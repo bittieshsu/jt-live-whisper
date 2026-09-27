@@ -118,7 +118,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.23.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.23.1 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -991,7 +991,8 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 <li><strong>限制</strong>：只支援離線處理錄音檔、中文／英文／韓文<strong>單向</strong>模式（日文長檔實測較差、台語遠不如 Breeze-ASR-26，所以不開放）；
 即時字幕、雙向模式仍用 Whisper。選了但不適用時，程式會說明原因並自動改用推薦模型</li>
 <li><strong>目前只在 GPU 伺服器執行</strong>（NVIDIA CUDA），伺服器沒有安裝時選單不會出現這個選項</li>
-<li><strong>資源</strong>：常駐約 7 GB 顯示記憶體（辨識 5.2 GB＋時間對齊 1.9 GB）；服務啟動後約 1~3 分鐘載入完成，載入完成前不會出現在選單</li>
+<li><strong>資源</strong>：啟動後約 7 GB 顯示記憶體，處理長錄音時增加到約 9 GB（實測 37 分鐘會議合計 8.9 GB）；服務啟動後約 1~3 分鐘載入完成，載入完成前不會出現在選單。
+一次送進模型的片段數預設 16（<code>JT_QWEN_BATCH</code>）：顯示記憶體寬裕時設 32 較快（37 分鐘 49 秒 vs 74 秒），但會到約 12 GB</li>
 </ul>
 <p><strong>安裝（在 GPU 伺服器上，用執行辨識服務的同一個帳號）：</strong></p>
 <pre><code class="language-bash">cd ~/jt-whisper-server
@@ -3127,7 +3128,7 @@ cd C:\jt-live-whisper
 </ul>
 <h3 id="q-用-qwen3-asr-處理到一半失敗了">Q: 用 Qwen3-ASR 處理到一半失敗了？</h3>
 <p>程式會自動改用 GPU 伺服器的 large-v3-turbo 重跑那個檔案，畫面會出現「[降級] Qwen3-ASR 失敗（原因），改用 GPU 伺服器的 large-v3-turbo」。
-伺服器上的 Qwen3-ASR 會自己重啟（一小時內最多 3 次，超過就停用並在 <code>/health</code> 說明）。</p>
+伺服器上的 Qwen3-ASR 會自己重啟（一小時內最多 3 次；超過就暫停，等一小時的額度空出來再試，原因寫在 <code>/health</code>）。</p>
 <h3 id="q-為什麼講者辨識不用-pyannoteaudio">Q: 為什麼講者辨識不用 pyannote.audio？</h3>
 <p>pyannote.audio 是目前最知名的講者辨識框架，準確度確實較高，但有以下限制：</p>
 <ul>
@@ -3375,7 +3376,7 @@ cd C:\jt-live-whisper
 </tr>
 </tbody></table>
 <blockquote>
-<p>要啟用 Qwen3-ASR（實驗）時，伺服器需再多約 7 GB 顯示記憶體常駐（辨識 5.2 GB＋時間對齊 1.9 GB），
+<p>要啟用 Qwen3-ASR（實驗）時，伺服器需再多約 7~9 GB 顯示記憶體常駐（處理長錄音時約 9 GB），
 建議 16 GB 以上的顯示卡；另需約 10 GB 磁碟放它的獨立環境（<code>venv-qwen</code>）與模型約 4 GB。</p>
 </blockquote>
 <h3 id="llm-伺服器建議選配翻譯摘要用">LLM 伺服器建議（選配，翻譯/摘要用）</h3>
