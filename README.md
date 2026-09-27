@@ -128,7 +128,7 @@ Author: Jason Cheng (Jason Tools)
 > （不適用時選單裡看不到，命令列指定會說明原因並改用推薦模型）。
 > v2.23.0 起可在 GPU 伺服器上跑；**v2.24.0 起也能在本機跑**：Apple Silicon Mac 用 MLX（M5 上 37 分鐘會議約 1 分半）、
 > NVIDIA 顯示卡用 transformers；只有 CPU 的電腦（記憶體 12 GB 以上）可以選但可能比錄音還慢。模型第一次選用時下載（Mac 2.3 GB、其他 3.4 GB）。
-> 從舊版升級的，`--upgrade` 後再執行一次 `./install.sh` 補裝套件。詳見 SOP「Qwen3-ASR（實驗）」。
+> 從舊版升級的 macOS／Windows，`--upgrade` 後再執行一次 `./install.sh`（Windows：`.\install.ps1`）補裝套件（Linux 的 `--upgrade` 會自動補）。詳見 SOP「Qwen3-ASR（實驗）」。
 
 ![離線處理選單：模式與模型選擇](images/offline-menu-1.png)
 

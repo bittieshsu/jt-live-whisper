@@ -28,8 +28,9 @@ v2.23.0 的 Qwen3-ASR 只能在 GPU 伺服器上跑。這一版起，辨識位�
 - 安裝程式會多裝：Apple Silicon Mac 裝 mlx-audio，Windows／Linux 裝 transformers 5.17 以上（都含韓文對時間用的 soynlp），約數十 MB。
   判斷看「裝好的套件有沒有 Qwen3-ASR」而不是只看套件在不在——已經裝了舊版 transformers 的電腦也會升上去
 - Mac 上實測 mlx-audio 與既有的 mlx-whisper 共用同一個環境：既有套件版本都沒有變動，mlx-whisper 的辨識結果逐字相同
-- **從舊版升級**：`./install.sh --upgrade`（Windows：`.\install.ps1 -Upgrade`）只更新程式，之後**再執行一次 `./install.sh`**
-  （Windows：`.\install.ps1`）才會補裝上面的套件。沒有補裝不影響其他功能，只是本機選不到 Qwen3-ASR
+- **從舊版升級**：macOS 的 `./install.sh --upgrade`、Windows 的 `.\install.ps1 -Upgrade` 只更新程式，之後要**再執行一次
+  `./install.sh`（Windows：`.\install.ps1`）**才會補裝上面的套件；Linux 的 `./install.sh --upgrade` 會自動接著檢查、補裝。
+  沒有補裝不影響其他功能，只是本機選不到 Qwen3-ASR
 
 **其他**
 - GPU 伺服器程式只有版本號變動（行為與 v2.23.1 相同）

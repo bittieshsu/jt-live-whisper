@@ -586,8 +586,8 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 
 #### 本機執行（v2.24.0 起）
 
-- **安裝**：新安裝的直接可用。從舊版升級的，`--upgrade` 之後**再執行一次 `./install.sh`**（Windows：`.\install.ps1`），
-  它會補裝 mlx-audio（Mac）或 transformers 5.17 以上（其他平台），約數十 MB。沒有裝時選單不會出現，命令列會寫原因與怎麼裝
+- **安裝**：新安裝的直接可用。從舊版升級時，macOS 與 Windows 在 `--upgrade` 之後要**再執行一次 `./install.sh`**
+  （Windows：`.\install.ps1`）；Linux 的 `--upgrade` 會自動接著檢查。它會補裝 mlx-audio（Mac）或 transformers 5.17 以上（其他平台），約數十 MB。沒有裝時選單不會出現，命令列會寫原因與怎麼裝
 - **模型第一次選用時才下載**（Mac 約 2.3 GB、其他平台約 3.4 GB），放在與 Whisper 模型相同的 HuggingFace 快取，之後不必再連網。
   選單會標「第一次使用下載約 X GB」
 - **準確度與 GPU 伺服器相同**：同一場 37 分鐘中文會議，Mac 本機與 GPU 伺服器的字錯率都是 18.85%，
@@ -2279,7 +2279,7 @@ AirPods 已連線但在系統設定的「聲音 → 輸入」看不到麥克風�
    - **GPU 伺服器**：那台伺服器**已安裝** Qwen3-ASR（見「Qwen3-ASR（實驗）」的 GPU 伺服器安裝），而且**已載入完成**
      （服務啟動後約 1~3 分鐘，第一次啟動要先下載模型會更久）
    - **本機**（v2.24.0 起）：Apple Silicon Mac 要有 mlx-audio、Windows／Linux 要有 transformers 5.17 以上。
-     從舊版升級的要在 `--upgrade` 後**再執行一次** `./install.sh`（Windows：`.\install.ps1`）才會補裝；Intel Mac 不支援；
+     從舊版升級的 macOS、Windows 要在 `--upgrade` 後**再執行一次** `./install.sh`（Windows：`.\install.ps1`）才會補裝（Linux 會自動補）；Intel Mac 不支援；
      沒有 NVIDIA 顯示卡、只能用 CPU 時，電腦記憶體要 12 GB 以上
 
 命令列指定 `-m qwen3-asr-0.6b` 時會直接印出不能用的原因，例如
