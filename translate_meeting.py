@@ -1435,14 +1435,14 @@ def _enforce_nan_model(mode, model_name, quiet=False):
 # ── Qwen3-ASR（v2.23.0，實驗）──────────────────────────────────
 # 2026-09-25 實測（tools/asr_bench/）：中文 20 場真實會議 CER 28.78% → 15.75%、中英夾雜少數語言召回 2~3 倍、
 # 低音量 21% → 14%、韓文長檔 13.35% → 3.54%；**日文長檔較差**（8.38% vs 6.97%）、台語遠不如 Breeze → 這兩種不開。
-# 目前只在 GPU 伺服器上跑（vLLM worker，見 remote_whisper_server.py）；只支援離線處理。
+# GPU 伺服器（vLLM worker，見 remote_whisper_server.py）或本機（v2.24.0 起，見下方 _qwen_local_backend）；只支援離線處理。
 QWEN_MODEL = "qwen3-asr-0.6b"
 
 
 def _qwen_server_ready(rw_cfg):
     """回傳 (能不能用, 原因)：GPU 伺服器 /health 的 qwen.ready"""
     if not rw_cfg:
-        return False, "沒有設定 GPU 伺服器（Qwen3-ASR 目前只在 GPU 伺服器上跑）"
+        return False, "沒有設定 GPU 伺服器"
     try:
         url = f"http://{rw_cfg['host']}:{rw_cfg.get('whisper_port', REMOTE_WHISPER_DEFAULT_PORT)}/health"
         with urllib.request.urlopen(urllib.request.Request(url), timeout=5) as r:
@@ -1458,26 +1458,379 @@ def _qwen_server_ready(rw_cfg):
 
 def _enforce_qwen_model(mode, model_name, rw_cfg=None, quiet=False):
     """選了 Qwen3-ASR 但這個模式／環境不適用時，改用該模式的推薦模型並說明原因（比照 _enforce_nan_model）。
-    未選 Qwen3-ASR 時原樣回傳"""
+    rw_cfg 是「這次在哪裡辨識」：有值＝GPU 伺服器、None＝本機。未選 Qwen3-ASR 時原樣回傳"""
     if model_name != QWEN_MODEL:
         return model_name
     if mode in _NAN_INPUT_MODES or _is_nan_mode(mode):
         why = "台語請用 Breeze-ASR-26（實測 Qwen3-ASR 遠不如它）"
     elif mode in _BIDI_MODES:
         why = "雙向模式尚未支援"
-    elif mode not in _ZH_INPUT_MODES + _EN_INPUT_MODES + _KO_INPUT_MODES:
+    elif mode not in _QWEN_MODES:
         # 用明確的清單放行，不靠 _mode_whisper_lang 的預設值（它對純錄音等模式也回 zh，2026-09-26 測試抓到）
         why = "目前只支援中文、英文、韓文輸入（日文實測長檔較差）"
-    else:
+    elif rw_cfg:
         ok, why = _qwen_server_ready(rw_cfg)
         if ok:
             return model_name
+    else:
+        backend, device, why = _qwen_local_backend()
+        if backend:
+            if device == "cpu" and not quiet:
+                print(f"  {C_HIGHLIGHT}[提示] Qwen3-ASR 在這台電腦用 CPU 執行：{_QWEN_CPU_HINT}{RESET}")
+            return model_name
+        why = f"本機無法執行（{_qwen_local_fix_hint(why)}）"
     # 有 GPU 伺服器就退回伺服器的預設（large-v3-turbo）；沒有才依本機硬體推薦
     # （2026-09-26 實測：原本一律用本機推薦，有 GPU 伺服器的人被退到 small）
     fallback = "large-v3-turbo" if rw_cfg else _recommended_whisper_model(mode)
     if not quiet:
         print(f"  {C_HIGHLIGHT}[提示] Qwen3-ASR 無法使用：{why}，已改用 {fallback}{RESET}")
     return fallback
+
+
+# ── Qwen3-ASR 本機（v2.24.0）──
+# Apple Silicon 用 MLX（mlx-audio）；其他平台用 transformers 內建版（5.17 起）。
+# 2026-09-25 平台實測（6.7 分中文會議，只算辨識）：Mac MLX 28.7 倍即時、CER 13.58%（現行 mlx-whisper turbo 21.33%）；
+# NVIDIA transformers 6.5 倍；CPU 0.7（2 核 i5）~5.6 倍（M5）→ CPU 只當手動選項、附速度提示（D4）。
+# 流程與 GPU 伺服器相同：_nan_vad_windows 切 ≤28 秒窗 → 辨識 → 對齊器逐字時間 → 依句末標點切句。
+# _qwen_core／_qwen_filler_only／_qwen_sentences 與 remote_whisper_server.py 是同一套（tools/test_qwen_local.py 比對）
+QWEN_LOCAL_REPOS = {
+    "mlx": ("mlx-community/Qwen3-ASR-0.6B-8bit", "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"),
+    "hf": ("Qwen/Qwen3-ASR-0.6B-hf", "Qwen/Qwen3-ForcedAligner-0.6B-hf"),
+}
+QWEN_LOCAL_GB = {"mlx": 2.3, "hf": 3.4}          # 兩個模型合計（HF 檔案大小）
+_QWEN_LOCAL_GB_EACH = {"mlx": (1.0, 1.3), "hf": (1.6, 1.9)}    # 辨識、對齊器各自
+_QWEN_CPU_HINT = "較準但很慢，請預留比錄音長度更久的時間"
+_QWEN_CPU_MIN_RAM_GB = 12
+_QWEN_LANG = {"zh": "Chinese", "en": "English", "ko": "Korean"}     # 日文實測長檔較差（E3），先不開
+_QWEN_MODES = _ZH_INPUT_MODES + _EN_INPUT_MODES + _KO_INPUT_MODES
+_QWEN_SENT_END = "。？！?!"
+_QWEN_FILLERS = set("嗯啊呃唔哦喔欸誒呀哈") | {"um", "uh", "mm", "hmm", "mhm"}
+
+
+def _transformers_supports(model_type):
+    """產品 venv 的 transformers 有沒有內建某個模型（看能力、不比版本號）。回傳 (能不能用, 原因)；
+    版本太舊時原因是空字串，由呼叫端寫出需要的版本"""
+    try:
+        import importlib.util
+        if importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None:
+            return False, "未安裝 transformers"
+        from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES
+    except Exception as e:
+        return False, f"transformers 無法載入（{type(e).__name__}）"
+    return model_type in CONFIG_MAPPING_NAMES, ""
+
+
+@lru_cache(maxsize=1)
+def _qwen_local_backend():
+    """本機能不能跑 Qwen3-ASR：回傳 (後端, 裝置, 不能用的原因)。後端 "mlx"／"hf"、裝置 "mlx"／"cuda"／"cpu"；
+    不能用時前兩個是 None。**平台判斷只在這裡**（比照 _recommended_mic_engine）"""
+    import importlib.util
+    if IS_MACOS and not _is_apple_silicon():
+        return None, None, "Intel Mac 不支援"
+    if _is_apple_silicon():
+        # Mac 只走 MLX：MPS 只有 7.8 倍即時（MLX 28.7 倍），不值得多一條要維護的路。
+        # 看套件裡有沒有 qwen3_asr 模組（不 import：mlx_audio.stt.models 會一次載入所有模型）
+        try:
+            spec = importlib.util.find_spec("mlx_audio")
+        except Exception:
+            spec = None
+        if spec is None:
+            return None, None, "未安裝 mlx-audio"
+        if not any(os.path.isdir(os.path.join(p, "stt", "models", "qwen3_asr"))
+                   for p in (spec.submodule_search_locations or [])):
+            return None, None, "mlx-audio 版本太舊（需要 0.5.6 以上）"
+        return "mlx", "mlx", ""
+    ok, why = _transformers_supports("qwen3_asr")
+    if not ok:
+        return None, None, why or "transformers 版本太舊（Qwen3-ASR 需要 5.17 以上）"
+    try:
+        import torch
+        cuda = torch.cuda.is_available()
+    except Exception as e:
+        return None, None, f"torch 無法載入（{type(e).__name__}）"
+    if cuda:
+        return "hf", "cuda", ""
+    # CPU 用 fp32：處理中記憶體最高約 7.5 GB（2026-09-27 Windows 2 核 i5 16 GB 實測 7.55 GB、GB10 9.4 GB），
+    # 8 GB 的電腦會一直用虛擬記憶體、慢到不能用 → 不開放。讀不到記憶體大小（0）時不擋
+    mem = _get_system_memory_gb()
+    if mem and mem < _QWEN_CPU_MIN_RAM_GB:
+        return None, None, f"只有 CPU 且記憶體 {mem:.0f} GB，需要 {_QWEN_CPU_MIN_RAM_GB} GB 以上"
+    return "hf", "cpu", ""
+
+
+def _qwen_local_fix_hint(why):
+    """不能跑的原因＋怎麼補：套件沒裝或太舊 → 重新執行安裝程式。Intel Mac、記憶體不足裝了也沒用，不給"""
+    if "未安裝" not in why and "太舊" not in why:
+        return why
+    return f"{why}；重新執行 {_INSTALL_CMD} 會安裝"
+
+
+def _qwen_local_cached(backend, which=None):
+    """模型是否已下載（which：None＝兩個都要、"asr"／"al"＝只看其中一個）。沒有的話第一次使用要下載"""
+    repos = QWEN_LOCAL_REPOS[backend]
+    if which is not None:
+        repos = repos[:1] if which == "asr" else repos[1:]
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        return all(isinstance(try_to_load_from_cache(r, "config.json"), str) for r in repos)
+    except Exception:
+        return False
+
+
+def _qwen_core(s):
+    return re.sub(r"[\W_]+", "", s)
+
+
+def _qwen_filler_only(text):
+    """一窗只有語氣詞（嗯／啊／um…）→ 丟掉。E3：60 秒靜音、雜訊、和弦、嗡嗡聲 Qwen 會吐「嗯。」"""
+    words = re.findall(r"[a-z]+", text.lower())
+    cjk = [c for c in _qwen_core(text) if not ("a" <= c.lower() <= "z")]
+    return bool(words or cjk) and all(w in _QWEN_FILLERS for w in words) and all(c in _QWEN_FILLERS for c in cjk)
+
+
+def _qwen_sentences(text, stamps, off, win_end):
+    """一窗的文字依句末標點切句，用對齊器的逐字時間定起訖（E2 方案 A）。
+    對齊器的 token 沒有標點 → 用「去掉標點後的字數」對回去。**不丟字**：
+    對齊結果不夠時，剩下的文字照樣成一段（時間用到窗尾）；只有標點的尾巴接回前一句"""
+    tc = [(s, e) for tk, s, e in stamps for _ in _qwen_core(tk)]
+    out, buf, n, pos = [], "", 0, 0
+
+    def flush():
+        nonlocal buf, n, pos
+        if n:
+            if pos < len(tc):
+                s0, e0 = off + tc[pos][0], off + tc[min(pos + n, len(tc)) - 1][1]
+            else:
+                s0, e0 = (out[-1]["end"] if out else off), win_end
+            out.append({"start": round(s0, 3), "end": round(max(e0, s0), 3), "text": buf.strip()})
+        elif buf.strip() and out:
+            out[-1]["text"] += buf.strip()
+        pos += n
+        buf, n = "", 0
+
+    for i, ch in enumerate(text):
+        buf += ch
+        if _qwen_core(ch):
+            n += 1
+        # 英文／韓文的句點：後面是空白或結尾、前一個字不是數字（「3.5」不切）才算句末
+        if ch in _QWEN_SENT_END or (ch == "." and (i + 1 == len(text) or text[i + 1].isspace())
+                                    and not (i and text[i - 1].isdigit())):
+            flush()
+    flush()
+    return out
+
+
+class _QwenLocal:
+    """本機 Qwen3-ASR＋對齊器。MLX 逐窗；transformers 一次送一批（CUDA 8、CPU 4，與平台實測相同）。
+    兩個模型**用到才載入、辨識完先釋放辨識模型再載對齊器**：CPU 上是 fp32，兩個同時在記憶體約 9 GB
+    （2026-09-27 Windows 2 核 i5 實測），先後載入只要其中大的那個"""
+
+    def __init__(self, backend, device):
+        self.backend, self.device = backend, device
+        self.asr = self.al = self.proc = self.al_proc = None
+        if backend == "mlx":
+            self.batch = 1
+            return
+        import torch
+        if device == "cuda":
+            self.dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        else:
+            self.dtype = torch.float32
+        self.batch = 8 if device == "cuda" else 4
+
+    def load(self, which):
+        """載入 "asr"（辨識）或 "al"（對齊器）；已載入就不動。第一次用會從 HuggingFace 下載"""
+        if getattr(self, which) is not None:
+            return
+        repo = QWEN_LOCAL_REPOS[self.backend][0 if which == "asr" else 1]
+        if self.backend == "mlx":
+            from mlx_audio.stt.utils import load_model
+            setattr(self, which, _call_with_ssl_retry(load_model, repo))
+            return
+        from transformers import AutoModelForMultimodalLM, AutoModelForTokenClassification, AutoProcessor
+        cls = AutoModelForMultimodalLM if which == "asr" else AutoModelForTokenClassification
+        # 不用 device_map：那要多裝 accelerate（E1）
+        setattr(self, "proc" if which == "asr" else "al_proc", _call_with_ssl_retry(AutoProcessor.from_pretrained, repo))
+        setattr(self, which, _call_with_ssl_retry(cls.from_pretrained, repo, dtype=self.dtype).to(self.device).eval())
+
+    def release_asr(self):
+        """辨識做完、對齊前呼叫：把辨識模型的記憶體還回去"""
+        self.asr = self.proc = None
+        self._free()
+
+    def transcribe(self, chunks, language, progress=None):
+        """每窗一段文字；極短的窗（<0.2 秒）不送模型（與伺服器相同）"""
+        texts = [""] * len(chunks)
+        live = [k for k, c in enumerate(chunks) if len(c) >= 3200]
+        if live:
+            self.load("asr")
+        for k0 in range(0, len(live), self.batch):
+            ks = live[k0:k0 + self.batch]
+            if self.backend == "mlx":
+                texts[ks[0]] = self.asr.generate(chunks[ks[0]], language=language, max_tokens=512).text
+            else:
+                import torch
+                inp = self.proc.apply_transcription_request(
+                    audio=[chunks[k] for k in ks], language=[language] * len(ks)).to(self.device, self.dtype)
+                with torch.inference_mode():
+                    ids = self.asr.generate(**inp, max_new_tokens=512, do_sample=False)
+                out = self.proc.decode(ids[:, inp["input_ids"].shape[1]:], return_format="transcription_only")
+                for k, t in zip(ks, out):
+                    texts[k] = t
+            if progress:
+                progress(ks[-1])
+        return texts
+
+    def align(self, chunks, texts, language, progress=None):
+        """每窗的逐字時間 [[字, 起, 迄]]（窗內相對秒數）。某批失敗時那幾窗留空、文字照用（切句時不丟字），回傳 (時間, 失敗窗數)"""
+        stamps = [[] for _ in texts]
+        failed = 0
+        idx = [k for k, t in enumerate(texts) if t.strip()]
+        if idx:
+            self.load("al")
+        for k0 in range(0, len(idx), self.batch):
+            ks = idx[k0:k0 + self.batch]
+            try:
+                if self.backend == "mlx":
+                    r = self.al.generate([chunks[k] for k in ks], [texts[k] for k in ks], language=[language] * len(ks))
+                    res = [[[x.text, float(x.start_time), float(x.end_time)] for x in items] for items in r]
+                else:
+                    import torch
+                    inp, words = self.al_proc.prepare_forced_aligner_inputs(
+                        audio=[chunks[k] for k in ks], transcript=[texts[k] for k in ks],
+                        language=[language] * len(ks))
+                    inp = inp.to(self.device, self.dtype)
+                    with torch.inference_mode():
+                        logits = self.al(**inp).logits
+                    r = self.al_proc.decode_forced_alignment(
+                        logits=logits, input_ids=inp["input_ids"], word_lists=words,
+                        timestamp_token_id=self.al.config.timestamp_token_id)
+                    res = [[[x["text"], float(x["start_time"]), float(x["end_time"])] for x in items] for items in r]
+            except Exception as e:
+                failed += len(ks)
+                print(f"  {C_DIM}[Qwen3-ASR] 對齊失敗 {len(ks)} 窗（{type(e).__name__}: {e}），這幾段的時間以整窗估計{RESET}")
+                continue
+            for k, v in zip(ks, res):
+                stamps[k] = v
+            if progress:
+                progress(ks[-1])
+        return stamps, failed
+
+    def close(self):
+        self.asr = self.al = self.proc = self.al_proc = None
+        self._free()
+
+    def _free(self):
+        import gc
+        gc.collect()
+        if self.backend == "mlx":
+            try:
+                import mlx.core as mx
+                mx.clear_cache()
+            except Exception:
+                pass
+        else:
+            _release_gpu_resources()
+
+
+def _qwen_local_transcribe(wav_path, mode, progress_cb=None, stage_cb=None):
+    """本機 Qwen3-ASR 離線辨識，回傳 [{"start", "end", "text"}]（與其他辨識路徑同格式）。
+    progress_cb(秒)：辨識進度；stage_cb(文字)：階段（載入、對齊）。失敗時丟例外，由呼叫端改用 Whisper"""
+    backend, device, why = _qwen_local_backend()
+    if not backend:
+        raise RuntimeError(why)
+    lang = _QWEN_LANG[_mode_whisper_lang(mode)]
+    audio = _read_wav_mono16k(wav_path)
+    sr = _WHISPER_INPUT_SR
+    windows = _nan_vad_windows(audio, sr)
+    chunks = [audio[max(0, int(a * sr)):int(b * sr)] for a, b in windows]
+    def _stage(text):
+        if stage_cb:
+            stage_cb(text)
+
+    def _load(which):
+        name = "辨識" if which == "asr" else "對齊"
+        gb = _QWEN_LOCAL_GB_EACH[backend][0 if which == "asr" else 1]
+        _stage(f"載入{name}模型" if _qwen_local_cached(backend, which)
+               else f"第一次使用，下載{name}模型（約 {gb} GB）")
+        eng.load(which)
+
+    prog = (lambda k: progress_cb(windows[k][1])) if progress_cb else None
+    eng = _QwenLocal(backend, device)
+    try:
+        _load("asr")
+        _stage("辨識中")
+        texts = eng.transcribe(chunks, lang, progress=prog)
+        eng.release_asr()
+        # 只有語氣詞的窗反正要丟（靜音時模型會吐「嗯。」），先丟掉就不必對齊；整段都沒內容時連對齊器都不用載
+        texts = ["" if _qwen_filler_only(t) else t for t in texts]
+        if any(t.strip() for t in texts):
+            _load("al")
+        _stage("對齊時間")
+        stamps, failed = eng.align(chunks, texts, lang, progress=prog)
+    finally:
+        eng.close()
+    segs = []
+    for (ws, we), txt, st in zip(windows, texts, stamps):
+        if not txt.strip() or _qwen_filler_only(txt):
+            continue
+        segs += _qwen_sentences(txt, st, ws, we)
+    return segs
+
+
+def _qwen_menu_desc(mode, use_remote, remote_models=None):
+    """互動選單要不要列 Qwen3-ASR：要列就回傳說明文字，否則 None。
+    GPU 伺服器：伺服器上已就緒（就緒才會出現在它的模型清單）；本機：_qwen_local_backend 跑得了"""
+    if mode not in _QWEN_MODES:
+        return None
+    if use_remote:
+        return "（實驗）中文會議、中英夾雜明顯更準" if remote_models and QWEN_MODEL in remote_models else None
+    backend, device, _why = _qwen_local_backend()
+    if not backend:
+        return None
+    desc = "（實驗）較準但很慢（本機只有 CPU）" if device == "cpu" else "（實驗）中文會議、中英夾雜明顯更準"
+    if not _qwen_local_cached(backend):
+        desc += f"，第一次使用下載約 {QWEN_LOCAL_GB[backend]} GB"
+    return desc
+
+
+def _qwen_local_offline(wav_path, mode, audio_duration=0, fell_back=False):
+    """離線處理的本機 Qwen3-ASR 那一段（含狀態列與退回）。回傳 (模型, segments, 狀態列)：
+    不能跑或失敗時 segments 為 None、模型換成本機推薦的 Whisper，呼叫端接著走原本的本機辨識。
+    fell_back：原本要用 GPU 伺服器、是伺服器失敗才退到這裡"""
+    backend, device, why = _qwen_local_backend()
+    fallback = _recommended_whisper_model(mode)
+    if not backend:
+        print(f"  {C_HIGHLIGHT}[降級] 本機無法執行 Qwen3-ASR（{_qwen_local_fix_hint(why)}），改用 {fallback}{RESET}")
+        return fallback, None, None
+    if fell_back and device == "cpu":
+        # CPU 跑 Qwen 比錄音還久，使用者選的是 GPU 伺服器、不是這個（D4：CPU 只當手動選項）
+        print(f"  {C_HIGHLIGHT}[降級] 本機只有 CPU，Qwen3-ASR 會很慢，改用 {fallback}{RESET}")
+        return fallback, None, None
+    label = {"mlx": "MLX GPU", "cuda": "CUDA GPU", "cpu": "CPU"}.get(device, device)
+    print(f"  {C_WHITE}辨識引擎    Qwen3-ASR 0.6B（本機 {label}，實驗）{RESET}\n")
+    _webui_send({"type": "progress", "stage": "辨識中", "detail": f"本機 {QWEN_MODEL}"})
+    sbar = _SummaryStatusBar(model=QWEN_MODEL, task="準備中", asr_location="本機").start()
+
+    def _prog(pos):
+        if audio_duration > 0:
+            pct = min(pos / audio_duration, 1.0)
+            pm, ps = divmod(int(pos), 60)
+            dm, ds = divmod(int(audio_duration), 60)
+            sbar.set_progress(f"{pct:.0%}  {pm}:{ps:02d} / {dm}:{ds:02d}")
+
+    def _stage(s):
+        sbar.set_task(s, reset_timer=False)
+        _webui_send({"type": "progress", "stage": s, "detail": f"本機 {QWEN_MODEL}"})
+
+    try:
+        return QWEN_MODEL, _qwen_local_transcribe(wav_path, mode, progress_cb=_prog, stage_cb=_stage), sbar
+    except Exception as e:
+        sbar.set_task("Qwen3-ASR 失敗", reset_timer=False)
+        sbar.freeze()
+        sbar.stop()
+        print(f"  {C_HIGHLIGHT}[降級] 本機 Qwen3-ASR 失敗（{type(e).__name__}: {e}），改用 {fallback}{RESET}")
+        return fallback, None, None
 
 
 def _mode_whisper_lang(mode):
@@ -1714,7 +2067,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.23.1"
+APP_VERSION = "2.24.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -1850,13 +2203,8 @@ def _nan_vad_windows(audio, samplerate=16000):
     return windows
 
 
-def _nan_transcribe_windows(model, wav_path, progress_cb=None, use_mlx=False):
-    """台語離線辨識：自行 VAD 切段後逐段辨識，時間戳取自切段邊界。
-
-    Breeze-ASR-26 不產生時間戳 token，直接整檔辨識只會得到「每 30 秒一段」
-    且結束時間錯誤的結果，SRT / VTT / 時間逐字稿全部不可用，因此改由這裡切段。
-    use_mlx=True 時走 mlx-whisper GPU（Apple Silicon 上快約 4 倍）。
-    回傳格式與其他辨識路徑一致：[{"start", "end", "text"}]。"""
+def _read_wav_mono16k(wav_path):
+    """讀 16-bit WAV 成 16 kHz 單聲道 float32（台語與本機 Qwen3-ASR 逐窗辨識共用）"""
     import numpy as np
     import wave as _wave
 
@@ -1872,7 +2220,17 @@ def _nan_transcribe_windows(model, wav_path, progress_cb=None, use_mlx=False):
         from scipy.signal import resample_poly as _resample_poly
         g = _gcd(int(sr), _WHISPER_INPUT_SR)
         audio = _resample_poly(audio, _WHISPER_INPUT_SR // g, int(sr) // g)
-    audio = np.ascontiguousarray(audio, dtype=np.float32)
+    return np.ascontiguousarray(audio, dtype=np.float32)
+
+
+def _nan_transcribe_windows(model, wav_path, progress_cb=None, use_mlx=False):
+    """台語離線辨識：自行 VAD 切段後逐段辨識，時間戳取自切段邊界。
+
+    Breeze-ASR-26 不產生時間戳 token，直接整檔辨識只會得到「每 30 秒一段」
+    且結束時間錯誤的結果，SRT / VTT / 時間逐字稿全部不可用，因此改由這裡切段。
+    use_mlx=True 時走 mlx-whisper GPU（Apple Silicon 上快約 4 倍）。
+    回傳格式與其他辨識路徑一致：[{"start", "end", "text"}]。"""
+    audio = _read_wav_mono16k(wav_path)
 
     if use_mlx:
         import mlx_whisper as _mlx
@@ -5672,11 +6030,10 @@ def _input_interactive_menu(args):
                 available_models.append((name, desc))
             if mode_key in _BREEZE_OPTIONAL_MODES:
                 available_models.append((BREEZE_MODEL, "台灣華語／台語混用，較慢（固定本機辨識）"))
-            # Qwen3-ASR（實驗）：選了 GPU 伺服器、伺服器上已就緒（就緒才會出現在模型清單）、
-            # 而且是單向的中／英／韓輸入才列出；其他情況選單裡不出現（不支援的地方不讓人選到）
-            if (use_remote_whisper and remote_cached_models and QWEN_MODEL in remote_cached_models
-                    and mode_key in _ZH_INPUT_MODES + _EN_INPUT_MODES + _KO_INPUT_MODES):
-                available_models.append((QWEN_MODEL, "（實驗）中文會議、中英夾雜明顯更準"))
+            # Qwen3-ASR（實驗）：單向中／英／韓輸入，且這次辨識的位置跑得了才列出（不支援的地方不讓人選到）
+            _qdesc = _qwen_menu_desc(mode_key, use_remote_whisper, remote_cached_models)
+            if _qdesc:
+                available_models.append((QWEN_MODEL, _qdesc))
         # 預設：GPU 伺服器推薦 large-v3-turbo，本機按 CPU 推薦
         if use_remote_whisper:
             recommended = "large-v3-turbo"
@@ -11832,16 +12189,8 @@ def _nemo_available():
 
 @lru_cache(maxsize=1)
 def _nemo_transformers_ok():
-    try:
-        import importlib.util
-        if importlib.util.find_spec("torch") is None or importlib.util.find_spec("transformers") is None:
-            return False, "未安裝 transformers"
-        from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES
-    except Exception as e:
-        return False, f"transformers 無法載入（{type(e).__name__}）"
-    if "nemotron3_diarization" not in CONFIG_MAPPING_NAMES:
-        return False, "transformers 版本太舊（Nemotron 需要 5.18 以上）"
-    return True, ""
+    ok, why = _transformers_supports("nemotron3_diarization")
+    return ok, (why or ("" if ok else "transformers 版本太舊（Nemotron 需要 5.18 以上）"))
 
 
 def _recommended_diarizer(num_speakers=None, engine="auto"):
@@ -12341,6 +12690,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
         # 反而大幅劣化（實測 CER 17.99% → 56.42%），且時間戳需由用戶端切段產生
         print(f"  {C_DIM}[{BREEZE_MODEL}] 改用本機辨識（GPU 伺服器的辨識參數不適用本模型）{RESET}")
         remote_whisper_cfg = None
+    _want_remote = remote_whisper_cfg is not None     # 之後退到本機時，分得出是使用者選的還是伺服器失敗
 
     if remote_whisper_cfg is not None:
         rw_host = remote_whisper_cfg.get("host", "?")
@@ -12405,10 +12755,14 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             _macos_local_network_hint((remote_whisper_cfg or {}).get("host", ""))
             remote_whisper_cfg = None  # fallback
 
-    if not used_remote:
-        if model_size == QWEN_MODEL:              # 本機還沒有 Qwen3-ASR：伺服器失敗時改用推薦模型
-            model_size = _recommended_whisper_model(mode)
-            print(f"  {C_HIGHLIGHT}[降級] Qwen3-ASR 目前只在 GPU 伺服器上跑，本機改用 {model_size}{RESET}")
+    if not used_remote and model_size == QWEN_MODEL:
+        # 本機 Qwen3-ASR；不能跑或失敗時 raw_segments 仍是 None、模型換成本機推薦的 Whisper，接著走下面原本的路
+        model_size, raw_segments, _qsbar = _qwen_local_offline(asr_wav_path, mode, audio_duration,
+                                                               fell_back=_want_remote)
+        if raw_segments is not None:
+            sbar = _qsbar
+
+    if not used_remote and raw_segments is None:
         # 本機 faster-whisper
         try:
             from faster_whisper import WhisperModel
@@ -14940,7 +15294,7 @@ def parse_args():
         (f"{_sc} --input meeting.mp3 --diarize --mode zh", "中文逐字稿 + 講者辨識"),
         (f"{_sc} --input meeting.mp3 --mode zh --summarize", "中文逐字稿 + 摘要修正"),
         (f"{_sc} --input meeting.mp3 --diarize --num-speakers 3", "指定 3 位講者"),
-        (f"{_sc} --input meeting.mp3 --mode zh -m {QWEN_MODEL}", "中文會議用 Qwen3-ASR（實驗，需 GPU 伺服器）"),
+        (f"{_sc} --input meeting.mp3 --mode zh -m {QWEN_MODEL}", "中文會議用 Qwen3-ASR（實驗；GPU 伺服器或本機）"),
         (f"{_sc} --input meeting.mp3 --diarize --summarize", "辨識 + 翻譯 + 摘要"),
         (f"{_sc} --input m.mp3 --diarize --mode zh --summarize", "中文辨識 + 講者 + 摘要"),
         (f"{_sc} --input meeting.mp3 --local-asr", "強制本機 辨識"),
@@ -14967,7 +15321,7 @@ def parse_args():
         "-m", "--model", choices=model_names, metavar="MODEL",
         help=f"語音辨識模型 ({' / '.join(model_names)}，--input 預設 large-v3-turbo，中日文品質最好用 -m large-v3；"
              f"{BREEZE_MODEL} 限台語與華語模式，台灣華語夾雜台語時可選用；"
-             f"{QWEN_MODEL}（實驗）限離線中／英／韓，需 GPU 伺服器)")
+             f"{QWEN_MODEL}（實驗）限離線中／英／韓，GPU 伺服器或本機（Apple Silicon 用 MLX、其他平台用 transformers）)")
     parser.add_argument(
         "--moonshine-model", choices=moonshine_model_names, metavar="MMODEL",
         help=f"Moonshine 模型 ({' / '.join(moonshine_model_names)}，預設 medium)")

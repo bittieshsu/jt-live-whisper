@@ -67,6 +67,7 @@ try:
     SUMMARY_DEFAULT_MODEL as _TM_SUMMARY_DEFAULT_MODEL,
     QWEN_MODEL as _TM_QWEN_MODEL,
     _qwen_server_ready as _tm_qwen_server_ready,
+    _qwen_local_backend as _tm_qwen_local_backend,
     _ZH_INPUT_MODES as _TM_ZH_MODES,
     _EN_INPUT_MODES as _TM_EN_MODES,
     _KO_INPUT_MODES as _TM_KO_MODES,
@@ -296,7 +297,7 @@ async def lifespan(app):
     t.start()
     asyncio.create_task(_event_dispatcher())
     try:
-        _qwen_available()            # 一啟動就先查 GPU 伺服器有沒有 Qwen3-ASR（背景，不擋啟動）
+        _qwen_status()               # 一啟動就先查 Qwen3-ASR 在 GPU 伺服器／本機能不能跑（背景，不擋啟動）
     except Exception:
         pass
     yield
@@ -532,26 +533,32 @@ def _start_proc(args: list):
     return _proc.pid
 
 
-# Qwen3-ASR（實驗）：GPU 伺服器上就緒才列進模型選單。背景查、快取 60 秒，
-# 不可以在 /api/config 裡同步去打伺服器（伺服器連不上時頁面會卡住幾秒，v2.16.1 才處理過冷啟動）
-_QWEN_PROBE = {"ok": False, "t": -1e9, "running": False}
+# Qwen3-ASR（實驗）：GPU 伺服器上就緒、或本機跑得了，才列進模型選單。背景查、快取 60 秒，
+# 不可以在 /api/config 裡同步去打伺服器（伺服器連不上時頁面會卡住幾秒，v2.16.1 才處理過冷啟動）；
+# 本機偵測要載入 torch／transformers（數秒），同樣放背景
+_QWEN_PROBE = {"server": False, "local": None, "t": -1e9, "running": False}
 
 
-def _qwen_available():
+def _qwen_status():
+    """回傳 {"server": GPU 伺服器就緒, "local": 本機裝置 "mlx"／"cuda"／"cpu" 或 None}（上一次背景查到的）"""
     if time.monotonic() - _QWEN_PROBE["t"] > 60 and not _QWEN_PROBE["running"]:
         _QWEN_PROBE["running"] = True
 
         def _probe():
-            ok = False
+            server, local = False, None
             try:
                 rw = json.loads(CONFIG_FILE.read_text(encoding="utf-8")).get("remote_whisper") \
                     if CONFIG_FILE.exists() else None
-                ok = bool(rw) and _tm_qwen_server_ready(rw)[0]
+                server = bool(rw) and _tm_qwen_server_ready(rw)[0]
             except Exception:
-                ok = False
-            _QWEN_PROBE.update(ok=ok, t=time.monotonic(), running=False)
+                server = False
+            try:
+                local = _tm_qwen_local_backend()[1]
+            except Exception:
+                local = None
+            _QWEN_PROBE.update(server=server, local=local, t=time.monotonic(), running=False)
         threading.Thread(target=_probe, daemon=True).start()
-    return _QWEN_PROBE["ok"]
+    return {"server": _QWEN_PROBE["server"], "local": _QWEN_PROBE["local"]}
 
 
 def _get_config():
@@ -586,11 +593,14 @@ def _get_config():
         models = [{"value": n, "label": f"{n}（{d}）"} for n, _, d in _TM_WHISPER_MODELS]
         # Breeze-ASR-26：台語專用，華語模式也可選用（台灣華語夾雜台語時），固定本機辨識
         models.append({"value": "breeze-asr-26", "label": "breeze-asr-26（台灣華語／台語，較慢，固定本機）"})
-        if _qwen_available():
-            # 使用限制由後端給，前端照 limits 停用（不在前端寫死模型名稱）
+        qs = _qwen_status()
+        if qs["server"] or qs["local"]:
+            # 使用限制由後端給，前端照 limits 停用（不在前端寫死模型名稱）：
+            # server／local＝選 GPU 伺服器／本機時能不能用；local_slow＝本機只有 CPU（D4：可選但要提示很慢）
             models.append({"value": _TM_QWEN_MODEL,
                            "label": f"{_TM_QWEN_MODEL}（實驗：中文會議、中英夾雜明顯更準）",
-                           "limits": {"file_only": True, "remote_only": True,
+                           "limits": {"file_only": True, "server": bool(qs["server"]), "local": bool(qs["local"]),
+                                      "local_slow": qs["local"] == "cpu",
                                       "modes": list(_TM_ZH_MODES + _TM_EN_MODES + _TM_KO_MODES)}})
     except Exception:
         models = [
@@ -735,7 +745,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.23.1",
+        "last": last, "version": "2.24.0",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }

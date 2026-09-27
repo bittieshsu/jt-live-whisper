@@ -467,10 +467,11 @@ function _updateModelRec(mode){
   const recIdx=_mOrder[recM]??6;
   const isNan=['nan','nan2en'].includes(mode),breezeOk=['zh','zh2en','zh2ja','zh2ko','nan','nan2en'].includes(mode);
   const isFile=cselVal($('iSource'))==='file',isGpu=cselVal($('iAsrLoc'))==='gpu';
-  // 後端給的使用限制（例：Qwen3-ASR 限錄音檔、需 GPU 伺服器、限中英韓單向）→ 不適用就停用並說明
+  // 後端給的使用限制（例：Qwen3-ASR 限錄音檔、選的辨識位置要跑得了、限中英韓單向）→ 不適用就停用並說明
   const limitTag=m=>{const L=m.limits;if(!L)return '';
     if(L.file_only&&!isFile)return '僅限錄音檔';
-    if(L.remote_only&&!isGpu)return '需選 GPU 伺服器';
+    if(isGpu&&L.server===false)return 'GPU 伺服器未提供';
+    if(!isGpu&&L.local===false)return '需選 GPU 伺服器';
     if(L.modes&&!L.modes.includes(mode))return '不支援此模式';return ''};
   cselSetItems($('iModel'),_cfgModels.map(m=>{
     const isEnOnly=m.value.endsWith('.en'),isBreeze=m.value==='breeze-asr-26';
@@ -481,6 +482,7 @@ function _updateModelRec(mode){
     if(isBreeze&&!breezeOk)return{value:m.value,label:m.label,tag:'僅台語與華語模式',disabled:true};
     let t=tagFor(m.value,recM,_lastModel);
     if(m.value===recM&&t!=='前次使用')t='此裝置適合';
+    if(m.limits&&m.limits.local_slow&&!isGpu)t='本機只有 CPU，很慢';
     else if((_mOrder[m.value]??0)>recIdx&&!t)t='此裝置速度可能較慢';
     return{value:m.value,label:m.label,tag:t};
   }));
@@ -907,7 +909,7 @@ const _tips={
   // 語音辨識
   iMode:'選擇翻譯方向或轉錄語言。雙向模式建議使用耳麥',
   iAsrLoc:'GPU 伺服器辨識速度快；本機不需網路但較慢',
-  iModel:'較大的模型準確度較高但速度較慢。標有「此裝置適合」的為推薦。標「實驗」的模型只在符合條件時可選（例：Qwen3-ASR 限錄音檔、GPU 伺服器、中英韓單向），灰色項目右側會寫原因',
+  iModel:'較大的模型準確度較高但速度較慢。標有「此裝置適合」的為推薦。標「實驗」的模型只在符合條件時可選（例：Qwen3-ASR 限錄音檔、中英韓單向，且所選的辨識位置跑得了），灰色項目右側會寫原因',
   iScene:'緩衝長度越長句子越完整，越短反應越即時',
   // 語言翻譯
   iEngine:'LLM 品質最好需伺服器，NLLB/Argos 為本機離線',

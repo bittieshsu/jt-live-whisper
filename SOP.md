@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.23.1 (by Jason Cheng)
+即時英翻中字幕系統 v2.24.0 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [使用流程總結](#五使用流程總結) · [常見問題](#六常見問題) · [檔案說明](#七檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -100,7 +100,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 | 語音辨識 | **Whisper** (OpenAI) | **多語（中日韓英）** 主力辨識模型；base / small / large-v3-turbo / large-v3 可選 |
 | 語音辨識 | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，結果直接輸出漢字，不需另外翻譯 |
 | 語音辨識 | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（不支援 Intel Mac） |
-| 語音辨識 | **Qwen3-ASR 0.6B** (Alibaba Qwen) | **實驗選項（v2.23.0 起）**：離線處理錄音檔時選用，中文會議與中英夾雜明顯更準；目前只在 GPU 伺服器執行、限中文／英文／韓文輸入，見「GPU 伺服器的 Qwen3-ASR」 |
+| 語音辨識 | **Qwen3-ASR 0.6B** (Alibaba Qwen) | **實驗選項（v2.23.0 起）**：離線處理錄音檔時選用，中文會議與中英夾雜明顯更準；限中文／英文／韓文輸入。GPU 伺服器（v2.23.0）或本機（v2.24.0 起：Apple Silicon、NVIDIA、CPU）執行，見「Qwen3-ASR（實驗）」 |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + 頻譜分群，可在本機或 GPU 伺服器執行 |
 | 講者辨識 | **Nemotron 3 Diarization** (NVIDIA) | v2.23.0 起程式已支援，**需 transformers 5.18 以上才會啟用**（尚未推出）；啟用前一律使用上一列的方法，行為不變 |
 | 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯（本機或區域網路 LLM 伺服器）；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
@@ -117,6 +117,8 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 | **mlx-whisper** | Apple Silicon GPU 加速（即時與台語離線） | Whisper 全系列、Breeze-ASR-26 |
 | **Moonshine** | 英文超低延遲串流（延遲 ~300ms，僅限本機） | Moonshine medium / small / tiny |
 | **vLLM** | GPU 伺服器的離線辨識（獨立環境的子行程，實驗） | Qwen3-ASR 0.6B |
+| **mlx-audio** | Apple Silicon 本機離線辨識（實驗，v2.24.0 起） | Qwen3-ASR 0.6B（MLX 8bit） |
+| **transformers** | Windows / Linux 本機離線辨識（NVIDIA CUDA 或 CPU，實驗，v2.24.0 起） | Qwen3-ASR 0.6B |
 
 你仍然可以正常從喇叭或耳機聽到聲音。macOS 13 以上使用系統內建的 ScreenCaptureKit 複製一份音訊給辨識程式（只需授權一次「螢幕錄製」，不必安裝驅動）；macOS 12 以下改用 BlackHole 虛擬音訊裝置；Windows 的 WASAPI Loopback 則直接擷取系統播放的音訊，同樣不需要安裝額外驅動；Linux 從 PipeWire / PulseAudio 的 monitor 來源擷取，也不需要虛擬音效卡。
 
@@ -554,7 +556,7 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 
 非 root 帳號或沒有 systemd 的伺服器不會建立服務，沿用原本「用戶端需要時再以 SSH 啟動」的方式，主機重開後要重新啟動服務。
 
-### GPU 伺服器的 Qwen3-ASR（實驗，v2.23.0 起）
+### Qwen3-ASR（實驗，v2.23.0 起）
 
 離線處理錄音檔時可選用的另一個辨識模型。用有標準答案的錄音實測（與現行 large-v3-turbo 同一段、同一份答案）：
 
@@ -569,7 +571,34 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 
 - **限制**：只支援離線處理錄音檔、中文／英文／韓文**單向**模式（日文長檔實測較差、台語遠不如 Breeze-ASR-26，所以不開放）；
   即時字幕、雙向模式仍用 Whisper。選了但不適用時，程式會說明原因並自動改用推薦模型
-- **目前只在 GPU 伺服器執行**（NVIDIA CUDA），伺服器沒有安裝時選單不會出現這個選項
+- **在哪裡跑**：跟著「辨識位置」走——選 GPU 伺服器就在伺服器上跑，選本機就在這台電腦上跑（本機 v2.24.0 起）。
+  該位置跑不了時選單不會出現；命令列指定時會說明原因並改用推薦模型
+
+| 執行位置 | 需要 | 速度（實測） | 記憶體 |
+|---|---|---|---|
+| GPU 伺服器 | 伺服器另建 `venv-qwen`（見下方「GPU 伺服器安裝」） | 37 分鐘會議約 74 秒 | 顯示記憶體約 7~9 GB |
+| Mac Apple Silicon | 安裝程式會裝好 mlx-audio | 37 分鐘會議約 1 分半（M5：辨識 64 秒＋對時間 22 秒） | 約 3.2 GB |
+| Windows／Linux＋NVIDIA 顯示卡 | 安裝程式會裝好 transformers | 37 分鐘會議約 4 分鐘（辨識 224 秒＋對時間 27 秒；DGX Spark 與其他服務共用時實測） | 顯示記憶體約 4.5 GB |
+| Windows／Linux 只有 CPU | 同上，且電腦記憶體 **12 GB 以上**（不足時不開放） | **可能比錄音還久**：2 核筆電（i5-6300U）2 分鐘錄音約 5 分鐘；20 核 ARM 伺服器 6.7 分鐘約 4.5~7 分鐘 | 處理中最高約 7.5 GB |
+| Intel Mac | 不支援 | — | — |
+
+- Windows＋NVIDIA 顯示卡這一格沒有實機驗證過（開發時沒有這種機器），程式路徑與 Linux＋NVIDIA 相同
+
+#### 本機執行（v2.24.0 起）
+
+- **安裝**：新安裝的直接可用。從舊版升級的，`--upgrade` 之後**再執行一次 `./install.sh`**（Windows：`.\install.ps1`），
+  它會補裝 mlx-audio（Mac）或 transformers 5.17 以上（其他平台），約數十 MB。沒有裝時選單不會出現，命令列會寫原因與怎麼裝
+- **模型第一次選用時才下載**（Mac 約 2.3 GB、其他平台約 3.4 GB），放在與 Whisper 模型相同的 HuggingFace 快取，之後不必再連網。
+  選單會標「第一次使用下載約 X GB」
+- **準確度與 GPU 伺服器相同**：同一場 37 分鐘中文會議，Mac 本機與 GPU 伺服器的字錯率都是 18.85%，
+  句子起點誤差的中位數也都是 280 毫秒
+- **只有 CPU 的電腦**：選單標「較準但很慢（本機只有 CPU）」，仍可手動選，建議先用短檔試。
+  處理中記憶體最高約 7.5 GB，**電腦記憶體不到 12 GB 時不開放**（8 GB 的電腦會一直用虛擬記憶體，慢到不能用）。
+  原本選 GPU 伺服器、伺服器剛好失敗而退回本機時，**不會**自動改在 CPU 上跑 Qwen3-ASR，而是用平常的本機模型
+- **本機跑到一半失敗**（例如記憶體不足）→ 自動改用本機推薦的 Whisper 模型重跑那個檔案，畫面會寫原因
+
+#### GPU 伺服器安裝
+
 - **資源**：啟動後約 7 GB 顯示記憶體，處理長錄音時增加到約 9 GB（實測 37 分鐘會議合計 8.9 GB）；服務啟動後約 1~3 分鐘載入完成，載入完成前不會出現在選單。
   一次送進模型的片段數預設 16（`JT_QWEN_BATCH`）：顯示記憶體寬裕時設 32 較快（37 分鐘 49 秒 vs 74 秒），但會到約 12 GB
 
@@ -761,7 +790,7 @@ cd C:\jt-live-whisper
 - 離線處理各階段即時進度：辨識/講者辨識/輸出/LLM 校正/摘要（含 tokens 數與 t/s）
 - 講者辨識時顯示彩色 Speaker N 標籤
 - 辨識模型依裝置與模式自動推薦（「此裝置適合」標籤）
-- 實驗模型（Qwen3-ASR）只在 GPU 伺服器上已就緒時出現；即時字幕、選「本機」辨識、或不支援的模式時會變灰並寫出原因（「僅限錄音檔」「需選 GPU 伺服器」「不支援此模式」），已選的會自動換回推薦模型
+- 實驗模型（Qwen3-ASR）在 GPU 伺服器已就緒、或本機跑得了時出現；即時字幕、所選的辨識位置跑不了、或不支援的模式時會變灰並寫出原因（「僅限錄音檔」「需選 GPU 伺服器」「GPU 伺服器未提供」「不支援此模式」），已選的會自動換回推薦模型；本機只有 CPU 時標「本機只有 CPU，很慢」但仍可選
 - 翻譯引擎依 config 自動推薦（有 LLM 伺服器預設 LLM，無則預設 NLLB）
 - 聊天模式與字幕模式切換
 - 即時辨識/翻譯進度顯示
@@ -962,7 +991,7 @@ WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝
 # 離線處理 + 講者辨識
 ./start.sh --input meeting.mp3 --diarize
 
-# 離線處理 + Qwen3-ASR（實驗，需 GPU 伺服器已安裝）
+# 離線處理 + Qwen3-ASR（實驗；有 GPU 伺服器用伺服器，加 --local-asr 在本機跑）
 ./start.sh --input meeting.mp3 --mode zh -m qwen3-asr-0.6b --diarize
 
 # 指定講者人數
@@ -1179,15 +1208,18 @@ CLI 用法：
 
 | 選項 | 說明 |
 |---|---|
-| qwen3-asr-0.6b | 中文會議、中英夾雜明顯更準（見「GPU 伺服器的 Qwen3-ASR」的實測表） |
+| qwen3-asr-0.6b | 中文會議、中英夾雜明顯更準（見「Qwen3-ASR（實驗）」的實測表）；本機只有 CPU 時標「較準但很慢」 |
 
 以下條件**全部符合**才會出現在清單裡，不符合時看不到、也選不到：
 - 處理的是錄音檔（`--input`），不是即時字幕
-- 辨識位置選「GPU 伺服器」，而且伺服器已安裝 Qwen3-ASR 並載入完成（服務啟動後約 1~3 分鐘）
+- 所選的辨識位置跑得了：
+  - 選「GPU 伺服器」：伺服器已安裝 Qwen3-ASR 並載入完成（服務啟動後約 1~3 分鐘）
+  - 選「本機」（v2.24.0 起）：Apple Silicon Mac 已裝 mlx-audio，或 Windows／Linux 已裝 transformers 5.17 以上（安裝程式會裝）；Intel Mac 不支援
 - 功能模式是中文、英文、韓文的**單向**模式（`zh`／`zh2en`／`zh2ja`／`zh2ko`／`en`／`en2zh`／`ko`／`ko2zh`）；日文、台語、雙向模式不提供
 
+還沒下載模型時說明會加上「第一次使用下載約 X GB」。
 用命令列 `-m qwen3-asr-0.6b` 強制指定但條件不符時，程式會說明原因並改用推薦模型（有 GPU 伺服器用 large-v3-turbo）。
-處理途中 Qwen3-ASR 出錯（例如伺服器上的 Qwen 剛好重啟），會自動改用 GPU 伺服器的 large-v3-turbo 重跑，不會中斷。
+處理途中 Qwen3-ASR 出錯：在 GPU 伺服器上會改用伺服器的 large-v3-turbo 重跑；在本機會改用本機推薦的 Whisper 模型重跑，都不會中斷。
 
 **4) 使用場景**
 
@@ -2113,7 +2145,7 @@ journalctl -u <服務名> | grep source.rejected
       [辨識模型]
           依辨識位置推薦模型
           顯示 [已快取] / [需下載] 標籤（有伺服器設定時）
-          GPU 伺服器已裝 Qwen3-ASR、且是中英韓單向模式時多一個 qwen3-asr-0.6b（實驗）
+          中英韓單向模式、且所選位置跑得了 Qwen3-ASR 時多一個 qwen3-asr-0.6b（實驗）
           |
           v
       (翻譯模式？) --> [LLM 伺服器] host:port --> [翻譯模型]
@@ -2242,9 +2274,16 @@ AirPods 已連線但在系統設定的「聲音 → 輸入」看不到麥克風�
 
 它只在以下條件都符合時出現（v2.23.0 起的實驗選項）：
 1. 處理錄音檔（不是即時字幕）
-2. 辨識位置選 GPU 伺服器，而且那台伺服器**已安裝** Qwen3-ASR（見「GPU 伺服器的 Qwen3-ASR」）
-3. 伺服器上的 Qwen3-ASR **已載入完成**：服務啟動後約 1~3 分鐘，第一次啟動要先下載模型會更久
-4. 模式是中文、英文或韓文的單向模式
+2. 模式是中文、英文或韓文的單向模式
+3. 所選的辨識位置跑得了：
+   - **GPU 伺服器**：那台伺服器**已安裝** Qwen3-ASR（見「Qwen3-ASR（實驗）」的 GPU 伺服器安裝），而且**已載入完成**
+     （服務啟動後約 1~3 分鐘，第一次啟動要先下載模型會更久）
+   - **本機**（v2.24.0 起）：Apple Silicon Mac 要有 mlx-audio、Windows／Linux 要有 transformers 5.17 以上。
+     從舊版升級的要在 `--upgrade` 後**再執行一次** `./install.sh`（Windows：`.\install.ps1`）才會補裝；Intel Mac 不支援；
+     沒有 NVIDIA 顯示卡、只能用 CPU 時，電腦記憶體要 12 GB 以上
+
+命令列指定 `-m qwen3-asr-0.6b` 時會直接印出不能用的原因，例如
+「Qwen3-ASR 無法使用：本機無法執行（未安裝 mlx-audio；重新執行 ./install.sh 會安裝），已改用 large-v3-turbo」。
 
 確認伺服器狀態：`curl http://<GPU 伺服器>:8978/health`，看 `qwen` 欄位——
 `null` 表示沒有安裝；`"ready": false` 時 `error` 欄位會寫原因（載入中、埠號被佔用、一小時內反覆結束而停用等），
@@ -2258,8 +2297,17 @@ AirPods 已連線但在系統設定的「聲音 → 輸入」看不到麥克風�
 
 ### Q: 用 Qwen3-ASR 處理到一半失敗了？
 
-程式會自動改用 GPU 伺服器的 large-v3-turbo 重跑那個檔案，畫面會出現「[降級] Qwen3-ASR 失敗（原因），改用 GPU 伺服器的 large-v3-turbo」。
-伺服器上的 Qwen3-ASR 會自己重啟（一小時內最多 3 次；超過就暫停，等一小時的額度空出來再試，原因寫在 `/health`）。
+- **在 GPU 伺服器上**：程式會自動改用 GPU 伺服器的 large-v3-turbo 重跑那個檔案，畫面會出現「[降級] Qwen3-ASR 失敗（原因），改用 GPU 伺服器的 large-v3-turbo」。
+  伺服器上的 Qwen3-ASR 會自己重啟（一小時內最多 3 次；超過就暫停，等一小時的額度空出來再試，原因寫在 `/health`）
+- **在本機**（v2.24.0 起）：改用本機推薦的 Whisper 模型重跑，畫面會出現「[降級] 本機 Qwen3-ASR 失敗（原因），改用 …」。
+  常見原因是記憶體不足（本機約需 3~6 GB），關掉其他大型程式後再試
+- 某幾段對不上時間（畫面寫「對齊失敗 N 窗」）不算失敗：那幾段的文字照樣保留，時間以約 28 秒的整段估計
+
+### Q: 本機跑 Qwen3-ASR 要多久、要多少空間？
+
+見「Qwen3-ASR（實驗）」的執行位置表。重點：Apple Silicon Mac 與 NVIDIA 顯示卡都比錄音快很多；**只有 CPU 的電腦可能比錄音還慢**，
+所以選單會標出來、伺服器失敗退回本機時也不會自動用它；只有 CPU 時處理中最高約 7.5 GB，記憶體不到 12 GB 的電腦不開放。
+模型第一次選用時下載（Mac 約 2.3 GB、其他約 3.4 GB）。
 
 ### Q: 為什麼講者辨識不用 pyannote.audio？
 
@@ -2326,7 +2374,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 | `translate_meeting.py` | 主程式（跨平台，macOS / Windows / Linux 共用） |
 | `subtitle_overlay.py` | 懸浮字幕覆蓋視窗（PyQt6，啟用時由主程式自動啟動） |
 | `remote_whisper_server.py` | GPU 伺服器程式（FastAPI，由 install.sh 自動部署到伺服器） |
-| `~/jt-whisper-server/venv-qwen/`（GPU 伺服器上） | Qwen3-ASR 的獨立環境（選配，手動建立，見「GPU 伺服器的 Qwen3-ASR」）；記錄在 `/tmp/jt-qwen-worker-<埠號>.log` |
+| `~/jt-whisper-server/venv-qwen/`（GPU 伺服器上） | Qwen3-ASR 的獨立環境（選配，手動建立，見「Qwen3-ASR（實驗）」的 GPU 伺服器安裝）；記錄在 `/tmp/jt-qwen-worker-<埠號>.log` |
 | `whisper.cpp/` | Whisper 語音辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用） |
 | `venv/` | Python 虛擬環境（自動建立） |
 | `config.json` | 使用者設定檔（自動產生，含 LLM 伺服器位址、GPU 伺服器設定、錄音格式等） |
@@ -2356,6 +2404,8 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 Apple Silicon Mac 的統一記憶體架構讓 GPU 可直接存取系統記憶體，不需獨立顯示卡即可流暢執行 AI 推論。16 GB 機型足以應付大多數使用場景。
 
+> 本機跑 Qwen3-ASR（實驗，v2.24.0 起）另需約 3.2 GB 記憶體與 2.3 GB 磁碟（模型），M5 上 37 分鐘會議約 1 分半處理完；Intel Mac 不支援。
+
 ### Windows 建議配置
 
 Windows 搭配 NVIDIA GPU（CUDA）可大幅加速 faster-whisper 語音辨識，**不需要另外架設 GPU 伺服器，單機就能享受 GPU 加速效能**。安裝程式會自動偵測 NVIDIA GPU 並安裝 CUDA 版 PyTorch，無需手動設定。
@@ -2371,6 +2421,9 @@ Windows 搭配 NVIDIA GPU（CUDA）可大幅加速 faster-whisper 語音辨識�
 > **Windows + NVIDIA GPU 是最簡單的高效能方案**：不需要額外硬體或伺服器設定，安裝後直接使用 large-v3-turbo 模型，即時辨識和離線處理都有 GPU 加速。
 
 最低建議 6 GB VRAM 的 NVIDIA 顯示卡。沒有獨顯的 Windows 電腦仍可使用，但離線處理速度會慢很多，即時辨識延遲也較高。
+
+> 本機跑 Qwen3-ASR（實驗，v2.24.0 起）：有 NVIDIA 顯示卡時約需 5 GB 顯示記憶體、3.4 GB 磁碟（模型）；
+> 沒有獨顯時可以選（電腦記憶體需 12 GB 以上），但**處理時間可能比錄音還長**（見「Qwen3-ASR（實驗）」的執行位置表）。
 
 **CUDA 版本注意事項：** faster-whisper 使用的 CTranslate2 引擎需要 CUDA 12.x 的程式庫（`cublas64_12.dll`）。若系統安裝的是 CUDA Toolkit 13.x，安裝腳本會自動偵測並安裝 `nvidia-cublas-cu12` 套件提供相容程式庫。若仍出現「Library cublas64_12.dll is not found」錯誤，可另外安裝 [CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive)（可與 13.x 並存）。
 

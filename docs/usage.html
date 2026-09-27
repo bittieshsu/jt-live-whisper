@@ -198,7 +198,7 @@ cd C:\jt-live-whisper
 ./start.sh --input meeting.mp3 --diarize
 <span class="c"># 指定講者人數（填「發言量足以辨認的人數」，不確定就不要填）</span>
 ./start.sh --input meeting.mp3 --diarize --num-speakers 3 --summarize
-<span class="c"># 中文會議用 Qwen3-ASR（實驗，需 GPU 伺服器已安裝）</span>
+<span class="c"># 中文會議用 Qwen3-ASR（實驗；有 GPU 伺服器用伺服器，加 --local-asr 在本機跑）</span>
 ./start.sh --input meeting.mp3 --mode zh -m qwen3-asr-0.6b --diarize</pre>
     <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh"><b>不確定就不要填 <code>--num-speakers</code></b>。實測 7 人會議填「7」反而最差（講者搞錯 30.15%），不填是 22.90%——發言太短的人聲紋不足以成群，硬湊一群給他會把主要講者拆散。</span><span class="en"><b>When unsure, omit <code>--num-speakers</code>.</b> On a real 7-speaker meeting, passing "7" was the worst result (30.15% speaker confusion) versus 22.90% when omitted — people who barely speak can't form a reliable voiceprint, and forcing a cluster for them fragments the main speakers.</span></p>
 
@@ -270,7 +270,7 @@ journalctl -u jt-live-whisper-webui -f
           <tbody>
             <tr><td>1</td><td><span class="zh">功能模式</span><span class="en">Mode</span></td><td><span class="zh">15 種（不含純錄音）</span><span class="en">15 modes (no record-only)</span></td></tr>
             <tr><td>2</td><td><span class="zh">辨識位置</span><span class="en">Location</span></td><td><span class="zh">GPU 伺服器快 5–10 倍</span><span class="en">GPU server 5–10× faster</span></td></tr>
-            <tr><td>3</td><td><span class="zh">辨識模型</span><span class="en">Model</span></td><td><span class="zh">伺服器模式顯示快取標籤；GPU 伺服器已裝 Qwen3-ASR 且是中英韓單向模式時多一個 qwen3-asr-0.6b（實驗）</span><span class="en">Cache tags in server mode; adds qwen3-asr-0.6b (experimental) when the GPU server has it and the mode is Chinese/English/Korean one-way</span></td></tr>
+            <tr><td>3</td><td><span class="zh">辨識模型</span><span class="en">Model</span></td><td><span class="zh">伺服器模式顯示快取標籤；中英韓單向模式、且所選位置跑得了 Qwen3-ASR 時多一個 qwen3-asr-0.6b（實驗）</span><span class="en">Cache tags in server mode; adds qwen3-asr-0.6b (experimental) for Chinese/English/Korean one-way modes when the chosen location can run it</span></td></tr>
             <tr><td>4</td><td><span class="zh">LLM 伺服器</span><span class="en">LLM server</span></td><td><span class="zh">翻譯模式才詢問，自動偵測類型</span><span class="en">Translate modes; auto-detect</span></td></tr>
             <tr><td>5</td><td><span class="zh">翻譯模型</span><span class="en">Translate model</span></td><td><span class="zh">伺服器模型 + 本機離線選項</span><span class="en">Server models + offline</span></td></tr>
             <tr><td>6</td><td><span class="zh">講者辨識</span><span class="en">Diarization</span></td><td><span class="zh">不辨識 / 自動 / 指定 2–20 人</span><span class="en">None / auto / 2–20 speakers</span></td></tr>
@@ -294,7 +294,7 @@ journalctl -u jt-live-whisper-webui -f
         <tr><td><code>--webui</code></td><td><span class="zh">啟動 WebUI 瀏覽器介面</span><span class="en">Launch the Web UI</span></td><td></td></tr>
         <tr><td><code>--mode MODE</code></td><td><span class="zh">功能模式（en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record）</span><span class="en">Mode (en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record)</span></td><td><code>en2zh</code></td></tr>
         <tr><td><code>--asr ASR</code></td><td><span class="zh">辨識引擎（whisper / moonshine / faster-whisper）</span><span class="en">ASR engine</span></td><td><code>whisper</code></td></tr>
-        <tr><td><code>-m, --model</code></td><td><span class="zh">辨識模型（base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b）；qwen3-asr-0.6b 為實驗選項，限離線、中英韓單向、需 GPU 伺服器已安裝，不符合時說明原因並改用推薦模型</span><span class="en">Recognition model (base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b); qwen3-asr-0.6b is experimental: offline only, Chinese/English/Korean one-way, needs it installed on the GPU server — otherwise the reason is shown and the recommended model is used</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
+        <tr><td><code>-m, --model</code></td><td><span class="zh">辨識模型（base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b）；qwen3-asr-0.6b 為實驗選項，限離線、中英韓單向，在 GPU 伺服器或本機（<code>--local-asr</code>）執行，不符合時說明原因並改用推薦模型</span><span class="en">Recognition model (base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b); qwen3-asr-0.6b is experimental: offline only, Chinese/English/Korean one-way, on the GPU server or locally (<code>--local-asr</code>) — otherwise the reason is shown and the recommended model is used</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
         <tr><td><code>--moonshine-model</code></td><td><span class="zh">Moonshine 模型（medium / small / tiny）</span><span class="en">Moonshine model</span></td><td><code>medium</code></td></tr>
         <tr><td><code>-s, --scene</code></td><td><span class="zh">使用場景（meeting / training / presentation / subtitle）</span><span class="en">Scene</span></td><td><code>training</code></td></tr>
         <tr><td><code>-e, --engine</code></td><td><span class="zh">翻譯引擎（llm / nllb / argos）</span><span class="en">Translation engine</span></td><td><code>llm</code></td></tr>
@@ -413,15 +413,27 @@ webui.py (FastAPI + WebSocket)
       </div>
 
       <div class="feat-block" id="qwen">
-        <h3><span class="zh">GPU 伺服器的 Qwen3-ASR（實驗，v2.23.0 起）</span><span class="en">Qwen3-ASR on the GPU server (experimental, v2.23.0+)</span></h3>
+        <h3><span class="zh">Qwen3-ASR（實驗，v2.23.0 起）</span><span class="en">Qwen3-ASR (experimental, v2.23.0+)</span></h3>
         <p><span class="zh">離線處理錄音檔時可選用的另一個辨識模型。與現行 large-v3-turbo 同條件實測：中文真實會議 20 場字錯率 <strong>28.78% → 15.75%</strong>；中英夾雜時少數語言找回比例提高 2~3 倍（中文為主的會議，英文詞 34.7% → 74.9%）；低音量 20.67% → 14.33%；韓文長檔 13.35% → 3.54%。日文長檔較差（6.97% → 8.38%）。</span><span class="en">An alternative recognition model for offline files. Measured against large-v3-turbo under identical conditions: 20 real Chinese meetings CER <strong>28.78% → 15.75%</strong>; 2–3× better recall of the minority language in Chinese–English code-switching (English words 34.7% → 74.9%); low volume 20.67% → 14.33%; Korean long-form 13.35% → 3.54%. Japanese long-form is worse (6.97% → 8.38%).</span></p>
         <p style="margin-top:12px"><span class="zh"><strong>以下條件都符合才能用</strong>（不符合時選單與 WebUI 選不到；命令列指定會說明原因並改用推薦模型）：</span><span class="en"><strong>Available only when all of these hold</strong> (otherwise menus and the WebUI won't offer it; on the CLI the reason is shown and the recommended model is used):</span></p>
         <ul>
           <li><span class="zh">處理錄音檔（<code>--input</code> 或 WebUI 選檔案）——即時字幕不提供，WebUI 標「僅限錄音檔」</span><span class="en">Processing a file (<code>--input</code> or a file in the WebUI) — not for live captions; WebUI shows "file only"</span></li>
-          <li><span class="zh">辨識位置是 GPU 伺服器，且伺服器已安裝、已載入完成（啟動後約 1~3 分鐘）</span><span class="en">Recognition on the GPU server, installed and loaded (1–3 min after start)</span></li>
+          <li><span class="zh">所選的辨識位置跑得了：GPU 伺服器已安裝並載入完成（啟動後約 1~3 分鐘），或本機（v2.24.0 起）有 mlx-audio（Apple Silicon）／transformers 5.17 以上（Windows、Linux）——安裝程式會裝，Intel Mac 不支援</span><span class="en">The chosen location can run it: the GPU server has it installed and loaded (1–3 min after start), or locally (v2.24.0+) mlx-audio (Apple Silicon) / transformers 5.17+ (Windows, Linux) is present — the installer adds them; Intel Mac is not supported</span></li>
           <li><span class="zh">中文、英文、韓文的單向模式——日文、台語、雙向不提供（台語請用 Breeze-ASR-26）</span><span class="en">Chinese / English / Korean one-way modes — not Japanese, Taiwanese Hokkien or two-way (use Breeze-ASR-26 for Hokkien)</span></li>
         </ul>
-        <div class="cmd-label" style="margin-top:14px"><span class="zh">安裝（在 GPU 伺服器上，用執行辨識服務的帳號）</span><span class="en">Install (on the GPU server, as the service account)</span></div>
+        <div class="tbl-wrap" style="margin-top:14px"><table>
+          <thead><tr><th><span class="zh">執行位置</span><span class="en">Where</span></th><th><span class="zh">速度（實測）</span><span class="en">Speed (measured)</span></th><th><span class="zh">記憶體</span><span class="en">Memory</span></th></tr></thead>
+          <tbody>
+            <tr><td><span class="zh">GPU 伺服器（vLLM）</span><span class="en">GPU server (vLLM)</span></td><td><span class="zh">37 分鐘會議約 74 秒</span><span class="en">37-min meeting in ~74 s</span></td><td><span class="zh">顯示記憶體約 7~9 GB</span><span class="en">~7–9 GB VRAM</span></td></tr>
+            <tr><td><span class="zh">Mac Apple Silicon（MLX）</span><span class="en">Mac Apple Silicon (MLX)</span></td><td><span class="zh">37 分鐘會議約 1 分半（M5）</span><span class="en">37-min meeting in ~1.5 min (M5)</span></td><td><span class="zh">約 3.2 GB</span><span class="en">~3.2 GB</span></td></tr>
+            <tr><td><span class="zh">Windows／Linux＋NVIDIA</span><span class="en">Windows / Linux + NVIDIA</span></td><td><span class="zh">37 分鐘會議約 4 分鐘</span><span class="en">37-min meeting in ~4 min</span></td><td><span class="zh">顯示記憶體約 4.5 GB</span><span class="en">~4.5 GB VRAM</span></td></tr>
+            <tr><td><span class="zh">Windows／Linux 只有 CPU</span><span class="en">Windows / Linux, CPU only</span></td><td><span class="zh">可能比錄音還久：2 核筆電 2 分鐘錄音約 5 分鐘</span><span class="en">Can be slower than real time: a 2-core laptop needs ~5 min for 2 min of audio</span></td><td><span class="zh">最高約 7.5 GB（電腦需 12 GB 以上）</span><span class="en">Up to ~7.5 GB (needs a 12 GB+ machine)</span></td></tr>
+          </tbody>
+        </table></div>
+        <ul>
+          <li><span class="zh"><strong>本機</strong>：從舊版升級的，<code>--upgrade</code> 後再執行一次 <code>./install.sh</code>（Windows：<code>.\install.ps1</code>）補裝套件；模型第一次選用時下載（Mac 約 2.3 GB、其他約 3.4 GB）。Mac 本機與 GPU 伺服器同一場會議字錯率相同（18.85%）。只有 CPU 時選單標「較準但很慢」，電腦記憶體不到 12 GB 不開放；GPU 伺服器失敗退回本機時不會自動在 CPU 上跑它。Windows＋NVIDIA 沒有實機驗證過</span><span class="en"><strong>Local</strong>: after <code>--upgrade</code> from an older version, run <code>./install.sh</code> (Windows: <code>.\install.ps1</code>) once more to add the packages; models download on first use (~2.3 GB on Mac, ~3.4 GB elsewhere). The Mac and the GPU server give the same CER on the same meeting (18.85%). CPU-only machines see "accurate but slow" and need 12 GB+ RAM; a GPU-server failure never silently falls back to Qwen on CPU. Windows + NVIDIA has not been tested on real hardware</span></li>
+        </ul>
+        <div class="cmd-label" style="margin-top:14px"><span class="zh">GPU 伺服器安裝（在 GPU 伺服器上，用執行辨識服務的帳號）</span><span class="en">GPU server install (on the GPU server, as the service account)</span></div>
 <pre>cd ~/jt-whisper-server
 python3 -m venv venv-qwen
 venv-qwen/bin/pip install --upgrade pip
@@ -433,7 +445,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
         <ul>
           <li><span class="zh"><strong>資源</strong>：啟動後約 7 GB 顯示記憶體、處理長錄音時約 9 GB（一次處理的片段數 <code>JT_QWEN_BATCH</code> 預設 16，設 32 較快但約 12 GB），磁碟約 14 GB（獨立環境 9.5 GB＋模型約 4 GB），建議 16 GB 以上的顯示卡</span><span class="en"><strong>Resources</strong>: ~7 GB VRAM after start, ~9 GB while processing long files (batch <code>JT_QWEN_BATCH</code> defaults to 16; 32 is faster but ~12 GB), ~14 GB disk (9.5 GB venv + ~4 GB models); 16 GB+ GPU recommended</span></li>
           <li><span class="zh"><strong>為什麼要獨立環境</strong>：它需要的 PyTorch 版本與辨識服務不同，裝在一起會互相衝突；服務會自動帶起一個只聽本機的子行程，服務停止時一起結束</span><span class="en"><strong>Why a separate venv</strong>: it needs a different PyTorch version from the service; the service starts a localhost-only child process and stops it with the service</span></li>
-          <li><span class="zh"><strong>出錯時</strong>：處理途中失敗會自動改用 GPU 伺服器的 large-v3-turbo 重跑；伺服器上的 Qwen3-ASR 會自動重啟（一小時內最多 3 次，超過就暫停到一小時後再試）。狀態看 <code>/health</code> 的 <code>qwen</code> 欄位，記錄在 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code></span><span class="en"><strong>On errors</strong>: a failure mid-file reruns it with the GPU server's large-v3-turbo; Qwen3-ASR restarts itself (max 3 times per hour, then pauses and retries after the hour). Status: the <code>qwen</code> field of <code>/health</code>; log at <code>/tmp/jt-qwen-worker-&lt;port&gt;.log</code></span></li>
+          <li><span class="zh"><strong>出錯時</strong>：處理途中失敗會自動改用 GPU 伺服器的 large-v3-turbo 重跑（本機跑的改用本機推薦的 Whisper）；伺服器上的 Qwen3-ASR 會自動重啟（一小時內最多 3 次，超過就暫停到一小時後再試）。狀態看 <code>/health</code> 的 <code>qwen</code> 欄位，記錄在 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code></span><span class="en"><strong>On errors</strong>: a failure mid-file reruns it with the GPU server's large-v3-turbo (locally: the recommended local Whisper); Qwen3-ASR restarts itself (max 3 times per hour, then pauses and retries after the hour). Status: the <code>qwen</code> field of <code>/health</code>; log at <code>/tmp/jt-qwen-worker-&lt;port&gt;.log</code></span></li>
           <li><span class="zh"><strong>移除</strong>：刪掉 <code>venv-qwen</code> 後重啟服務</span><span class="en"><strong>Remove</strong>: delete <code>venv-qwen</code> and restart the service</span></li>
         </ul>
       </div>
@@ -488,7 +500,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
         <tr><td>NVIDIA DGX Spark</td><td>128 GB</td><td>~10 <span class="zh">秒</span><span class="en">s</span></td><td><span class="zh">同時跑 Ollama LLM + Whisper，一機搞定</span><span class="en">Ollama LLM + Whisper on one box</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note" style="margin-top:10px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「GPU 伺服器的 Qwen3-ASR」）。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7–9 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR on the GPU server" above).</span></p>
+    <p class="note" style="margin-top:10px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「Qwen3-ASR」）。本機跑則見該節的執行位置表。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7–9 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR" above). For local use see the table in that section.</span></p>
 
     <div class="cmd-label" style="margin-top:18px"><span class="zh">LLM 伺服器（選配，翻譯 / 摘要）</span><span class="en">LLM server (optional)</span></div>
     <div class="tbl-wrap"><table>

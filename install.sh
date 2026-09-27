@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.23.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.24.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1271,6 +1271,45 @@ print('found' if found else 'notfound')
         fi
     fi
 
+    deactivate
+}
+
+# ─── Qwen3-ASR 本機辨識（實驗，v2.24.0）──────────
+# Apple Silicon 用 mlx-audio（會一併裝 transformers）；soynlp 是韓文對齊用的。
+# 模型第一次選用時才下載（約 2.3 GB），這裡只裝套件。看能力不看套件名稱：舊版 mlx-audio 沒有 qwen3_asr
+_QWEN_MLX_CHECK='import importlib.util as u, os, sys, soynlp
+s = u.find_spec("mlx_audio")
+sys.exit(0 if s and any(os.path.isdir(os.path.join(p, "stt", "models", "qwen3_asr")) for p in (s.submodule_search_locations or [])) else 1)'
+
+# 其他平台（install-linux.sh、install.ps1 同一個判斷）：transformers 內建 qwen3_asr（5.17 起）＋ torch ＋ soynlp
+_QWEN_TF_CHECK='import sys, torch, soynlp
+from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES as M
+sys.exit(0 if "qwen3_asr" in M else 1)'
+
+check_qwen_local_mac() {
+    # 僅 ARM64 Mac（Intel Mac 決定不支援）
+    if [ "$(uname -m)" != "arm64" ]; then
+        return 0
+    fi
+    section "Qwen3-ASR 本機辨識（實驗，Apple Silicon MLX）"
+    source "$VENV_DIR/bin/activate"
+    if python3 -c "$_QWEN_MLX_CHECK" &>/dev/null; then
+        check_ok "mlx-audio（已安裝）"
+    else
+        check_install "正在安裝 mlx-audio ..."
+        if run_spinner "安裝 mlx-audio..." pip install --disable-pip-version-check "mlx-audio>=0.5.6" soynlp \
+                && python3 -c "$_QWEN_MLX_CHECK" &>/dev/null; then
+            echo ""
+            check_ok "mlx-audio 安裝完成（Qwen3-ASR 模型第一次選用時下載，約 2.3 GB）"
+        else
+            echo ""
+            check_notice "mlx-audio 安裝失敗：Qwen3-ASR 只能透過 GPU 伺服器使用，其他功能不受影響"
+        fi
+    fi
+    # 與 mlx-whisper 共用 MLX（2026-09-27 實測 mlx-audio 0.5.6 不動既有套件版本、辨識結果逐字相同）；裝完再確認一次
+    if ! python3 -c "import mlx_whisper" &>/dev/null; then
+        check_notice "mlx-whisper 無法載入，請重新執行 ./install.sh"
+    fi
     deactivate
 }
 
@@ -2807,6 +2846,15 @@ print('found' if found else '')
         fi
     fi
 
+    # Qwen3-ASR 本機（僅 ARM64）
+    if [ "$(uname -m)" = "arm64" ]; then
+        if python3 -c "$_QWEN_MLX_CHECK" &>/dev/null 2>&1; then
+            echo -e "  ${C_OK}■${NC} Qwen3-ASR 本機辨識（實驗）  ${C_DIM}離線中英韓，mlx-audio${NC}"
+        else
+            echo -e "  ${C_DIM}□ Qwen3-ASR 本機辨識（實驗）  離線中英韓，mlx-audio${NC}"
+        fi
+    fi
+
     # GPU 伺服器
     local rw_host=""
     if [ -f "$SCRIPT_DIR/config.json" ]; then
@@ -2913,5 +2961,6 @@ check_argos_model
 check_nllb_model
 check_faster_whisper_model
 check_mlx_whisper
+check_qwen_local_mac
 setup_remote_whisper
 print_summary

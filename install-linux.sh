@@ -248,6 +248,21 @@ check_linux_venv() {
         fi
     done
 
+    # Qwen3-ASR 本機辨識（實驗，v2.24.0）：transformers 5.17 起內建。看能力不看版本號——
+    # 已經裝了舊版 transformers 的機器 import 會成功，但沒有 qwen3_asr。soynlp 是韓文對齊用的。
+    # 模型第一次選用時才下載（約 3.4 GB），這裡只裝套件；失敗不影響其他功能
+    if python3 -c "$_QWEN_TF_CHECK" >/dev/null 2>&1; then
+        check_ok "transformers（Qwen3-ASR 本機辨識，實驗）（已安裝）"
+    elif run_spinner "transformers（Qwen3-ASR 本機辨識，實驗）..." \
+            pip install --disable-pip-version-check "transformers>=5.17" soynlp \
+            && python3 -c "$_QWEN_TF_CHECK" >/dev/null 2>&1; then
+        echo ""
+        check_ok "transformers（Qwen3-ASR 本機辨識，實驗；模型第一次選用時下載，約 3.4 GB）"
+    else
+        echo ""
+        check_notice "transformers 安裝失敗：Qwen3-ASR 只能透過 GPU 伺服器使用，其他功能不受影響"
+    fi
+
     if _has_nvidia; then
         if python3 -c "import ctranslate2,sys; sys.exit(0 if ctranslate2.get_supported_compute_types('cuda') else 1)" >/dev/null 2>&1; then
             check_ok "CTranslate2 可使用 CUDA（本機辨識 GPU 加速）"
@@ -674,6 +689,9 @@ print_linux_summary() {
     python3 -c "from moonshine_voice import get_model_for_language" >/dev/null 2>&1 \
         && check_ok "Moonshine（英文低延遲辨識）" \
         || echo -e "  ${C_DIM}[略過]${NC} Moonshine 未安裝（選裝，不影響主要功能）"
+    python3 -c "$_QWEN_TF_CHECK" >/dev/null 2>&1 \
+        && check_ok "Qwen3-ASR 本機辨識（實驗）" \
+        || echo -e "  ${C_DIM}[略過]${NC} Qwen3-ASR 本機辨識未安裝（實驗，不影響主要功能）"
     deactivate 2>/dev/null
 
     echo ""

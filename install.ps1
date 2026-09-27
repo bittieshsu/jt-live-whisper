@@ -244,6 +244,13 @@ function venv_import_ok($module) {
     return ($LASTEXITCODE -eq 0)
 }
 
+# Qwen3-ASR 本機辨識（v2.24.0）：transformers 內建 qwen3_asr（5.17 起）＋ torch ＋ soynlp（與 install.sh 的 _QWEN_TF_CHECK 同一個判斷）
+$QWEN_TF_CHECK = "import sys, torch, soynlp; from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES as M; sys.exit(0 if 'qwen3_asr' in M else 1)"
+function qwen_tf_ok {
+    & $VENV_PYTHON -c $QWEN_TF_CHECK 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function hf_download($repo, $desc, $localDir) {
     # HuggingFace 模型下載，SSL 失敗時自動停用憑證驗證重試
     $localDirArg = if ($localDir) { ", local_dir=r'$localDir'" } else { "" }
@@ -301,7 +308,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.23.1 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.24.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -919,6 +926,21 @@ except Exception as e:
     }
 } else {
     check_notice "Moonshine 安裝失敗（非必要，可忽略）"
+}
+
+# ─── Qwen3-ASR 本機辨識（實驗，v2.24.0）──────────────────────
+# transformers 5.17 起內建。看能力不看版本號：已經裝了舊版 transformers 時 import 會成功，但沒有 qwen3_asr
+# （pip_install 只看套件在不在，這裡不能用它）。soynlp 是韓文對齊用的。模型第一次選用時才下載（約 3.4 GB）
+if (qwen_tf_ok) {
+    check_ok "transformers（Qwen3-ASR 本機辨識，實驗）（已安裝）"
+} else {
+    info "安裝 transformers（Qwen3-ASR 本機辨識，實驗）..."
+    & $VENV_PIP install "transformers>=5.17" soynlp --quiet 2>$null
+    if (qwen_tf_ok) {
+        check_ok "transformers（Qwen3-ASR 本機辨識，實驗；模型第一次選用時下載，約 3.4 GB）"
+    } else {
+        check_notice "transformers 安裝失敗：Qwen3-ASR 只能透過 GPU 伺服器使用，其他功能不受影響"
+    }
 }
 
 if ($installFailed.Count -gt 0) {
@@ -2573,7 +2595,8 @@ $features = @(
     @{ OK = (venv_import_ok "resemblyzer");    Desc = "AI 講者辨識 (--diarize)"; Engine = "resemblyzer" },
     @{ OK = (venv_import_ok "argostranslate"); Desc = "Argos 離線翻譯";          Engine = "僅英翻中" },
     @{ OK = (Test-Path (Join-Path $env:LOCALAPPDATA "jt-live-whisper\models\nllb-600m\model.bin")); Desc = "NLLB 離線翻譯"; Engine = "中日韓英互譯" },
-    @{ OK = (venv_import_ok "moonshine_voice");      Desc = "Moonshine 即時辨識";       Engine = "英文低延遲" }
+    @{ OK = (venv_import_ok "moonshine_voice");      Desc = "Moonshine 即時辨識";       Engine = "英文低延遲" },
+    @{ OK = (qwen_tf_ok);                            Desc = "Qwen3-ASR 本機辨識（實驗）"; Engine = "離線中英韓，transformers" }
 )
 
 foreach ($feat in $features) {
