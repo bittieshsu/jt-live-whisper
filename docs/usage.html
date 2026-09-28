@@ -506,8 +506,8 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
     <div class="tbl-wrap"><table>
       <thead><tr><th><span class="zh">用途</span><span class="en">Use</span></th><th><span class="zh">建議模型</span><span class="en">Model</span></th><th><span class="zh">記憶體 / VRAM</span><span class="en">RAM / VRAM</span></th></tr></thead>
       <tbody>
-        <tr><td><span class="zh">翻譯</span><span class="en">Translation</span></td><td><span class="zh">14B 以上（如 gemma4:26b、qwen2.5:14b）</span><span class="en">≥14B (e.g. gemma4:26b, qwen2.5:14b)</span></td><td>~12 GB（gemma4:26b ~17 GB）</td></tr>
-        <tr><td><span class="zh">摘要</span><span class="en">Summary</span></td><td><span class="zh">120B 以上（如 gpt-oss:120b）</span><span class="en">≥120B (e.g. gpt-oss:120b)</span></td><td>~80 GB</td></tr>
+        <tr><td><span class="zh">翻譯</span><span class="en">Translation</span></td><td><span class="zh">14B 以上（如 gemma4:26b、qwen2.5:14b）。選用不會思考、或思考可關閉的模型</span><span class="en">≥14B (e.g. gemma4:26b, qwen2.5:14b). Use a model without thinking, or whose thinking can be turned off</span></td><td>~12 GB（gemma4:26b ~17 GB）</td></tr>
+        <tr><td><span class="zh">摘要 / 逐字稿校正</span><span class="en">Summary / transcript correction</span></td><td><span class="zh">27B 以上（預設 qwen3.8:27b）</span><span class="en">≥27B (default qwen3.8:27b)</span></td><td>~18 GB</td></tr>
       </tbody>
     </table></div>
 

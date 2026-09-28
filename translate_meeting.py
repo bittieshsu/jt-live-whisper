@@ -2067,7 +2067,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.24.0"
+APP_VERSION = "2.25.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -13731,6 +13731,61 @@ def _fix_speaker_labels_in_text(text):
     return "\n".join(result)
 
 
+def _write_meeting_summary(meeting, corrected, output_path, input_path, metadata=None, audio_path=""):
+    """會議分析（＋校正逐字稿）寫成摘要 .txt 與 .html。回傳值與 summarize_log_file 相同 (txt, 文字, html)"""
+    pub, segs, measured = meeting
+    corrected = re.sub(r"^\s*#{2,4}\s*校正逐字稿\s*\n", "", corrected or "").strip()
+    text = meeting_summary_markdown(pub, segs, measured)
+    if corrected:
+        text += "\n## 校正逐字稿\n\n" + corrected + "\n"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(_build_metadata_header(metadata) + text)
+    html_path = os.path.splitext(output_path)[0] + ".html"
+    _th = os.path.splitext(input_path)[0] + ".html"
+    meeting_summary_html(pub, segs, html_path, os.path.basename(input_path), measured=measured,
+                         corrected=corrected, summary_txt_path=output_path, transcript_txt_path=input_path,
+                         metadata=metadata, transcript_html_path=_th if os.path.exists(_th) else "",
+                         audio_path=audio_path)
+    return output_path, text, html_path
+
+
+def _meeting_for_summary(transcript, model, host, port, server_type="ollama", topic=None):
+    """摘要要用的會議分析（JTDT）。能用時回傳 (結果, 段落, 時間是否量到的)；
+    不能用（套件不在、逐字稿讀不出段落、只有韓文／日文原文、分析整個失敗）時說明原因並回 None，呼叫端退回舊的摘要方式"""
+    if not _meeting_modules():
+        print(f"  {C_HIGHLIGHT}[提示] 找不到會議分析模組 jtdt_meeting，這次用舊的摘要方式"
+              f"（從舊版升級的請再執行一次 {_INSTALL_CMD} --upgrade）{RESET}")
+        return None
+    segs, measured = meeting_segments_from_log(transcript)
+    if len(segs) < 2:
+        print(f"  {C_DIM}[提示] 逐字稿讀不出足夠的段落（{len(segs)} 段），這次用舊的摘要方式{RESET}")
+        return None
+    ok, why = _meeting_language_ok(segs)
+    if not ok:
+        print(f"  {C_HIGHLIGHT}[提示] {why}，這次用舊的摘要方式{RESET}")
+        return None
+    _loc = "本機" if host in ("localhost", "127.0.0.1", "::1") else "伺服器"
+    sbar = _SummaryStatusBar(model=model, task="會議分析：準備中", location=_loc).start()
+
+    def _prog(frac, msg):
+        sbar.set_task(f"會議分析：{msg}", reset_timer=False)
+        sbar.set_progress(f"{frac:.0%}")
+        _webui_send({"type": "progress", "stage": f"會議分析（{model}）", "detail": f"{msg}，{frac:.0%}"})
+    try:
+        pub = meeting_analysis(segs, model, host, port, server_type, context=meeting_context(topic),
+                               on_progress=_prog)
+    except Exception as e:
+        sbar.stop()
+        print(f"  {C_HIGHLIGHT}[降級] 會議分析失敗（{type(e).__name__}: {e}），這次用舊的摘要方式{RESET}")
+        return None
+    sbar.stop()
+    n = {k: len(v) for k, v in (pub.get("items") or {}).items()}
+    print(f"  {C_OK}會議分析完成{RESET} {C_DIM}（{len(segs)} 段、{pub.get('llm_calls', 0)} 次模型請求；"
+          f"決議 {n.get('decisions', 0)}、待辦 {n.get('actions', 0)}、風險 {n.get('risks', 0)}、"
+          f"未決 {n.get('questions', 0)}、事件 {n.get('impacts', 0)}；議題 {len(pub.get('chapters') or [])}）{RESET}")
+    return pub, segs, measured
+
+
 def summarize_log_file(input_path, model, host, port, server_type="ollama",
                        topic=None, metadata=None, summary_mode="both",
                        audio_path="", summary_rounds=1):
@@ -13820,6 +13875,14 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
     else:
         out_name = f"摘要_{basename}"
     output_path = os.path.join(dirpath, out_name)
+
+    # 會議分析（JTDT，v2.25.0）：重點摘要改用它；「摘要＋校正逐字稿」時校正逐字稿仍用下面原本的方式產生
+    meeting = _meeting_for_summary(transcript, model, host, port, server_type, topic) \
+        if summary_mode in ("both", "summary") else None
+    if meeting is not None:
+        if summary_mode == "summary":
+            return _write_meeting_summary(meeting, "", output_path, input_path, metadata, audio_path)
+        summary_mode = "transcript"          # 下面只產生校正逐字稿
 
     # 查詢模型 context window，動態決定分段大小
     num_ctx = query_ollama_num_ctx(model, host, port, server_type=server_type)
@@ -14056,6 +14119,9 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
     # 校正逐字稿：LLM 漏掉的 Speaker 標籤，自動補上（與 HTML 邏輯對齊）
     summary = _fix_speaker_labels_in_text(summary)
 
+    if meeting is not None:                   # both：會議分析＋校正逐字稿
+        return _write_meeting_summary(meeting, summary, output_path, input_path, metadata, audio_path)
+
     meta_header = _build_metadata_header(metadata)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(meta_header + summary + "\n")
@@ -14074,24 +14140,564 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
     return output_path, summary, html_path
 
 
+# ── 會議摘要：jt-doc-tools（JTDT）的會議分析（v2.25.0）──────────────────
+# 使用者 2026-09-28：「把 jtdt 的會議摘要功能完全抄過來，讓 jtlw 產生的會議摘要也有同樣高品質」。
+# 核心在 jtdt_meeting/（與 JTDT 同一份、**不在這邊改**，tools/test_jtdt_modules_in_sync.py 比對雜湊）；
+# 這裡只做 jtlw 的接法：jtlw 逐字稿 → 段落 → full_analysis(段落, ask) → Markdown／HTML。
+# 它的設計（每一條都要附段號、引用逐條驗證、摘要只從驗證過的項目寫）與實測數據見 jtdt_meeting/meeting_insight.py 開頭。
+#
+# 呼叫模型照 JTDT 的 LLMClient.text_query 一比一：/v1/chat/completions、溫度 0、system 一句「只輸出答案」、
+# 使用者訊息前加 /no_think、Ollama 再帶 think:false 與 reasoning_effort:"none"。
+# 多做兩件 jtlw 本來就有的事：去掉 <think>…</think>（JTDT 沒去，模型吐推理時那一窗會變成空的）、
+# 模型寫的文字偵測到簡體才轉繁體（_to_traditional）。
+_MEETING_SYSTEM = ("Respond with ONLY the requested output. No reasoning traces, no <think> tags, "
+                   "no prefaces, no explanations. Output the final answer directly.")
+_MEETING_TIMEOUT = 600          # JTDT timeout_seconds 預設值
+_MEETING_KIND_ORDER = ("impacts", "decisions", "actions", "risks", "questions")
+_MEETING_KIND_LABELS = {"impacts": "事件與影響", "decisions": "決議", "actions": "待辦",
+                        "risks": "風險", "questions": "未決問題"}
+_MEETING_TS = r"\d{1,2}:\d{2}(?::\d{2})?"
+# jtlw 逐字稿的一行：[時間] 或 [起-迄]、雙向的 ◀／▶、[Speaker N]、[語言標籤] 文字
+_MEETING_LINE_RE = re.compile(
+    rf"^\[({_MEETING_TS})(?:-({_MEETING_TS}))?\]\s*([◀▶])?\s*(?:\[(Speaker \d+)\]\s*)?\[([^\]\s]{{1,4}})\]\s*(.+)$")
+_MEETING_DIRECTION = {"◀": "對方", "▶": "我方"}
+
+
+def _meeting_modules():
+    """(meeting_insight, meeting_charts, transcript_parse)；jtdt_meeting 不在時回 None。
+    從舊版升級時，第一次 --upgrade 跑的是舊的安裝腳本、拿不到這個資料夾（要跑第二次），
+    這時退回舊的摘要方式，不可以讓整個程式 import 失敗"""
+    try:
+        from jtdt_meeting import meeting_insight, meeting_charts, transcript_parse
+        return meeting_insight, meeting_charts, transcript_parse
+    except Exception:
+        return None
+
+
+def _clock_ms(s):
+    sec = 0
+    for p in s.split(":"):
+        sec = sec * 60 + int(p)
+    return sec * 1000
+
+
+def meeting_segments_from_log(text):
+    """jtlw 逐字稿文字 → (段落, 時間是否為量到的)。段落是 JTDT 會議分析的格式
+    `{seq, speaker?, start_ms, end_ms?, text}`，已經照 JTDT 的規則合併同一講者的短句、切開超過 400 字的段落、重新編號。
+
+    - 翻譯模式同一個時間點有原文與譯文兩行：**取「中」那一行**（分析的提示詞與引用比對都是中文），沒有中文才取第一行
+    - 離線逐字稿有起訖時間（量到的）；即時逐字稿只有牆上時間，換成相對第一句的時間、結束用下一句的開始補
+      （與 JTDT 讀純文字逐字稿相同，所以「發言時間」要標成推估）
+    - 講者：[Speaker N]；雙向逐字稿沒有講者時用 ◀ 對方／▶ 我方"""
+    mods = _meeting_modules()
+    rows = []
+    for raw in (text or "").splitlines():
+        m = _MEETING_LINE_RE.match(raw.strip())
+        if not m:
+            continue
+        t1, t2, direction, spk, label, body = m.groups()
+        body = body.strip()
+        if not body:
+            continue
+        who = spk or _MEETING_DIRECTION.get(direction or "")
+        key = (t1, t2, who)
+        if rows and rows[-1]["key"] == key and label not in rows[-1]["texts"]:
+            rows[-1]["texts"][label] = body
+        else:
+            rows.append({"key": key, "t1": t1, "t2": t2, "who": who, "texts": {label: body}})
+    measured = bool(rows) and all(r["t2"] for r in rows)
+    segs, base, prev, day = [], None, None, 0
+    offset, last_start, last_end = 0, None, 0     # --summarize 一次給多個檔：每個檔都從 00:00 起算
+    for r in rows:
+        start = _clock_ms(r["t1"])
+        if not r["t2"]:                     # 即時逐字稿：牆上時間 → 相對第一句（跨午夜補一天）
+            if prev is not None and start + day < prev - 12 * 3600 * 1000:
+                day += 24 * 3600 * 1000
+            start += day
+            prev = start
+            base = start if base is None else base
+            start -= base
+        elif last_start is not None and start + offset < last_start - 60 * 1000:
+            offset = last_end               # 時間倒退超過一分鐘＝下一個檔案，接在前一個後面
+        if r["t2"]:
+            start += offset
+            last_start = start
+        seg = {"text": r["texts"].get("中") or next(iter(r["texts"].values())), "start_ms": start}
+        if r["t2"]:
+            end = _clock_ms(r["t2"]) + offset
+            if end >= start:
+                seg["end_ms"] = end
+                last_end = max(last_end, end)
+        if r["who"]:
+            seg["speaker"] = r["who"]
+        segs.append(seg)
+    if not measured:
+        for a, b in zip(segs, segs[1:]):
+            if "end_ms" not in a and b["start_ms"] >= a["start_ms"]:
+                a["end_ms"] = b["start_ms"]
+    if mods and segs:
+        segs = mods[2]._merge(segs)
+    else:
+        for i, s in enumerate(segs, 1):
+            s["seq"] = i
+    return segs, measured
+
+
+def _meeting_language_ok(segments):
+    """JTDT 的引用驗證只認漢字（二元字組）與拉丁字：**韓文會整條被當成空的丟掉、日文只剩漢字勉強比得到**
+    （2026-09-28 實測 `수요일까지 견적서 송부` → 內容是空的）。這兩種只有原文、沒有中文譯文時不走會議分析。
+    回傳 (能不能用, 原因)"""
+    text = "".join(s.get("text", "") for s in segments)
+    hangul = sum(1 for c in text if "가" <= c <= "힯" or "ᄀ" <= c <= "ᇿ")
+    kana = sum(1 for c in text if "぀" <= c <= "ヿ")
+    han = sum(1 for c in text if "㐀" <= c <= "鿿")
+    latin = sum(1 for c in text if c.isascii() and c.isalpha())
+    total = max(1, hangul + kana + han + latin)
+    if hangul / total > 0.2:
+        return False, "韓文逐字稿（會議分析目前只能驗證中文與英文的引用）"
+    if kana / total > 0.2:
+        return False, "日文逐字稿（會議分析目前只能驗證中文與英文的引用）"
+    return True, ""
+
+
+def _meeting_ask(model, host, port, server_type="ollama", timeout=_MEETING_TIMEOUT, cancelled=None):
+    """回傳 ask(prompt) → 模型回覆文字（會議分析每一次呼叫模型都經過這裡）"""
+    url = f"http://{host}:{port}/v1/chat/completions"
+    ollama = server_type != "openai"
+    state = {"reasoning_effort": ollama}
+
+    def ask(prompt):
+        if cancelled and cancelled():
+            raise RuntimeError("已取消")
+        payload = {"model": model, "temperature": 0.0, "stream": False,
+                   "messages": [{"role": "system", "content": _MEETING_SYSTEM},
+                                {"role": "user", "content": "/no_think\n\n" + prompt}]}
+        if ollama:
+            payload["think"] = False
+            if state["reasoning_effort"]:
+                payload["reasoning_effort"] = "none"
+
+        def send():
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        try:
+            res = send()
+        except urllib.error.HTTPError as e:
+            # 不認得 reasoning_effort 的伺服器回 400：拿掉再送一次，之後都不送
+            if e.code != 400 or "reasoning_effort" not in payload:
+                raise
+            payload.pop("reasoning_effort")
+            state["reasoning_effort"] = False
+            res = send()
+        out = (res.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        out = re.sub(r"<think>[\s\S]*?</think>", "", out)
+        out = re.sub(r"<think>[\s\S]*", "", out)
+        return out.strip()
+    return ask
+
+
+def _meeting_traditional(pub):
+    """模型寫的文字（摘要、項目、負責人、期限、章節標題、心智圖標籤）偵測到簡體才轉繁體。
+    **只轉顯示用的文字**：引用驗證在分析裡已經做完，段號不動"""
+    s = pub.get("summary") or {}
+    if s.get("text"):
+        s["text"] = _to_traditional(s["text"])
+    for items in (pub.get("items") or {}).values():
+        for it in items:
+            for k in ("text", "owner", "due_text"):
+                if isinstance(it.get(k), str) and it[k]:
+                    it[k] = _to_traditional(it[k])
+    for c in pub.get("chapters") or []:
+        if c.get("title"):
+            c["title"] = _to_traditional(c["title"])
+    for n in pub.get("mindmap") or []:
+        for k in ("label", "label_full"):
+            if isinstance(n.get(k), str) and n[k]:
+                n[k] = _to_traditional(n[k])
+    return pub
+
+
+def meeting_context(topic=None, extra=None):
+    """給會議分析的背景資料（JTDT 的 context）：只拿來讀懂逐字稿，**不會變成項目**（有防抄機制）"""
+    lines = []
+    if topic:
+        lines.append(f"會議主題：{topic}")
+    if extra:
+        lines.append(str(extra).strip())
+    return "\n".join(l for l in lines if l) or None
+
+
+def meeting_analysis(segments, model, host, port, server_type="ollama", context=None,
+                     on_progress=None, cancelled=None, timeout=_MEETING_TIMEOUT):
+    """段落 → 會議分析結果（JTDT `Analysis.to_public()` 再加 `llm_calls`）。套件不在時丟 RuntimeError"""
+    mods = _meeting_modules()
+    if not mods:
+        raise RuntimeError("找不到 jtdt_meeting（從舊版升級時請再執行一次 --upgrade）")
+    mi = mods[0]
+    ask = _meeting_ask(model, host, port, server_type, timeout=timeout, cancelled=cancelled)
+    an = mi.full_analysis(segments, ask, context=context, on_progress=on_progress)
+    pub = an.to_public()
+    pub["llm_calls"] = an.calls
+    return _meeting_traditional(pub)
+
+
+def _meeting_cite(ids, by_seq):
+    """引用 → 「03:12、05:40」；沒有時間就寫段號"""
+    out = []
+    for i in ids or []:
+        seg = by_seq.get(i)
+        if seg is not None and seg.get("start_ms") is not None:
+            out.append(_format_timestamp(seg["start_ms"] / 1000))
+        else:
+            out.append(f"第 {i} 段")
+    return "、".join(dict.fromkeys(out))
+
+
+def _meeting_speaker_rows(pub, measured):
+    """誰講了多少：[(名稱, 次數, 字數, 字數佔比, 發言時間文字)]；有時間照時間排、否則照字數"""
+    stats = pub.get("speaker_stats") or {}
+    rows = []
+    for name, st in stats.items():
+        label = "未標示發言者" if name == "unknown" else name
+        ms = st.get("speaking_ms")
+        t = ""
+        if ms is not None:
+            t = _format_timestamp(ms / 1000) + (f"（{st.get('percentage', 0)}%）" if st.get("percentage") is not None else "")
+        rows.append((label, st.get("turn_count", 0), st.get("chars", 0), st.get("char_pct", 0), t, ms))
+    if rows and all(r[5] is not None for r in rows):
+        rows.sort(key=lambda r: -r[5])
+    else:
+        rows.sort(key=lambda r: -r[2])
+    return rows
+
+
+def meeting_summary_markdown(pub, segments, measured=True):
+    """會議分析 → Markdown（JTDT 匯出的章節順序：摘要、五類項目、議題、誰講了多少）。
+    引用寫成逐字稿的時間點（jtlw 的逐字稿與字幕檔都用時間找），沒有時間才寫段號"""
+    by_seq = {s["seq"]: s for s in segments}
+    out = ["## 重點摘要", ""]
+    summ = pub.get("summary") or {}
+    out.append(summ.get("text") or "（摘要沒有產生；下面的項目與議題不受影響）")
+    if summ.get("grounded") is False and summ.get("unsupported"):
+        out += ["", "> ⚠ 這幾個詞在逐字稿裡找不到依據：" + "、".join(summ["unsupported"])]
+    items = pub.get("items") or {}
+    for kind in _MEETING_KIND_ORDER:
+        rows = items.get(kind) or []
+        if not rows:
+            continue
+        out += ["", f"## {_MEETING_KIND_LABELS[kind]}", ""]
+        for it in rows:
+            extra = []
+            if kind == "actions":
+                extra.append(f"負責：{it.get('owner') or '未指定'}")
+                extra.append(f"期限：{it.get('due_text') or '未定'}")
+            tail = f"（{'，'.join(extra)}）" if extra else ""
+            cite = _meeting_cite(it.get("segment_ids"), by_seq)
+            out.append(f"- {it.get('text', '')}{tail}" + (f"（{cite}）" if cite else ""))
+    if not any(items.get(k) for k in _MEETING_KIND_ORDER):
+        out += ["", "> 分析沒有在逐字稿裡找到決議、待辦、風險、未決問題或事件。"]
+    chapters = pub.get("chapters") or []
+    if chapters:
+        out += ["", "## 議題", ""]
+        for c in chapters:
+            if c.get("start_ms") is not None:
+                span = f"{_format_timestamp(c['start_ms'] / 1000)}–{_format_timestamp((c.get('end_ms') or c['start_ms']) / 1000)}"
+                pct = f"，{c['percentage']}%" if c.get("percentage") is not None else ""
+                out.append(f"- {span} {c['title']}（{_format_timestamp((c.get('duration_ms') or 0) / 1000)}{pct}）")
+            else:
+                out.append(f"- {c['title']}（第 {c['start_seq']}–{c['end_seq']} 段）")
+    rows = _meeting_speaker_rows(pub, measured)
+    if len(rows) >= 2:
+        tcol = "發言時間" if measured else "推估發言時間"
+        out += ["", "## 誰講了多少", "", f"| 發言者 | 發言次數 | 字數 | 字數佔比 | {tcol} |",
+                "|---|--:|--:|--:|--:|"]
+        for label, turns, chars, pct, t, _ms in rows:
+            out.append(f"| {label} | {turns} | {chars} | {pct}% | {t or '—'} |")
+        if not measured:
+            out += ["", "> 逐字稿沒有每一句的結束時間，發言時間是用下一句的開始推估的，包含停頓。"]
+    out += ["", f"> 會議分析：每一條都附逐字稿時間點、引用經過比對；共送出 {pub.get('llm_calls', 0)} 次模型請求。"
+            "空白的類別表示**分析沒有在逐字稿裡找到**，不代表會議一定沒有。"]
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _meeting_html_body(pub, segments, measured, corrected=""):
+    """會議分析的 HTML 主體（卡片＋圖表＋依據逐字稿）；引用可點、跳到下面的逐字稿那一段"""
+    import html as H
+    mods = _meeting_modules()
+    by_seq = {s["seq"]: s for s in segments}
+
+    def cites(ids):
+        chips = []
+        for i in ids or []:
+            seg = by_seq.get(i)
+            lab = _format_timestamp(seg["start_ms"] / 1000) if seg and seg.get("start_ms") is not None else f"#{i}"
+            chips.append(f'<a class="cite" href="#seg-{int(i)}">{H.escape(lab)}</a>')
+        return " ".join(chips)
+
+    parts = ['<h2>重點摘要</h2>']
+    summ = pub.get("summary") or {}
+    parts.append(f'<p class="lead">{H.escape(summ.get("text") or "（摘要沒有產生；下面的項目與議題不受影響）")}</p>')
+    if summ.get("grounded") is False and summ.get("unsupported"):
+        parts.append('<p class="warn">⚠ 這幾個詞在逐字稿裡找不到依據：' + H.escape("、".join(summ["unsupported"])) + "</p>")
+    parts.append('<h2>決議與待辦</h2><div class="cards">')
+    items = pub.get("items") or {}
+    for kind in _MEETING_KIND_ORDER:
+        rows = items.get(kind) or []
+        parts.append(f'<div class="card k-{kind}"><h3>{_MEETING_KIND_LABELS[kind]}'
+                     f'<span class="n">{len(rows)}</span></h3>')
+        if not rows:
+            parts.append('<p class="empty">分析沒有在逐字稿裡找到這一類的內容。</p>')
+        else:
+            parts.append("<ul>")
+            for it in rows:
+                meta = ""
+                if kind == "actions":
+                    meta = (f'<span class="who">負責：{H.escape(it.get("owner") or "未指定")}</span>'
+                            f'<span class="who">期限：{H.escape(it.get("due_text") or "未定")}</span>')
+                parts.append(f'<li>{H.escape(it.get("text", ""))} {meta}<span class="cites">{cites(it.get("segment_ids"))}</span></li>')
+            parts.append("</ul>")
+        parts.append("</div>")
+    parts.append("</div>")
+    charts = mods[1].build_all(pub, segments) if mods else {}
+    chapters = pub.get("chapters") or []
+    if chapters:
+        parts.append("<h2>議題時間軸</h2><table class=\"tbl\"><tr><th>時間</th><th>議題</th><th>佔比</th></tr>")
+        for c in chapters:
+            if c.get("start_ms") is not None:
+                t = f'<a class="cite" href="#seg-{int(c["start_seq"])}">{_format_timestamp(c["start_ms"] / 1000)}</a>'
+                pct = c.get("percentage")
+            else:
+                t = f'<a class="cite" href="#seg-{int(c["start_seq"])}">#{int(c["start_seq"])}</a>'
+                pct = None
+            bar = (f'<div class="bar"><span style="width:{max(1, min(100, float(pct)))}%"></span></div>{pct}%'
+                   if pct is not None else "")
+            parts.append(f"<tr><td>{t}</td><td>{H.escape(c['title'])}</td><td>{bar}</td></tr>")
+        parts.append("</table>")
+        if charts.get("timeline"):
+            parts.append(f'<div class="chart">{charts["timeline"]}</div>')
+    rows = _meeting_speaker_rows(pub, measured)
+    if len(rows) >= 2:
+        tcol = "發言時間" if measured else "推估發言時間"
+        parts.append(f'<h2>誰講了多少</h2><table class="tbl"><tr><th>發言者</th><th>發言次數</th><th>字數</th>'
+                     f'<th>字數佔比</th><th>{tcol}</th></tr>')
+        for label, turns, chars, pct, t, _ms in rows:
+            parts.append(f"<tr><td>{H.escape(str(label))}</td><td>{turns}</td><td>{chars}</td><td>{pct}%</td>"
+                         f"<td>{H.escape(t or '—')}</td></tr>")
+        parts.append("</table>")
+        if not measured:
+            parts.append('<p class="note">逐字稿沒有每一句的結束時間，發言時間是用下一句的開始推估的，包含停頓。</p>')
+        if charts.get("speaker_share"):
+            parts.append(f'<div class="chart">{charts["speaker_share"]}</div>')
+    if charts.get("mindmap"):
+        # 圖自己帶「討論結構」標題，外面不再加一次（JTDT 也有擋標題重複的測試）
+        parts.append(f'<div class="chart" style="margin-top:1.6em">{charts["mindmap"]}</div>')
+    if corrected.strip():
+        parts.append("<h2>校正逐字稿</h2>")
+        for para in re.split(r"\n\s*\n", corrected.strip()):
+            para = para.strip()
+            if not para or para.startswith("## "):
+                continue
+            m = re.match(r"^\*{0,2}(Speaker \d+|講者 ?\d+|對方|我方)\*{0,2}\s*[：:]\s*", para)
+            color = _speaker_html_color(m.group(1)) if m else None
+            if color:                       # 與舊的摘要 HTML 相同：每位講者一個顏色
+                parts.append(f'<p class="speaker" style="color:{color}"><strong>{H.escape(m.group(1))}：</strong>'
+                             f'{H.escape(para[m.end():])}</p>')
+            else:
+                parts.append(f"<p>{H.escape(para)}</p>")
+    parts.append('<h2>依據（逐字稿）</h2><div class="segs">')
+    for s in segments:
+        t = _format_timestamp(s["start_ms"] / 1000) if s.get("start_ms") is not None else f"#{s['seq']}"
+        spk = s.get("speaker")
+        parts.append(f'<p id="seg-{int(s["seq"])}"><span class="t">{H.escape(t)}</span>'
+                     + (f'<span class="spk" style="color:{_speaker_html_color(spk) or "#ffcb6b"}">'
+                        f'{H.escape(str(spk))}</span>' if spk else "")
+                     + f'{H.escape(s.get("text", ""))}</p>')
+    parts.append("</div>")
+    parts.append(f'<p class="note">每一條都附逐字稿時間點（點一下跳到依據的原文），引用經過比對；'
+                 f'共送出 {pub.get("llm_calls", 0)} 次模型請求。空白的類別表示分析沒有在逐字稿裡找到，不代表會議一定沒有。</p>')
+    return "\n".join(parts)
+
+
+_MEETING_HTML_CSS = """
+  body { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+         max-width: 980px; margin: 40px auto; padding: 0 20px;
+         background: #1a1a2e; color: #e0e0e0; line-height: 1.8; }
+  h1 { color: #82aaff; border-bottom: 2px solid #82aaff; padding-bottom: 8px; }
+  h2 { color: #c792ea; margin-top: 1.6em; }
+  .meta { color: #999; font-size: 0.85em; margin-bottom: 1.5em; line-height: 1.6; }
+  .badge { display: inline-block; background: #2d3a5a; color: #82aaff; padding: 2px 10px;
+           border-radius: 10px; font-size: 0.9em; margin-bottom: 4px; }
+  .lead { font-size: 1.05em; }
+  .warn { color: #ffcb6b; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+  .card { background: #22223a; border-radius: 10px; padding: 10px 16px; border-top: 4px solid #666; min-width: 0; }
+  .card h3 { margin: 4px 0 6px; font-size: 1.05em; }
+  .card .n { float: right; color: #999; font-weight: normal; }
+  .card ul { margin: 0; padding-left: 1.2em; }
+  .card li { margin: 6px 0; overflow-wrap: anywhere; }
+  .k-impacts { border-top-color: #0f766e; } .k-decisions { border-top-color: #047857; }
+  .k-actions { border-top-color: #1d4ed8; } .k-risks { border-top-color: #b91c1c; }
+  .k-questions { border-top-color: #b45309; }
+  .empty { color: #888; font-size: 0.9em; }
+  .who { display: inline-block; font-size: 0.85em; color: #c3e88d; margin-right: 8px; }
+  .cite { display: inline-block; font-size: 0.8em; color: #82aaff; background: #2d3a5a; border-radius: 6px;
+          padding: 0 6px; margin: 0 2px; text-decoration: none; }
+  .cite:hover { background: #3d4d78; }
+  .tbl { border-collapse: collapse; width: 100%; margin: 0.6em 0; }
+  .tbl th, .tbl td { border-bottom: 1px solid #333; padding: 4px 8px; text-align: left; }
+  .tbl td:nth-child(n+2) { overflow-wrap: anywhere; }
+  .bar { display: inline-block; width: 90px; height: 8px; background: #333; border-radius: 4px;
+         margin-right: 6px; vertical-align: middle; }
+  .bar span { display: block; height: 100%; background: #82aaff; border-radius: 4px; }
+  .chart { background: #fff; border-radius: 10px; padding: 8px; margin: 10px 0; overflow-x: auto; }
+  .chart svg { max-width: 100%; height: auto; }
+  .segs p { margin: 2px 0; padding: 2px 6px; border-radius: 4px; }
+  .segs p:target { background: #3d4d78; }
+  .segs .t { color: #82aaff; margin-right: 8px; font-size: 0.85em; }
+  .segs .spk { color: #ffcb6b; margin-right: 8px; font-size: 0.85em; }
+  .note { color: #999; font-size: 0.85em; }
+  .footer { margin-top: 2em; color: #888; font-size: 0.9em; }
+  .footer a { color: #82aaff; }
+  @media (max-width: 600px) { body { margin: 16px auto; padding: 0 12px; } .cards { grid-template-columns: 1fr; } }
+"""
+
+
+def meeting_summary_html(pub, segments, html_path, source_name="", measured=True, corrected="",
+                         summary_txt_path="", transcript_txt_path="", metadata=None,
+                         transcript_html_path="", audio_path=""):
+    """會議分析 → 獨立的 HTML 檔（樣式與舊版摘要一致；圖表是 JTDT 的 SVG，白底卡片）"""
+    import html as H
+    title = H.escape(source_name) if source_name else "會議記錄"
+    meta_html = _summary_meta_html(title, metadata, badge="會議記錄")
+    footer_html = _summary_footer_html(html_path, summary_txt_path, transcript_txt_path,
+                                       transcript_html_path, audio_path)
+    page = (f'<!DOCTYPE html>\n<html lang="zh-Hant">\n<head>\n<meta charset="utf-8">\n'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            f'<title>{title} - 會議記錄</title>\n<style>{_MEETING_HTML_CSS}</style>\n</head>\n<body>\n'
+            f'<h1>{title}</h1>\n{meta_html}\n{_meeting_html_body(pub, segments, measured, corrected)}\n'
+            f'<div class="footer">{footer_html}</div>\n</body>\n</html>\n')
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(page)
+    return html_path
+
+
+def _summary_footer_html(html_path, summary_txt_path="", transcript_txt_path="",
+                         transcript_html_path="", audio_path=""):
+    """摘要 HTML 底部的檔案連結（舊版摘要與會議分析摘要共用）"""
+    import html as html_mod
+    # 底部檔案連結區
+    footer_links = []
+    html_basename = os.path.basename(html_path)
+    footer_links.append(f'<a href="{html_mod.escape(html_basename)}">AI 摘要 (HTML)</a>')
+    if summary_txt_path:
+        txt_basename = html_mod.escape(os.path.basename(summary_txt_path))
+        footer_links.append(f'<a href="{txt_basename}">AI 摘要 (TXT)</a>')
+    if transcript_txt_path:
+        log_basename = html_mod.escape(os.path.basename(transcript_txt_path))
+        footer_links.append(f'<a href="{log_basename}">時間逐字稿 (TXT)</a>')
+    if transcript_html_path:
+        th_basename = html_mod.escape(os.path.basename(transcript_html_path))
+        footer_links.append(f'<a href="{th_basename}">時間逐字稿 (HTML)</a>')
+    if transcript_txt_path:
+        _srt_bn = os.path.splitext(os.path.basename(transcript_txt_path))[0] + ".srt"
+        _srt_full = os.path.join(os.path.dirname(html_path), _srt_bn)
+        if os.path.isfile(_srt_full):
+            footer_links.append(f'<a href="{html_mod.escape(_srt_bn)}">字幕檔 (SRT)</a>')
+        _vtt_bn = os.path.splitext(os.path.basename(transcript_txt_path))[0] + ".vtt"
+        _vtt_full = os.path.join(os.path.dirname(html_path), _vtt_bn)
+        if os.path.isfile(_vtt_full):
+            footer_links.append(f'<a href="{html_mod.escape(_vtt_bn)}">字幕檔 (VTT)</a>')
+    if audio_path and os.path.isfile(audio_path):
+        _html_dir = os.path.dirname(os.path.abspath(html_path))
+        _audio_rel = os.path.relpath(os.path.abspath(audio_path), _html_dir)
+        if _audio_rel.count("..") > 3:
+            from urllib.parse import quote as _url_quote
+            _audio_href = "file://" + _url_quote(os.path.abspath(audio_path))
+        else:
+            _audio_href = html_mod.escape(_audio_rel)
+        _audio_ext = os.path.splitext(audio_path)[1].lstrip(".").upper() or "音訊"
+        footer_links.append(f'<a href="{_audio_href}">音訊檔案 ({_audio_ext})</a>')
+    footer_links = [l.replace("<a ", '<a target="_blank" ') for l in footer_links]
+    footer_html = " | ".join(footer_links)
+    return footer_html
+
+
+def _summary_meta_html(title, metadata, badge="AI 摘要"):
+    """摘要 HTML 開頭的處理資訊（來源、辨識、講者、翻譯、摘要模型、主題）。title 已跳脫"""
+    import html as html_mod
+    # 建構 metadata 區塊
+    meta_lines = [f'來源檔案：{title}']
+    if metadata:
+        asr_engine = metadata.get("asr_engine")
+        if asr_engine:
+            asr_model = metadata.get("asr_model", "")
+            asr_loc = metadata.get("asr_location", "")
+            asr_str = asr_engine + (f" ({asr_model})" if asr_model else "")
+            if asr_loc:
+                asr_str += f"，{asr_loc}"
+            meta_lines.append(f'語音辨識：{asr_str}')
+        if metadata.get("diarize"):
+            d_engine = metadata.get("diarize_engine", "")
+            d_loc = metadata.get("diarize_location", "")
+            ns = metadata.get("num_speakers")
+            ns_str = f"{ns} 人" if isinstance(ns, int) else str(ns) if ns else "自動偵測"
+            d_parts = [p for p in [d_engine, d_loc, ns_str] if p]
+            _det = metadata.get("detected_speakers")
+            if _det and _det >= 2:
+                d_parts.append(f"辨識出 {_det} 位")
+            meta_lines.append(f'講者辨識：{"，".join(d_parts)}')
+        t_model = metadata.get("translate_model")
+        t_engine = metadata.get("translate_engine")
+        if t_model:
+            t_server = metadata.get("translate_server", "")
+            meta_lines.append(f'翻譯引擎：{t_model}' + (f" ({t_server})" if t_server else ""))
+        elif t_engine:
+            t_loc = metadata.get("translate_location", "")
+            meta_lines.append(f'翻譯引擎：{t_engine}' + (f"，{t_loc}" if t_loc else ""))
+        s_model = metadata.get("summary_model")
+        if s_model:
+            s_server = metadata.get("summary_server", "")
+            meta_lines.append(f'內容摘要：{s_model}' + (f" ({s_server})" if s_server else ""))
+        topic = metadata.get("meeting_topic")
+        if topic:
+            meta_lines.append(f'內容主題：{topic}')
+        inp = metadata.get("input_file")
+        if inp:
+            meta_lines.append(f'來源音訊：{inp}')
+    _badge = f'<span class="badge">jt-live-whisper v{APP_VERSION} {badge}</span>'
+    meta_html = '<div class="meta">' + _badge + "<br>\n  " + "<br>\n  ".join(html_mod.escape(l) for l in meta_lines) + '</div>'
+    return meta_html
+
+
+# 講者顏色（8 色循環，與終端機 SPEAKER_COLORS 對應的 HTML 色碼）；舊的摘要與會議分析的 HTML 共用
+_SPEAKER_HTML_COLORS = [
+    "#ffcb6b",  # 金黃
+    "#ff9a6c",  # 亮橘
+    "#c3e88d",  # 亮綠
+    "#d8a0ff",  # 亮紫
+    "#ff7090",  # 亮粉紅
+    "#50e8c0",  # 亮青綠
+    "#a0d0ff",  # 亮天藍
+    "#e0d080",  # 亮卡其
+]
+
+
+def _speaker_html_color(label):
+    """Speaker N／講者 N → 第 N 個顏色；雙向逐字稿的對方／我方各一色；其他（沒有講者）回 None"""
+    m = re.match(r"^(?:Speaker |講者 ?)(\d+)$", str(label or "").strip())
+    if m:
+        return _SPEAKER_HTML_COLORS[(int(m.group(1)) - 1) % len(_SPEAKER_HTML_COLORS)]
+    return {"對方": _SPEAKER_HTML_COLORS[0], "我方": _SPEAKER_HTML_COLORS[2]}.get(str(label or "").strip())
+
+
 def _summary_to_html(summary_text, html_path, source_name="",
                      summary_txt_path="", transcript_txt_path="",
                      metadata=None, transcript_html_path="",
                      audio_path=""):
     """將摘要純文字轉為帶樣式的 HTML 檔"""
     import html as html_mod
-
-    # 講者顏色（8 色循環，與終端機 SPEAKER_COLORS 對應的 HTML 色碼）
-    _SPEAKER_HTML_COLORS = [
-        "#ffcb6b",  # 金黃
-        "#ff9a6c",  # 亮橘
-        "#c3e88d",  # 亮綠
-        "#d8a0ff",  # 亮紫
-        "#ff7090",  # 亮粉紅
-        "#50e8c0",  # 亮青綠
-        "#a0d0ff",  # 亮天藍
-        "#e0d080",  # 亮卡其
-    ]
 
     lines = summary_text.split("\n")
     body_parts = []
@@ -14227,82 +14833,10 @@ def _summary_to_html(summary_text, html_path, source_name="",
     body_html = "\n".join(body_parts)
     title = html_mod.escape(source_name) if source_name else "AI 摘要"
 
-    # 底部檔案連結區
-    footer_links = []
-    html_basename = os.path.basename(html_path)
-    footer_links.append(f'<a href="{html_mod.escape(html_basename)}">AI 摘要 (HTML)</a>')
-    if summary_txt_path:
-        txt_basename = html_mod.escape(os.path.basename(summary_txt_path))
-        footer_links.append(f'<a href="{txt_basename}">AI 摘要 (TXT)</a>')
-    if transcript_txt_path:
-        log_basename = html_mod.escape(os.path.basename(transcript_txt_path))
-        footer_links.append(f'<a href="{log_basename}">時間逐字稿 (TXT)</a>')
-    if transcript_html_path:
-        th_basename = html_mod.escape(os.path.basename(transcript_html_path))
-        footer_links.append(f'<a href="{th_basename}">時間逐字稿 (HTML)</a>')
-    if transcript_txt_path:
-        _srt_bn = os.path.splitext(os.path.basename(transcript_txt_path))[0] + ".srt"
-        _srt_full = os.path.join(os.path.dirname(html_path), _srt_bn)
-        if os.path.isfile(_srt_full):
-            footer_links.append(f'<a href="{html_mod.escape(_srt_bn)}">字幕檔 (SRT)</a>')
-        _vtt_bn = os.path.splitext(os.path.basename(transcript_txt_path))[0] + ".vtt"
-        _vtt_full = os.path.join(os.path.dirname(html_path), _vtt_bn)
-        if os.path.isfile(_vtt_full):
-            footer_links.append(f'<a href="{html_mod.escape(_vtt_bn)}">字幕檔 (VTT)</a>')
-    if audio_path and os.path.isfile(audio_path):
-        _html_dir = os.path.dirname(os.path.abspath(html_path))
-        _audio_rel = os.path.relpath(os.path.abspath(audio_path), _html_dir)
-        if _audio_rel.count("..") > 3:
-            from urllib.parse import quote as _url_quote
-            _audio_href = "file://" + _url_quote(os.path.abspath(audio_path))
-        else:
-            _audio_href = html_mod.escape(_audio_rel)
-        _audio_ext = os.path.splitext(audio_path)[1].lstrip(".").upper() or "音訊"
-        footer_links.append(f'<a href="{_audio_href}">音訊檔案 ({_audio_ext})</a>')
-    footer_links = [l.replace("<a ", '<a target="_blank" ') for l in footer_links]
-    footer_html = " | ".join(footer_links)
+    footer_html = _summary_footer_html(html_path, summary_txt_path, transcript_txt_path,
+                                      transcript_html_path, audio_path)
 
-    # 建構 metadata 區塊
-    meta_lines = [f'來源檔案：{title}']
-    if metadata:
-        asr_engine = metadata.get("asr_engine")
-        if asr_engine:
-            asr_model = metadata.get("asr_model", "")
-            asr_loc = metadata.get("asr_location", "")
-            asr_str = asr_engine + (f" ({asr_model})" if asr_model else "")
-            if asr_loc:
-                asr_str += f"，{asr_loc}"
-            meta_lines.append(f'語音辨識：{asr_str}')
-        if metadata.get("diarize"):
-            d_engine = metadata.get("diarize_engine", "")
-            d_loc = metadata.get("diarize_location", "")
-            ns = metadata.get("num_speakers")
-            ns_str = f"{ns} 人" if isinstance(ns, int) else str(ns) if ns else "自動偵測"
-            d_parts = [p for p in [d_engine, d_loc, ns_str] if p]
-            _det = metadata.get("detected_speakers")
-            if _det and _det >= 2:
-                d_parts.append(f"辨識出 {_det} 位")
-            meta_lines.append(f'講者辨識：{"，".join(d_parts)}')
-        t_model = metadata.get("translate_model")
-        t_engine = metadata.get("translate_engine")
-        if t_model:
-            t_server = metadata.get("translate_server", "")
-            meta_lines.append(f'翻譯引擎：{t_model}' + (f" ({t_server})" if t_server else ""))
-        elif t_engine:
-            t_loc = metadata.get("translate_location", "")
-            meta_lines.append(f'翻譯引擎：{t_engine}' + (f"，{t_loc}" if t_loc else ""))
-        s_model = metadata.get("summary_model")
-        if s_model:
-            s_server = metadata.get("summary_server", "")
-            meta_lines.append(f'內容摘要：{s_model}' + (f" ({s_server})" if s_server else ""))
-        topic = metadata.get("meeting_topic")
-        if topic:
-            meta_lines.append(f'內容主題：{topic}')
-        inp = metadata.get("input_file")
-        if inp:
-            meta_lines.append(f'來源音訊：{inp}')
-    _badge = f'<span class="badge">jt-live-whisper v{APP_VERSION} AI 摘要</span>'
-    meta_html = '<div class="meta">' + _badge + "<br>\n  " + "<br>\n  ".join(html_mod.escape(l) for l in meta_lines) + '</div>'
+    meta_html = _summary_meta_html(title, metadata)
 
     page = f"""<!DOCTYPE html>
 <html lang="zh-Hant">
@@ -15366,10 +15900,11 @@ def parse_args():
         help="離線處理音訊檔 (mp3/wav/m4a/flac 等，用 faster-whisper 辨識)")
     parser.add_argument(
         "--summarize", nargs="*", metavar="FILE", default=None,
-        help="摘要模式：讀取記錄檔生成摘要後離開（與 --input 合用時不需指定檔案）")
+        help="摘要模式：讀取記錄檔生成會議摘要（重點摘要、決議、待辦、風險、議題，每一條附逐字稿時間點）後離開"
+             "（與 --input 合用時不需指定檔案）")
     parser.add_argument(
         "--summary-model", metavar="MODEL", default=SUMMARY_DEFAULT_MODEL,
-        help=f"摘要用的 LLM 模型 (預設 {SUMMARY_DEFAULT_MODEL})")
+        help=f"摘要與逐字稿校正用的 LLM 模型 (預設 {SUMMARY_DEFAULT_MODEL})")
     parser.add_argument(
         "--summary-rounds", type=int, metavar="N", default=1,
         help="摘要處理次數（1-3，多次處理後整合可提升品質，預設 1）")
@@ -16265,6 +16800,13 @@ def main():
 
             _batch_topic = getattr(args, 'topic', None)
             _batch_summary_mode = "both"  # --summarize 批次模式預設
+            # 會議分析（JTDT，v2.25.0）：重點摘要改用它，下面只產生校正逐字稿
+            sbar.stop()
+            _batch_meeting = _meeting_for_summary(combined_transcript, model, host, port, server_type,
+                                                  _batch_topic)
+            sbar = _SummaryStatusBar(model=model, task="準備中", location=_llm_loc).start()
+            if _batch_meeting is not None:
+                _batch_summary_mode = "transcript"
             if len(chunks) <= 1:
                 prompt = _summary_prompt(combined_transcript, topic=_batch_topic,
                                          summary_mode=_batch_summary_mode)
@@ -16283,6 +16825,11 @@ def main():
                     segment_summaries.append(seg)
                     print(f"  {C_OK}第 {i+1}/{len(chunks)} 段完成{RESET}", flush=True)
 
+            if len(chunks) > 1 and _batch_summary_mode == "transcript":
+                # 重點摘要已由會議分析產生：各段校正逐字稿直接接起來，不再合併出一份舊式摘要
+                summary = "\n\n".join(
+                    re.sub(r"^\s*#{2,4}\s*校正逐字稿\s*\n", "", seg_s).strip() for seg_s in segment_summaries)
+            elif len(chunks) > 1:
                 sbar.set_task(f"合併 {len(chunks)} 段摘要")
                 combined = "\n\n---\n\n".join(
                     f"### 第 {i+1} 段\n{s}" for i, s in enumerate(segment_summaries)
@@ -16361,17 +16908,22 @@ def main():
                 "summary_server": f"{srv_label} @ {host}:{port}",
                 "input_file": ", ".join(os.path.basename(f) for f in valid_files),
             }
-            meta_header = _build_metadata_header(_batch_meta)
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(meta_header + summary + "\n")
+            if _batch_meeting is not None:
+                _, _, html_path = _write_meeting_summary(_batch_meeting, summary, output_path,
+                                                         valid_files[0] if valid_files else output_path,
+                                                         _batch_meta)
+            else:
+                meta_header = _build_metadata_header(_batch_meta)
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(meta_header + summary + "\n")
 
-            # 同步產生 HTML 摘要
-            html_path = os.path.splitext(output_path)[0] + ".html"
-            source_name = os.path.basename(valid_files[0]) if valid_files else ""
-            transcript_path = valid_files[0] if valid_files else ""
-            _summary_to_html(summary, html_path, source_name,
-                             summary_txt_path=output_path, transcript_txt_path=transcript_path,
-                             metadata=_batch_meta)
+                # 同步產生 HTML 摘要
+                html_path = os.path.splitext(output_path)[0] + ".html"
+                source_name = os.path.basename(valid_files[0]) if valid_files else ""
+                transcript_path = valid_files[0] if valid_files else ""
+                _summary_to_html(summary, html_path, source_name,
+                                 summary_txt_path=output_path, transcript_txt_path=transcript_path,
+                                 metadata=_batch_meta)
             open_file_in_editor(html_path)
 
             t_batch_elapsed = time.monotonic() - t_batch_start

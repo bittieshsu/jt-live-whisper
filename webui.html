@@ -271,7 +271,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
   <!-- 離線處理 -->
   <div class="sec" id="rOffline" style="display:none">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M9 2H15M12 10V6M20 12V18C20 19.1046 19.1046 20 18 20H6C4.89543 20 4 19.1046 4 18V12C4 10.8954 4.89543 10 6 10H18C19.1046 10 20 10.8954 20 12Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 14H8.01M12 14H12.01M16 14H16.01" stroke="currentColor" stroke-linecap="round"/></svg>離線處理</div>
-    <div class="sec-hint">講者辨識可區分不同發言者，搭配摘要可自動產生會議重點。摘要需要 LLM 伺服器。</div>
+    <div class="sec-hint">講者辨識可區分不同發言者。摘要會整理出決議、待辦、風險與議題，每一條都附逐字稿的時間點。摘要需要 LLM 伺服器。</div>
     <div class="checks">
       <label><input type="checkbox" id="iDiarize" onchange="onDiarizeChg()"> 講者辨識</label>
       <label><input type="checkbox" id="iSummarize" onchange="onSummarizeChg()"> 產生摘要與校正逐字稿</label>
@@ -284,7 +284,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
     </div>
     <div class="fg" id="rNumSpk" style="display:none;margin-top:10px">
       <label>講者人數</label>
-      <div style="display:flex;align-items:center;gap:8px"><input type="number" id="iNumSpk" min="0" max="20" value="0" style="width:80px"><span style="font-size:12px;color:var(--text-dim)">0 = 自動偵測，若已知人數建議填入可提升精準度</span></div>
+      <div style="display:flex;align-items:center;gap:8px"><input type="number" id="iNumSpk" min="0" max="20" value="0" style="width:80px"><span style="font-size:12px;color:var(--text-dim)">0 = 自動偵測（建議）；填了會強制分成那麼多群</span></div>
     </div>
     <div class="fg" id="rSumRoundsHint" style="display:none"></div>
     <div class="fg" id="rSumModel" style="display:none;margin-top:10px">
@@ -921,11 +921,11 @@ const _tips={
   iMicDev:'擷取本機麥克風或耳機的輸入',
   // 離線處理
   iDiarize:'啟用講者辨識，區分不同發言者（需 resemblyzer + spectralcluster）',
-  iNumSpk:'指定講者人數，0 為自動偵測（2~8 位）。已知人數時建議填入可提升精準度',
-  iSummarize:'離線處理完成後自動產生 AI 摘要與校正逐字稿（需 LLM 伺服器）',
+  iNumSpk:'指定講者人數，0 為自動偵測（2~8 位）。填了會強制分成那麼多群；實測不會比自動偵測準，不確定時用 0',
+  iSummarize:'離線處理完成後產生會議摘要（重點摘要、決議、待辦、風險、議題，每一條附逐字稿時間點）與校正逐字稿（需 LLM 伺服器）',
   iGenSrt:'產生 SRT 字幕檔（可匯入影片編輯軟體或播放器）',
   iGenVtt:'產生 WebVTT 字幕檔（網頁播放器 <track> 標籤用）',
-  iSumModel:'選擇摘要用的 LLM 模型，建議使用 120B 以上大模型',
+  iSumModel:'摘要與逐字稿校正共用的 LLM 模型，建議 27B 以上（預設值見選單）',
   iSumRounds:'LLM 產生摘要的次數。多次處理後整合可提升品質，避免單次結果異常',
   // 其他設定
   iTopic:'填寫會議主題與關鍵字，可提升翻譯與摘要的準確度',

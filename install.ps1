@@ -308,7 +308,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.24.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -326,7 +326,11 @@ if ($Upgrade) {
     $UPGRADE_FILES = @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1",
                        "install-linux.sh","SOP.md","README.md","CHANGELOG.md","webui.py",
                        "webui.html","subtitle_overlay.py","sck_audio_capture.swift",
-                       "jtlw_tls.py","remote_whisper_server.py")
+                       "jtlw_tls.py","remote_whisper_server.py",
+                       # 會議摘要（v2.25.0）：第一個放在子資料夾的，複製時要先建資料夾
+                       "jtdt_meeting/__init__.py","jtdt_meeting/meeting_insight.py",
+                       "jtdt_meeting/meeting_charts.py","jtdt_meeting/transcript_parse.py",
+                       "jtdt_meeting/zip_guard.py")
 
     section "從 GitHub 升級程式"
 
@@ -377,7 +381,9 @@ if ($Upgrade) {
         if ($staleFiles.Count -gt 0) {
             info "版本相同但有檔案與最新版不符，更新中..."
             foreach ($f in $staleFiles) {
-                Copy-Item (Join-Path $repoDir $f) (Join-Path $SCRIPT_DIR $f) -Force
+                $dst = Join-Path $SCRIPT_DIR $f
+                New-Item -Path (Split-Path $dst -Parent) -ItemType Directory -Force | Out-Null
+                Copy-Item (Join-Path $repoDir $f) $dst -Force
             }
             check_ok "已更新與最新版不符的檔案（$($staleFiles -join '、')）"
         } else {
@@ -422,7 +428,9 @@ if ($Upgrade) {
     foreach ($f in $UPGRADE_FILES) {
         $src = Join-Path $repoDir $f
         if (Test-Path $src) {
-            Copy-Item $src (Join-Path $SCRIPT_DIR $f) -Force
+            $dst = Join-Path $SCRIPT_DIR $f
+            New-Item -Path (Split-Path $dst -Parent) -ItemType Directory -Force | Out-Null
+            Copy-Item $src $dst -Force
             $updated++
         }
     }

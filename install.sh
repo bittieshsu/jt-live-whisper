@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.24.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1407,9 +1407,12 @@ check_sck() {
 
 # 升級時要更新的檔案清單（補檔與升級共用同一份，避免兩邊漂掉而漏檔）
 # README.md 與 CHANGELOG.md 也要更新，否則升級後看不到改了什麼、版本號還停在舊版
+# jtdt_meeting/ 是第一個放在子資料夾的（v2.25.0，會議摘要）：複製時要先建資料夾
 _UPGRADE_FILES="translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh \
 SOP.md README.md CHANGELOG.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
-jtlw_tls.py remote_whisper_server.py"
+jtlw_tls.py remote_whisper_server.py \
+jtdt_meeting/__init__.py jtdt_meeting/meeting_insight.py jtdt_meeting/meeting_charts.py \
+jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py"
 
 # ─── GPU 伺服器 server.py 的啟停與版本比較 ──────────────────────
 # 這三支是 2026-09-23 補的。先前 install.sh / install.ps1 各自inline 一份，
@@ -1556,6 +1559,7 @@ do_upgrade() {
         if [ -n "$_stale" ]; then
             echo -e "  ${C_WARN}版本相同但有檔案與最新版不符，更新中...${NC}"
             for _uf in $_stale; do
+                mkdir -p "$(dirname "$SCRIPT_DIR/$_uf")"
                 cp "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"
             done
             chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/install.sh" 2>/dev/null
@@ -1582,6 +1586,7 @@ do_upgrade() {
     local files_updated=0
     for fname in $_UPGRADE_FILES; do
         if [ -f "$repo_dir/$fname" ]; then
+            mkdir -p "$(dirname "$SCRIPT_DIR/$fname")"
             cp "$repo_dir/$fname" "$SCRIPT_DIR/$fname"
             ((files_updated++)) || true
         fi

@@ -70,6 +70,7 @@
       <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
       <a class="" href="#四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</a>
       <a class="lv3" href="#已上線的整合jason-tools-文件工具箱">已上線的整合：Jason Tools 文件工具箱</a>
+      <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
       <a class="lv3" href="#api-key">API Key</a>
       <a class="lv3" href="#憑證tls">憑證（TLS）</a>
@@ -119,7 +120,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.24.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.25.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -230,12 +231,12 @@
 </tr>
 <tr>
 <td><code>摘要_*.txt</code></td>
-<td>AI 重點摘要 + 校正逐字稿（純文字）</td>
+<td>會議摘要（重點摘要、事件與影響、決議、待辦、風險、未決問題、議題、誰講了多少，每一條附時間點）+ 校正逐字稿（純文字）</td>
 <td>是</td>
 </tr>
 <tr>
 <td><code>摘要_*.html</code></td>
-<td>AI 摘要（帶樣式 HTML，含相關檔案連結）</td>
+<td>會議摘要（時間點可點、議題時間軸、發言佔比、心智圖、依據的逐字稿、相關檔案連結）</td>
 <td>是</td>
 </tr>
 <tr>
@@ -2384,6 +2385,66 @@ cd C:\jt-live-whisper
 </code></pre>
 <p>摘要完成後狀態列會凍結顯示最終統計（時間、tokens、速度），按 ESC 鍵退出。</p>
 <p>摘要檔會儲存在 <code>logs/</code> 子資料夾下，與記錄檔相同位置。</p>
+<h4 id="會議摘要的內容v2250-起">會議摘要的內容（v2.25.0 起）</h4>
+<p>摘要改用 <a href="https://jasoncheng7115.github.io/jt-doc-tools/">Jason Tools 文件工具箱</a>的會議分析（程式原封不動搬過來，放在 <code>jtdt_meeting/</code>）：</p>
+<table>
+<thead>
+<tr>
+<th>段落</th>
+<th>內容</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>重點摘要</td>
+<td>三到五句；<strong>只從下面驗證過的項目寫</strong>，數字或英文詞在逐字稿裡找不到時會標出來</td>
+</tr>
+<tr>
+<td>事件與影響、決議、待辦、風險、未決問題</td>
+<td>每一條都附逐字稿的時間點；待辦另附負責人與期限（逐字稿裡明確講到的才寫，沒有就寫「未指定」「未定」）</td>
+</tr>
+<tr>
+<td>議題</td>
+<td>會議分成幾段、各段的起訖時間與佔比</td>
+</tr>
+<tr>
+<td>誰講了多少</td>
+<td>每位發言者的發言次數、字數、發言時間（需搭配講者辨識）</td>
+</tr>
+<tr>
+<td>校正逐字稿</td>
+<td>選「摘要＋校正逐字稿」時附在最後，與以前相同</td>
+</tr>
+</tbody></table>
+<ul>
+<li><strong>每一條都指得回原文</strong>：分析會比對每一條引用的那幾段是不是真的講到這件事，對不上的先修正引用、修不好就不列出來。
+所以「決議」「待辦」空白時表示<strong>分析沒有在逐字稿裡找到</strong>，不代表會議一定沒有</li>
+<li>HTML 版的時間點可以點，跳到下面「依據（逐字稿）」的那一段；搭配講者辨識時不同講者以不同顏色區分</li>
+<li>用的模型就是摘要模型（選單、<code>--summary-model</code>、WebUI 選的那個，預設 qwen3.8:27b）</li>
+<li>會議越長、呼叫模型的次數越多：5 分鐘的訪談送 5 次（連同校正逐字稿約 1 分鐘）；37 分鐘的中文會議送 17 次、會議分析約 6 分鐘（qwen3.8:27b、GPU 伺服器）</li>
+<li>即時逐字稿只有每一句的開始時間：發言時間用下一句的開始推估（包含停頓），表格標為「推估發言時間」</li>
+<li>翻譯模式同一句有原文與中文譯文時，分析讀的是中文那一行</li>
+</ul>
+<p><strong>這幾種情況會照舊用原本的摘要方式</strong>，畫面會說明原因：</p>
+<table>
+<thead>
+<tr>
+<th>情況</th>
+<th>畫面上的提示</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>逐字稿只有日文或韓文（沒有中文譯文）</td>
+<td>「日文逐字稿（會議分析目前只能驗證中文與英文的引用）」；日翻中、韓翻中等有中文譯文的不受影響</td>
+</tr>
+<tr>
+<td>從舊版升級只跑了一次 <code>--upgrade</code></td>
+<td>「找不到會議分析模組 jtdt_meeting」→ 再執行一次 <code>--upgrade</code>（Windows：<code>-Upgrade</code>）</td>
+</tr>
+<tr>
+<td>分析整個失敗（例如 LLM 伺服器中途斷線）</td>
+<td>「[降級] 會議分析失敗（原因），這次用舊的摘要方式」</td>
+</tr>
+</tbody></table>
 <h3 id="4-8---input-音訊檔離線處理">4-8. --input 音訊檔離線處理</h3>
 <p><img src="images/offline-menu-1.png" alt="離線處理選單：模式與模型選擇"></p>
 <p><img src="images/offline-menu-2.png" alt="離線處理選單：LLM 伺服器與講者辨識"></p>
@@ -2435,7 +2496,7 @@ cd C:\jt-live-whisper
 </code></pre>
 <p>記錄檔名格式：<code>{模式}_{來源檔名}_{YYYYMMDD_HHMMSS}.txt</code>，例如 <code>logs/英翻中_逐字稿_meeting_20260303_150000.txt</code>。所有記錄檔和摘要檔統一存放在 <code>logs/</code> 子資料夾。</p>
 <p>搭配 <code>--summarize</code> 和 <code>--diarize</code>，可對匯入的錄音檔產生含講者辨識的摘要與校正逐字稿：</p>
-<p><img src="images/offline-summary-diarize.png" alt="匯入錄音檔產生的摘要與校正逐字稿"></p>
+<p><img src="images/meeting-summary.png" alt="匯入錄音檔產生的會議摘要：每一條都附逐字稿時間點"></p>
 <p>時間逐字稿 HTML 內嵌音訊播放器與波形圖，可直接點選波形任意位置跳至該時間點；播放時對應的逐字稿段落會即時以高亮區塊標示，方便對照聆聽。</p>
 <p><img src="images/offline-transcript.png" alt="時間逐字稿 HTML"></p>
 <p><strong>模型選擇：</strong></p>
@@ -2814,6 +2875,39 @@ cd C:\jt-live-whisper
 <p>實測（28.3 分鐘的真實會議、GPU 伺服器）：辨識 37 秒、講者分離 2 秒、
 校正 67 秒，<strong>總共 1 分 52 秒</strong>，約為即時的 15 倍速。
 送件當下就開始拉檔，輪到處理時音訊已在本機（預抓耗時 0 毫秒）。</p>
+<h3 id="會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</h3>
+<p>沒有自己的摘要功能、或拿不出下載網址的系統（例如視訊會議的錄影），可以整段交給 jt-live-whisper：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>做什麼</th>
+<th>API</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>上傳錄音或錄影（影片直接傳，會取出音軌）</td>
+<td><code>POST /api/v1/uploads</code> → <code>upload_id</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>送件：<code>tasks</code> 加上 <code>summarize</code>，來源寫 <code>{&quot;type&quot;:&quot;upload&quot;,&quot;upload_id&quot;:…}</code>；會議名稱、主持人、與會者可放 <code>hints.meeting</code> 幫助讀懂逐字稿</td>
+<td><code>POST /api/v1/jobs</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>等完成（輪詢或 webhook），取回逐字稿與會議摘要</td>
+<td><code>GET /api/v1/jobs/{id}/summary</code>（JSON）、<code>/summary.md</code></td>
+</tr>
+</tbody></table>
+<ul>
+<li>摘要與命令列的會議摘要是<strong>同一套分析</strong>：每一條都附引用，引用對回逐字稿的段號（<code>source_seqs</code>）與時間</li>
+<li>摘要用的模型：<code>config.json</code> 的 <code>api.summary_model</code>；沒設時沿用 API 的模型設定（<code>api.correction_model</code>，預設 qwen3.8:27b）</li>
+<li>摘要由另一條執行緒一次做一件，不會卡住別件作業的辨識；摘要失敗只讓 <code>summarize</code> 失敗（<code>partially_succeeded</code>），逐字稿照樣交付，可以只重做摘要</li>
+<li>上傳的檔案處理完就刪除；沒用來送件的 24 小時後刪除。會議摘要與逐字稿一樣，ACK 或刪除作業時一起刪除</li>
+<li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
+</ul>
 <blockquote>
 <p><strong>這個模組（<code>jtlw_api/</code>）不包含在本專案的公開發行內容裡</strong>，
 是與特定系統串接時另外部署的元件。這一節寫給已經拿到它的管理者，
@@ -2834,19 +2928,43 @@ cd C:\jt-live-whisper
 <code>systemctl cat &lt;服務名&gt; | grep ExecStart</code> 確認。</p>
 </blockquote>
 <h3 id="api-key">API Key</h3>
+<p>每個要串接的系統發一把自己的金鑰（例如 <code>jtdt</code>、<code>jtvc</code>）。<strong>同一個名稱底下的作業才看得到</strong>，
+不同系統之間看不到彼此的作業與上傳的檔案。</p>
 <ul>
 <li>設定位置：<code>config.json</code> 的 <code>api.api_keys</code> 陣列</li>
 <li><strong>只存 sha256 雜湊，不存明文</strong> —— 伺服器被看到也還原不出金鑰，
 相對地<strong>金鑰遺失無法救回</strong>，只能重新產生</li>
 <li>格式 <code>jtlw_&lt;名稱&gt;_&lt;隨機字串&gt;</code></li>
+<li><strong>新增或撤銷之後都要重啟 API 服務才生效</strong>（以 systemd 服務 <code>jtlw-api</code> 部署時是 <code>sudo systemctl restart jtlw-api</code>，約 1 秒；
+執行中的作業會自動接續，不會失敗）</li>
 </ul>
-<p>產生一組新的：</p>
-<pre><code class="language-bash">venv/bin/python -m jtlw_api --new-key &lt;對方的名稱&gt;
+<p>在 jt-live-whisper 的資料夾裡執行（照本手冊安裝的是 <code>~/Apps/jt-live-whisper</code>）：</p>
+<pre><code class="language-bash"># 產生一把新的，直接寫進 config.json（明文只會印這一次，請立刻交給對方）
+venv/bin/python -m jtlw_api.keys add &lt;對方的名稱&gt;
+
+# 列出現有的金鑰（名稱、sha256 前 12 碼、權限）
+venv/bin/python -m jtlw_api.keys list
+
+# 撤銷一把：寫 list 顯示的 sha256 前綴
+venv/bin/python -m jtlw_api.keys revoke &lt;sha256 前綴&gt;
+
+sudo systemctl restart jtlw-api
 </code></pre>
-<p>明文<strong>只會印這一次</strong>，同時會印出要貼進 <code>config.json</code> 的片段：</p>
-<pre><code class="language-json">{&quot;client&quot;: &quot;對方的名稱&quot;, &quot;key_sha256&quot;: &quot;……&quot;}
-</code></pre>
-<p>貼進 <code>api.api_keys</code> 後重啟服務即生效。</p>
+<blockquote>
+<p><strong>撤銷時寫前綴，不要寫名稱。</strong> <code>keys revoke jtvc</code> 會把<strong>所有</strong>叫 <code>jtvc</code> 的金鑰一起撤掉；
+換金鑰時通常新舊兩把同名並存一陣子，寫名稱就會連新的一起撤掉。</p>
+</blockquote>
+<p><code>keys add</code> 給的是一般系統的權限：送件、查詢、取消、讀辨識模式（<code>jobs:write</code>、<code>jobs:read</code>、<code>jobs:cancel</code>、<code>profiles:read</code>）。
+只要查詢不要送件的，可以在名稱後面列出權限，例如 <code>keys add dashboard jobs:read</code>。
+<strong><code>admin</code> 會略過所有權限檢查，不要發給外部系統。</strong></p>
+<p>不想讓指令改設定檔時，可以改用 <code>venv/bin/python -m jtlw_api --new-key &lt;對方的名稱&gt;</code>：
+只印出金鑰與要貼進 <code>api.api_keys</code> 的那一段，由你自己貼上。</p>
+<blockquote>
+<p><strong>2026-09-28 之前用 <code>--new-key</code> 產生的金鑰要檢查一下</strong>：當時印出的那段沒有 <code>scopes</code>，
+而沒寫 <code>scopes</code> 的金鑰會拿到<strong>全部權限（含 <code>admin</code>）</strong>。<code>keys list</code> 會在這種金鑰後面標出
+「未寫＝全部權限，含 admin」；在 <code>config.json</code> 裡替它補上
+<code>&quot;scopes&quot;: [&quot;jobs:write&quot;, &quot;jobs:read&quot;, &quot;jobs:cancel&quot;, &quot;profiles:read&quot;]</code> 後重啟即可，金鑰本身不用換。</p>
+</blockquote>
 <blockquote>
 <p><strong>交付時要講清楚「欄位裡只貼金鑰本身」</strong>。對方照文件複製
 <code>Authorization: Bearer &lt;金鑰&gt;</code> 整串貼進設定欄位是最自然的動作，
