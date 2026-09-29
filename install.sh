@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1408,11 +1408,15 @@ check_sck() {
 # 升級時要更新的檔案清單（補檔與升級共用同一份，避免兩邊漂掉而漏檔）
 # README.md 與 CHANGELOG.md 也要更新，否則升級後看不到改了什麼、版本號還停在舊版
 # jtdt_meeting/ 是第一個放在子資料夾的（v2.25.0，會議摘要）：複製時要先建資料夾
+# jtlw_api/（REST API）v2.25.1 起公開：只放程式與介面規格，測試（test_*.py）跟 tools/ 一樣不發佈
 _UPGRADE_FILES="translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh \
 SOP.md README.md CHANGELOG.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
 jtlw_tls.py remote_whisper_server.py \
 jtdt_meeting/__init__.py jtdt_meeting/meeting_insight.py jtdt_meeting/meeting_charts.py \
-jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py"
+jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py \
+jtlw_api/__init__.py jtlw_api/__main__.py jtlw_api/app.py jtlw_api/config.py jtlw_api/engine.py \
+jtlw_api/events.py jtlw_api/keys.py jtlw_api/log.py jtlw_api/store.py jtlw_api/tls.py \
+jtlw_api/schemas/jtlw-api-v1.schema.json"
 
 # ─── GPU 伺服器 server.py 的啟停與版本比較 ──────────────────────
 # 這三支是 2026-09-23 補的。先前 install.sh / install.ps1 各自inline 一份，

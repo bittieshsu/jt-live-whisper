@@ -1,0 +1,2137 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://jt-live-whisper.local/schemas/jtlw-api-v1.schema.json",
+ "title": "jtlw REST API v1",
+ "description": "jtlw ↔ JTDT 介面的資料結構（對應〈JTLW ↔ JTDT 介面回覆〉v0.5，api_revision 2.4）。範圍：jtlw 只負責聲音 → 逐字稿（拉檔、正規化、語音辨識、語言偵測、語者分離、校正）；摘要、主題、章節、決議、待辦、風險、心智圖、實體、逐字稿翻譯等後續處理都在 JTDT。api_revision 2.4 起另有選用的會議摘要任務 summarize（給沒有自己摘要功能的呼叫端，例如 jtvc；與 JTDT 的會議摘要是同一套分析）與上傳來源 source.type=upload，兩者都要主動要求才有，不送就與 2.3 完全相同。各結構在 $defs 中，以 $ref 引用，例如 #/$defs/JobCreateRequest。",
+ "$defs": {
+  "JobId": {
+   "type": "string",
+   "pattern": "^job_[0-9A-HJKMNP-TV-Z]{26}$",
+   "description": "job_ 加 ULID，全域唯一、可依時間排序"
+  },
+  "EventId": {
+   "type": "string",
+   "pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
+  },
+  "Timestamp": {
+   "type": "string",
+   "format": "date-time",
+   "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+   "description": "UTC ISO-8601，含毫秒，例如 2026-09-17T09:12:03.418Z"
+  },
+  "LanguageTag": {
+   "type": "string",
+   "enum": [
+    "zh-Hant",
+    "nan-Hant",
+    "en",
+    "ja",
+    "ko",
+    "und"
+   ],
+   "description": "BCP-47 語言代碼（api_revision 2.3 加入 ko：韓文）"
+  },
+  "Milliseconds": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "整數毫秒"
+  },
+  "Seq": {
+   "type": "integer",
+   "minimum": 1,
+   "description": "同一件作業內從 1 開始連續遞增、不跳號"
+  },
+  "SpeakerId": {
+   "type": "string",
+   "pattern": "^S[1-9][0-9]*$"
+  },
+  "Task": {
+   "type": "string",
+   "enum": [
+    "transcribe",
+    "diarize",
+    "correct",
+    "summarize"
+   ],
+   "description": "transcribe：語音辨識與語言偵測；diarize：語者分離；correct：以 LLM 修正標點與錯字（不合併、不拆分段落）；summarize（api_revision 2.4）：會議摘要——決議、待辦、風險、未決問題、事件與影響、議題時間軸、誰講了多少，每一條都附逐字稿依據。只支援中文與英文逐字稿；結果以 GET /jobs/{id}/summary 取得"
+  },
+  "JobStatus": {
+   "type": "string",
+   "enum": [
+    "queued",
+    "running",
+    "cancelling",
+    "succeeded",
+    "partially_succeeded",
+    "failed",
+    "cancelled"
+   ]
+  },
+  "Stage": {
+   "type": "string",
+   "enum": [
+    "fetch",
+    "normalize",
+    "asr",
+    "diarization",
+    "correction",
+    "finalize",
+    "summary"
+   ],
+   "description": "summary（api_revision 2.4）只在要求 summarize 時出現，排在 finalize 之後：逐字稿已經可以取用，摘要還在做"
+  },
+  "TaskStatus": {
+   "type": "string",
+   "enum": [
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "degraded",
+    "skipped",
+    "cancelled"
+   ]
+  },
+  "ErrorCode": {
+   "type": "string",
+   "enum": [
+    "source_unreachable",
+    "source_auth_failed",
+    "source_not_allowed",
+    "source_checksum_mismatch",
+    "unsupported_media",
+    "audio_too_long",
+    "source_too_large",
+    "queue_full",
+    "worker_unavailable",
+    "asr_failed",
+    "diarization_degraded",
+    "llm_unavailable",
+    "llm_failed",
+    "profile_not_found",
+    "disk_full",
+    "cancelled",
+    "not_found",
+    "unauthorized",
+    "forbidden",
+    "invalid_request",
+    "internal_error",
+    "task_not_supported",
+    "language_not_supported",
+    "glossary_too_large",
+    "glossary_unreachable",
+    "summary_not_ready"
+   ],
+   "description": "glossary_too_large：內嵌詞彙表超過 500 筆（送件當下 422，改用 glossary_url），或 glossary_url 的檔案超過 10000 筆（fetch 階段失敗）；glossary_unreachable：拉不到 glossary_url（fetch 階段失敗，可重試）；llm_unavailable / llm_failed：校正（correct）用的 LLM 無法使用；summary_not_ready（2.4）：GET /summary 時摘要還沒做好（409，可重試）"
+  },
+  "Error": {
+   "type": "object",
+   "required": [
+    "code",
+    "category",
+    "message",
+    "retryable"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "code": {
+     "$ref": "#/$defs/ErrorCode"
+    },
+    "category": {
+     "type": "string",
+     "enum": [
+      "source",
+      "media",
+      "capacity",
+      "dependency",
+      "processing",
+      "request",
+      "auth",
+      "internal"
+     ]
+    },
+    "stage": {
+     "$ref": "#/$defs/Stage"
+    },
+    "task": {
+     "$ref": "#/$defs/Task"
+    },
+    "retryable": {
+     "type": "boolean"
+    },
+    "retry_after_ms": {
+     "$ref": "#/$defs/Milliseconds"
+    },
+    "message": {
+     "type": "string",
+     "description": "固定範本產生，不含逐字稿、prompt 或路徑"
+    },
+    "details": {
+     "type": "object",
+     "description": "只放 ID、數字與代碼",
+     "additionalProperties": {
+      "type": [
+       "string",
+       "number",
+       "boolean",
+       "null"
+      ]
+     }
+    }
+   }
+  },
+  "ErrorResponse": {
+   "type": "object",
+   "required": [
+    "error"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "error": {
+     "$ref": "#/$defs/Error"
+    }
+   }
+  },
+  "Warning": {
+   "type": "object",
+   "required": [
+    "code"
+   ],
+   "properties": {
+    "code": {
+     "type": "string",
+     "enum": [
+      "idempotency_body_mismatch",
+      "profile_deprecated",
+      "diarization_degraded"
+     ]
+    },
+    "fields": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  "Source": {
+   "oneOf": [
+    {
+     "$ref": "#/$defs/UrlSource"
+    },
+    {
+     "$ref": "#/$defs/UploadSource"
+    }
+   ],
+   "description": "音訊來源：type=url（jtlw 拉檔）或 type=upload（api_revision 2.4，先上傳）。影片檔（mp4 等）也可以，會取出音軌"
+  },
+  "GlossaryEntry": {
+   "type": "object",
+   "required": [
+    "source",
+    "mode"
+   ],
+   "additionalProperties": false,
+   "description": "詞彙表的一筆。jtlw 只使用 source（要辨認的詞；用於校正，能做時也用於 ASR 偏好提示）與 mode=keep（校正時不得更動的詞）；target / src_lang / tgt_lang 由 JTDT 自己翻譯時使用，jtlw 會接受但忽略",
+   "properties": {
+    "source": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 200,
+     "description": "詞彙原文"
+    },
+    "target": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "jtlw 忽略（JTDT 翻譯用）"
+    },
+    "src_lang": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$",
+     "maxLength": 35,
+     "description": "jtlw 忽略（JTDT 翻譯用）；任何 BCP-47 語言代碼皆可，不限 jtlw 支援的辨識語言"
+    },
+    "tgt_lang": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$",
+     "maxLength": 35,
+     "description": "jtlw 忽略（JTDT 翻譯用）；任何 BCP-47 語言代碼皆可，例如 ko、fr、zh-Hans"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "translate",
+      "keep"
+     ],
+     "description": "keep：校正時保持原樣；translate：對 jtlw 而言只當作要辨認的詞"
+    },
+    "case_sensitive": {
+     "type": "boolean",
+     "default": false
+    }
+   }
+  },
+  "Glossary": {
+   "type": "object",
+   "required": [
+    "entries"
+   ],
+   "additionalProperties": false,
+   "description": "內嵌詞彙表；超過 500 筆時送件回 422 glossary_too_large，請改用 glossary_url",
+   "properties": {
+    "entries": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/GlossaryEntry"
+     },
+     "maxItems": 500
+    }
+   }
+  },
+  "GlossaryUrl": {
+   "type": "object",
+   "required": [
+    "url",
+    "sha256",
+    "size_bytes"
+   ],
+   "additionalProperties": false,
+   "description": "詞彙表檔案：內容為 GlossaryEntry 的 JSON 陣列，最多 10000 筆。與 source.url 相同，須在允許的主機清單內（否則回 source_not_allowed，details.field=glossary_url）；於 fetch 階段與音訊一起拉取，拉不到時作業以 glossary_unreachable 失敗",
+   "properties": {
+    "url": {
+     "type": "string",
+     "format": "uri"
+    },
+    "sha256": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{64}$"
+    },
+    "size_bytes": {
+     "type": "integer",
+     "minimum": 1
+    }
+   }
+  },
+  "GlossarySummary": {
+   "type": "object",
+   "required": [
+    "entries",
+    "keep_terms",
+    "asr_bias_terms"
+   ],
+   "additionalProperties": false,
+   "description": "詞彙表使用摘要。ASR 偏好提示（initial prompt）有長度限制，只取前面的詞（mock 為前 50 筆）；校正則使用全部詞彙",
+   "properties": {
+    "entries": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "詞彙總筆數"
+    },
+    "keep_terms": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "mode=keep 的筆數"
+    },
+    "asr_bias_terms": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "實際用於 ASR 偏好提示的筆數"
+    }
+   }
+  },
+  "JobCreateRequest": {
+   "type": "object",
+   "required": [
+    "profile_id",
+    "tasks",
+    "source"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "profile_id": {
+     "type": "string"
+    },
+    "tasks": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Task"
+     },
+     "minItems": 1,
+     "uniqueItems": true,
+     "description": "要做的任務：transcribe / diarize / correct / summarize（summarize 為 api_revision 2.4 新增）。音訊一律包含 transcribe（未列出時自動加入）；須為 profile.capabilities 的子集，否則（含已移除的 translate / meeting_intelligence）送件當下回 422 task_not_supported。summarize 搭配 language=ja／ko 送件當下回 422 language_not_supported（會議摘要只支援中文與英文）"
+    },
+    "source": {
+     "$ref": "#/$defs/Source"
+    },
+    "language": {
+     "oneOf": [
+      {
+       "const": "auto"
+      },
+      {
+       "$ref": "#/$defs/LanguageTag"
+      }
+     ],
+     "default": "auto",
+     "description": "auto：由錄音開頭約 30 秒的「講話內容」（先濾掉靜音）判斷一種語言，整場都以該語言辨識，不會逐段切換（raw 層每段的 language 因此都相同）。指定語言時所有段落以該語言辨識。中英句子交錯的錄音，不論 auto 或指定，佔少數的那種語言大多會遺失或被翻成主要語言；開頭若有人先講另一種語言（實測 20 秒英文就足以讓中文會議整場判成英文），auto 會整場判錯；開頭的靜音、雜訊、無人聲的音樂會先被濾掉，不影響判斷。已知整場語言時請直接指定"
+    },
+    "hints": {
+     "type": "object",
+     "additionalProperties": false,
+     "properties": {
+      "num_speakers": {
+       "type": [
+        "integer",
+        "null"
+       ],
+       "minimum": 1,
+       "maximum": 20
+      },
+      "meeting": {
+       "type": "object",
+       "additionalProperties": false,
+       "description": "api_revision 2.4：會議的背景資料，只拿來幫助會議摘要讀懂逐字稿（人名、職稱、專有名詞），不會被寫成摘要項目。全部選填",
+       "properties": {
+        "title": {
+         "type": "string",
+         "maxLength": 200
+        },
+        "room": {
+         "type": "string",
+         "maxLength": 200
+        },
+        "host": {
+         "type": "string",
+         "maxLength": 200
+        },
+        "started_at": {
+         "type": "string",
+         "maxLength": 64
+        },
+        "ended_at": {
+         "type": "string",
+         "maxLength": 64
+        },
+        "participants": {
+         "type": "array",
+         "maxItems": 200,
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+           "name"
+          ],
+          "properties": {
+           "name": {
+            "type": "string",
+            "maxLength": 64
+           },
+           "joined_at": {
+            "type": "string",
+            "maxLength": 64
+           },
+           "left_at": {
+            "type": "string",
+            "maxLength": 64
+           }
+          }
+         }
+        },
+        "notes": {
+         "type": "string",
+         "maxLength": 4000
+        }
+       }
+      }
+     }
+    },
+    "glossary": {
+     "$ref": "#/$defs/Glossary"
+    },
+    "glossary_url": {
+     "$ref": "#/$defs/GlossaryUrl"
+    },
+    "external_ref": {
+     "type": "object",
+     "properties": {
+      "system": {
+       "type": "string"
+      },
+      "job_id": {
+       "type": "string"
+      },
+      "workspace_id": {
+       "type": "string"
+      },
+      "mock_scenario": {
+       "type": "string",
+       "description": "僅 mock 使用：指定模擬情境"
+      }
+     },
+     "additionalProperties": {
+      "type": "string"
+     }
+    },
+    "webhook": {
+     "type": "object",
+     "required": [
+      "endpoint_id"
+     ],
+     "properties": {
+      "endpoint_id": {
+       "type": "string",
+       "pattern": "^wh_"
+      }
+     }
+    },
+    "correction_level": {
+     "$ref": "#/$defs/CorrectionLevel"
+    }
+   },
+   "not": {
+    "required": [
+     "glossary",
+     "glossary_url"
+    ]
+   },
+   "description": "建立作業。glossary 與 glossary_url 只能擇一（同時提供回 400 invalid_request）；未定義的欄位一律回 400 invalid_request"
+  },
+  "Progress": {
+   "type": "object",
+   "required": [
+    "stage",
+    "stage_index",
+    "stage_count",
+    "percent"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "stage": {
+     "$ref": "#/$defs/Stage"
+    },
+    "stage_index": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "stage_count": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "processed_audio_ms": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "description": "api_revision 2.2 起在 asr 階段隨辨識結果即時前進（最多每秒更新一次）；2.1 以前整個 asr 階段不動"
+    },
+    "total_audio_ms": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0
+    },
+    "items_done": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "description": "api_revision 2.2 起用於 correction 階段：已完成的校正批數"
+    },
+    "items_total": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "description": "api_revision 2.2 起用於 correction 階段：校正總批數"
+    },
+    "percent": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 100
+    },
+    "waiting": {
+     "type": [
+      "object",
+      "null"
+     ],
+     "description": "api_revision 2.2 新增。只有在 GPU 伺服器排隊時才有值，其餘（包含正在辨識）為 null。status 維持 running，不會退回 queued。對方可據此把排隊時間排除在逾時計算之外。asr 與 diarization 階段都可能出現。",
+     "required": [
+      "reason",
+      "ahead",
+      "since"
+     ],
+     "additionalProperties": false,
+     "properties": {
+      "reason": {
+       "type": "string",
+       "enum": [
+        "gpu_queue"
+       ],
+       "description": "等待的原因；目前只有 GPU 伺服器排隊一種"
+      },
+      "ahead": {
+       "type": "integer",
+       "minimum": 0,
+       "description": "前面還有幾件（含正在跑的那件）。包含其他使用者的作業"
+      },
+      "since": {
+       "$ref": "#/$defs/Timestamp",
+       "description": "這一段排隊開始的時間"
+      }
+     }
+    },
+    "detail": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "api_revision 2.4：summary 階段正在做哪一步（例：擷取重點 3/6、複審、切章節、寫摘要）"
+    }
+   }
+  },
+  "Job": {
+   "type": "object",
+   "required": [
+    "job_id",
+    "status",
+    "created_at",
+    "profile_id",
+    "profile_version",
+    "tasks",
+    "last_event_seq",
+    "segment_count",
+    "errors",
+    "warnings",
+    "glossary",
+    "correction_level"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "job_id": {
+     "$ref": "#/$defs/JobId"
+    },
+    "status": {
+     "$ref": "#/$defs/JobStatus"
+    },
+    "queue_position": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0
+    },
+    "created_at": {
+     "$ref": "#/$defs/Timestamp"
+    },
+    "updated_at": {
+     "$ref": "#/$defs/Timestamp"
+    },
+    "profile_id": {
+     "type": "string"
+    },
+    "profile_version": {
+     "type": "string"
+    },
+    "external_ref": {
+     "type": "object"
+    },
+    "progress": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/Progress"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "tasks": {
+     "type": "object",
+     "propertyNames": {
+      "$ref": "#/$defs/Task"
+     },
+     "additionalProperties": {
+      "$ref": "#/$defs/TaskStatus"
+     }
+    },
+    "last_event_seq": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "跨所有事件的流水號"
+    },
+    "segment_count": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "已提交的 raw segment 數"
+    },
+    "acknowledged": {
+     "type": "boolean"
+    },
+    "content_available": {
+     "type": "boolean",
+     "description": "ACK 或過期後為 false"
+    },
+    "result_url": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "errors": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Error"
+     }
+    },
+    "warnings": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Warning"
+     }
+    },
+    "glossary": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/GlossarySummary"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "沒有提供詞彙表時為 null；使用 glossary_url 時，fetch 階段完成前為 null"
+    },
+    "correction_level": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/CorrectionLevel"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "description": "這件作業實際使用的校正等級；沒有要求 correct 時為 null"
+    }
+   }
+  },
+  "RawSegment": {
+   "type": "object",
+   "required": [
+    "seq",
+    "start_ms",
+    "end_ms",
+    "text",
+    "language",
+    "confidence"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "seq": {
+     "$ref": "#/$defs/Seq"
+    },
+    "start_ms": {
+     "$ref": "#/$defs/Milliseconds",
+     "description": "整數毫秒，以「原始上傳檔案在播放器中呈現的時間軸」為準：MP4 / M4A 會套用 edit list 與編碼器延遲（encoder delay），與 ffmpeg 及一般播放器一致"
+    },
+    "end_ms": {
+     "$ref": "#/$defs/Milliseconds",
+     "description": "整數毫秒，以「原始上傳檔案在播放器中呈現的時間軸」為準：MP4 / M4A 會套用 edit list 與編碼器延遲（encoder delay），與 ffmpeg 及一般播放器一致"
+    },
+    "text": {
+     "type": "string",
+     "description": "ASR 原始文字，之後不會被校正結果覆寫"
+    },
+    "language": {
+     "$ref": "#/$defs/LanguageTag",
+     "description": "該段的語言（BCP-47）。目前同一件作業內每段都相同（auto 只由開頭判斷一次）；欄位保留日後逐段不同的可能"
+    },
+    "confidence": {
+     "type": [
+      "number",
+      "null"
+     ],
+     "minimum": 0,
+     "maximum": 1,
+     "description": "0～1；引擎無法提供時為 null，但欄位一定存在"
+    },
+    "asr_profile_version": {
+     "type": "string"
+    }
+   },
+   "description": "raw 層：ASR 原始結果，text 永不覆寫；language 目前整件相同（見 JobCreateRequest.language）"
+  },
+  "FinalSegment": {
+   "type": "object",
+   "required": [
+    "seq",
+    "text",
+    "edited"
+   ],
+   "additionalProperties": false,
+   "description": "final 層：校正後文字，seq 與 raw 一對一，不合併、不拆分",
+   "properties": {
+    "seq": {
+     "$ref": "#/$defs/Seq"
+    },
+    "text": {
+     "type": "string"
+    },
+    "edited": {
+     "type": "boolean",
+     "description": "校正是否改動了文字（與 raw 的 text 不同時為 true）"
+    }
+   }
+  },
+  "SpeakerAssignment": {
+   "type": "object",
+   "required": [
+    "seq",
+    "speaker_id"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "seq": {
+     "$ref": "#/$defs/Seq"
+    },
+    "speaker_id": {
+     "$ref": "#/$defs/SpeakerId"
+    }
+   },
+   "description": "speakers 層：seq 對應的語者代碼（S1、S2…，不會是姓名）"
+  },
+  "SegmentsPage": {
+   "type": "object",
+   "required": [
+    "job_id",
+    "layer",
+    "segments",
+    "last_seq",
+    "has_more",
+    "complete"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "job_id": {
+     "$ref": "#/$defs/JobId"
+    },
+    "layer": {
+     "type": "string",
+     "enum": [
+      "raw",
+      "final",
+      "speakers"
+     ],
+     "description": "raw：ASR 原始結果；final：校正後文字（需 correct）；speakers：語者對應（需 diarize）。未要求對應任務時回 400 invalid_request（details.reason=task_not_requested）。correct 失敗時 final 層為 complete=true 且沒有段落，請改用 raw"
+    },
+    "segments": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/RawSegment"
+       },
+       {
+        "$ref": "#/$defs/FinalSegment"
+       },
+       {
+        "$ref": "#/$defs/SpeakerAssignment"
+       }
+      ]
+     },
+     "description": "每頁預設 500 筆，最多 1000 筆（limit）"
+    },
+    "next_after_seq": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0,
+     "description": "has_more 為 true 時，下一頁請帶 after_seq=此值"
+    },
+    "last_seq": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "該層目前已提交的最大 seq"
+    },
+    "has_more": {
+     "type": "boolean",
+     "description": "這次因 limit 截斷，還有更多已提交的段"
+    },
+    "complete": {
+     "type": "boolean",
+     "description": "該層已產生完畢，之後不會再增加"
+    }
+   }
+  },
+  "LayerSummary": {
+   "type": "object",
+   "required": [
+    "count",
+    "last_seq"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "count": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "last_seq": {
+     "type": "integer",
+     "minimum": 0
+    }
+   }
+  },
+  "Result": {
+   "type": "object",
+   "description": "逐字稿清單（manifest），不含任何分析內容；逐字稿本身請以 segments 端點分頁拉取",
+   "required": [
+    "result_schema_version",
+    "job_id",
+    "status",
+    "tasks",
+    "duration_ms",
+    "languages",
+    "speakers",
+    "layers",
+    "glossary",
+    "warnings"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "result_schema_version": {
+     "type": "string",
+     "pattern": "^2\\.[0-9]+$",
+     "description": "大版號變動代表不相容；小版號只新增選填欄位"
+    },
+    "job_id": {
+     "$ref": "#/$defs/JobId"
+    },
+    "status": {
+     "type": "string",
+     "enum": [
+      "succeeded",
+      "partially_succeeded"
+     ]
+    },
+    "tasks": {
+     "type": "object",
+     "propertyNames": {
+      "$ref": "#/$defs/Task"
+     },
+     "additionalProperties": {
+      "$ref": "#/$defs/TaskStatus"
+     }
+    },
+    "duration_ms": {
+     "$ref": "#/$defs/Milliseconds",
+     "description": "音訊總長度"
+    },
+    "languages": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/LanguageTag"
+     },
+     "uniqueItems": true,
+     "description": "raw 層出現過的語言，依第一次出現的順序"
+    },
+    "speakers": {
+     "type": "array",
+     "description": "依 first_seq 排序；未要求 diarize 時為空陣列",
+     "items": {
+      "type": "object",
+      "required": [
+       "speaker_id",
+       "segments",
+       "first_seq"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "speaker_id": {
+        "$ref": "#/$defs/SpeakerId"
+       },
+       "segments": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "該語者的段落數"
+       },
+       "first_seq": {
+        "$ref": "#/$defs/Seq"
+       }
+      }
+     }
+    },
+    "layers": {
+     "type": "object",
+     "required": [
+      "raw",
+      "final",
+      "speakers"
+     ],
+     "additionalProperties": false,
+     "description": "各層的筆數與最大 seq；未要求對應任務的層為 null",
+     "properties": {
+      "raw": {
+       "$ref": "#/$defs/LayerSummary"
+      },
+      "final": {
+       "oneOf": [
+        {
+         "$ref": "#/$defs/LayerSummary"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "correct 失敗時 count=0，請改用 raw"
+      },
+      "speakers": {
+       "oneOf": [
+        {
+         "$ref": "#/$defs/LayerSummary"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      }
+     }
+    },
+    "glossary": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/GlossarySummary"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "warnings": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Warning"
+     }
+    },
+    "correction_level": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/CorrectionLevel"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "correction": {
+     "oneOf": [
+      {
+       "$ref": "#/$defs/CorrectionStats"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "stage_ms": {
+     "type": [
+      "object",
+      "null"
+     ],
+     "additionalProperties": {
+      "type": "integer",
+      "minimum": 0
+     },
+     "description": "各階段耗時（毫秒），例如 {\"fetch\":120,\"asr\":31000}。GPU 伺服器共用，排隊時間會反映在 asr 上"
+    },
+    "summary_url": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "api_revision 2.4（result_schema_version 2.1）：要求 summarize 而且成功時為 /api/v1/jobs/{id}/summary，其餘為 null"
+    }
+   }
+  },
+  "LocalizedText": {
+   "type": "object",
+   "required": [
+    "zh-Hant",
+    "en"
+   ],
+   "properties": {
+    "zh-Hant": {
+     "type": "string"
+    },
+    "en": {
+     "type": "string"
+    },
+    "ja": {
+     "type": "string"
+    }
+   }
+  },
+  "Profile": {
+   "type": "object",
+   "required": [
+    "id",
+    "version",
+    "default",
+    "deprecated",
+    "name",
+    "description",
+    "capabilities",
+    "languages"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "id": {
+     "type": "string",
+     "pattern": "^[a-z0-9]+(\\.[a-z0-9_]+)+$"
+    },
+    "version": {
+     "type": "string"
+    },
+    "default": {
+     "type": "boolean"
+    },
+    "deprecated": {
+     "type": "boolean"
+    },
+    "replacement_profile_id": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "name": {
+     "$ref": "#/$defs/LocalizedText"
+    },
+    "description": {
+     "$ref": "#/$defs/LocalizedText"
+    },
+    "capabilities": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Task"
+     }
+    },
+    "languages": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/LanguageTag"
+     },
+     "description": "可辨識的來源語言"
+    }
+   }
+  },
+  "Capabilities": {
+   "type": "object",
+   "required": [
+    "version",
+    "api_version",
+    "capabilities",
+    "limits",
+    "queue",
+    "workers",
+    "api_revision"
+   ],
+   "properties": {
+    "version": {
+     "type": "string"
+    },
+    "api_version": {
+     "const": "v1"
+    },
+    "capabilities": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Task"
+     }
+    },
+    "limits": {
+     "type": "object",
+     "required": [
+      "max_duration_ms",
+      "max_source_bytes",
+      "min_sample_rate_hz",
+      "max_glossary_inline_entries",
+      "max_glossary_entries",
+      "max_segments_page"
+     ],
+     "properties": {
+      "max_duration_ms": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "max_source_bytes": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "min_sample_rate_hz": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "max_glossary_inline_entries": {
+       "type": "integer",
+       "minimum": 1,
+       "description": "glossary 內嵌上限（500）"
+      },
+      "max_glossary_entries": {
+       "type": "integer",
+       "minimum": 1,
+       "description": "glossary_url 檔案上限（10000）"
+      },
+      "max_segments_page": {
+       "type": "integer",
+       "minimum": 1,
+       "description": "segments 每頁 limit 上限（1000）"
+      }
+     }
+    },
+    "queue": {
+     "type": "object",
+     "required": [
+      "depth",
+      "running",
+      "max_depth"
+     ],
+     "properties": {
+      "depth": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "running": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "max_depth": {
+       "type": "integer",
+       "minimum": 1
+      }
+     }
+    },
+    "workers": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "id",
+       "kind",
+       "health",
+       "version"
+      ],
+      "properties": {
+       "id": {
+        "type": "string"
+       },
+       "kind": {
+        "type": "string",
+        "enum": [
+         "asr",
+         "diarization",
+         "llm"
+        ]
+       },
+       "endpoint": {
+        "type": "string"
+       },
+       "health": {
+        "type": "string",
+        "enum": [
+         "ok",
+         "degraded",
+         "down"
+        ]
+       },
+       "version": {
+        "type": "string"
+       },
+       "load": {
+        "type": "object",
+        "properties": {
+         "running": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "queued": {
+          "type": "integer",
+          "minimum": 0
+         },
+         "gpu_util": {
+          "type": [
+           "number",
+           "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+         },
+         "vram_used_mb": {
+          "type": [
+           "integer",
+           "null"
+          ],
+          "minimum": 0
+         },
+         "vram_total_mb": {
+          "type": [
+           "integer",
+           "null"
+          ],
+          "minimum": 0
+         }
+        }
+       }
+      }
+     }
+    },
+    "api_revision": {
+     "type": "string",
+     "pattern": "^2\\.[0-9]+$",
+     "description": "api_revision 大版號變動代表不相容（2.0 起範圍縮小為聲音 → 逐字稿）；小版號只做向下相容的新增"
+    }
+   }
+  },
+  "Event": {
+   "type": "object",
+   "required": [
+    "event_id",
+    "event_seq",
+    "type",
+    "job_id",
+    "occurred_at",
+    "data"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "event_id": {
+     "$ref": "#/$defs/EventId"
+    },
+    "event_seq": {
+     "$ref": "#/$defs/Seq"
+    },
+    "type": {
+     "type": "string",
+     "enum": [
+      "job.accepted",
+      "job.stage_changed",
+      "job.progress",
+      "segments.appended",
+      "speakers.assigned",
+      "final_segments.appended",
+      "task.completed",
+      "job.succeeded",
+      "job.partially_succeeded",
+      "job.failed",
+      "job.cancelled",
+      "job.expired"
+     ]
+    },
+    "job_id": {
+     "$ref": "#/$defs/JobId"
+    },
+    "external_ref": {
+     "type": "object"
+    },
+    "occurred_at": {
+     "$ref": "#/$defs/Timestamp"
+    },
+    "data": {
+     "type": "object"
+    }
+   },
+   "allOf": [
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "job.accepted"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "status",
+         "queue_position",
+         "profile_version"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "job.stage_changed"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "stage",
+         "previous_stage",
+         "progress"
+        ],
+        "properties": {
+         "stage": {
+          "$ref": "#/$defs/Stage"
+         },
+         "progress": {
+          "$ref": "#/$defs/Progress"
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "job.progress"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "progress"
+        ],
+        "properties": {
+         "progress": {
+          "$ref": "#/$defs/Progress"
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "segments.appended"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "first_seq",
+         "last_seq",
+         "segments"
+        ],
+        "properties": {
+         "segments": {
+          "type": "array",
+          "items": {
+           "$ref": "#/$defs/RawSegment"
+          },
+          "minItems": 1
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "speakers.assigned"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "speaker_ids",
+         "assignments",
+         "degraded"
+        ],
+        "properties": {
+         "assignments": {
+          "type": "array",
+          "items": {
+           "$ref": "#/$defs/SpeakerAssignment"
+          }
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "final_segments.appended"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "first_seq",
+         "last_seq",
+         "segments"
+        ],
+        "properties": {
+         "segments": {
+          "type": "array",
+          "items": {
+           "$ref": "#/$defs/FinalSegment"
+          },
+          "minItems": 1
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "task.completed"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "task",
+         "status"
+        ],
+        "properties": {
+         "task": {
+          "$ref": "#/$defs/Task"
+         },
+         "status": {
+          "enum": [
+           "succeeded",
+           "failed",
+           "degraded"
+          ]
+         },
+         "error": {
+          "oneOf": [
+           {
+            "$ref": "#/$defs/Error"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        }
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "enum": [
+         "job.succeeded",
+         "job.partially_succeeded"
+        ]
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "tasks",
+         "result_url",
+         "segment_count"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "job.failed"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "tasks",
+         "errors"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "job.cancelled"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "segment_count"
+        ]
+       }
+      }
+     }
+    },
+    {
+     "if": {
+      "properties": {
+       "type": {
+        "const": "job.expired"
+       }
+      }
+     },
+     "then": {
+      "properties": {
+       "data": {
+        "required": [
+         "expired_at"
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  "WebhookEndpoint": {
+   "type": "object",
+   "required": [
+    "endpoint_id",
+    "url",
+    "created_at",
+    "active_secrets"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "endpoint_id": {
+     "type": "string",
+     "pattern": "^wh_"
+    },
+    "url": {
+     "type": "string",
+     "format": "uri"
+    },
+    "created_at": {
+     "$ref": "#/$defs/Timestamp"
+    },
+    "active_secrets": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 2
+    },
+    "secret": {
+     "type": "string",
+     "description": "只在建立與輪替時回傳一次"
+    }
+   }
+  },
+  "CorrectionLevel": {
+   "type": "string",
+   "enum": [
+    "punctuation_only",
+    "standard"
+   ],
+   "description": "校正強度。punctuation_only：只做標點、明顯錯字與詞彙庫專有名詞，不改語序與用詞；standard：允許一般的辨識錯誤修正。預設 standard"
+  },
+  "JobRetryRequest": {
+   "type": "object",
+   "additionalProperties": false,
+   "description": "重試作業；可一併更換詞彙庫或校正等級，只重跑校正（raw 段落與 seq 不變）",
+   "properties": {
+    "glossary": {
+     "$ref": "#/$defs/Glossary"
+    },
+    "glossary_url": {
+     "$ref": "#/$defs/GlossaryUrl"
+    },
+    "correction_level": {
+     "$ref": "#/$defs/CorrectionLevel"
+    }
+   }
+  },
+  "CorrectionStats": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "edited_segments",
+    "unchanged_segments",
+    "kept_original_segments"
+   ],
+   "description": "校正幅度。kept_original_segments 是 jtlw 檢查後認為改動異常（改變數字、語意、專有名詞等）而保留原文的段數 model 是實際使用的校正模型名稱。",
+   "properties": {
+    "edited_segments": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "unchanged_segments": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "kept_original_segments": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "model": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "實際用來校正的 LLM 模型名稱。校正品質與模型高度相關（實測同一批語料換模型，英文的語意損壞率相差數倍），所以要記錄「這份結果是在什麼條件下產生的」"
+    }
+   }
+  },
+  "UrlSource": {
+   "type": "object",
+   "required": [
+    "type",
+    "url",
+    "sha256",
+    "size_bytes"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "type": {
+     "const": "url"
+    },
+    "url": {
+     "type": "string",
+     "format": "uri",
+     "description": "須在允許的主機清單內，否則送件當下回 source_not_allowed"
+    },
+    "sha256": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{64}$"
+    },
+    "size_bytes": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "content_type": {
+     "type": "string"
+    }
+   },
+   "description": "音訊來源：jtlw 自行拉檔並核對 sha256"
+  },
+  "UploadSource": {
+   "type": "object",
+   "required": [
+    "type",
+    "upload_id"
+   ],
+   "additionalProperties": false,
+   "description": "api_revision 2.4：先 POST /uploads 上傳，再用回傳的 upload_id 送件。一個上傳只能給一件作業；作業處理完會刪除檔案，沒用掉的 24 小時後刪除",
+   "properties": {
+    "type": {
+     "const": "upload"
+    },
+    "upload_id": {
+     "type": "string",
+     "pattern": "^upl_[0-9A-Z]{26}$"
+    }
+   }
+  },
+  "SummaryCitation": {
+   "type": "object",
+   "required": [
+    "seq",
+    "start_ms",
+    "end_ms",
+    "speaker_id",
+    "source_seqs"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "seq": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "MeetingSummary.segments 的段號"
+    },
+    "start_ms": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "end_ms": {
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "speaker_id": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "source_seqs": {
+     "type": "array",
+     "items": {
+      "$ref": "#/$defs/Seq"
+     },
+     "description": "對應到 raw 層的 seq"
+    }
+   }
+  },
+  "SummaryItem": {
+   "type": "object",
+   "required": [
+    "text",
+    "citations"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "text": {
+     "type": "string"
+    },
+    "owner": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "只有 actions：逐字稿裡明確指名的負責人，沒有就是 null"
+    },
+    "due_text": {
+     "type": [
+      "string",
+      "null"
+     ],
+     "description": "只有 actions：原文的期限寫法（例：下週三），不換算成日期"
+    },
+    "citations": {
+     "type": "array",
+     "minItems": 1,
+     "items": {
+      "$ref": "#/$defs/SummaryCitation"
+     }
+    }
+   }
+  },
+  "UploadResponse": {
+   "type": "object",
+   "required": [
+    "upload_id",
+    "size_bytes",
+    "sha256",
+    "filename",
+    "expires_at"
+   ],
+   "additionalProperties": false,
+   "description": "api_revision 2.4：POST /uploads 的回應（201）",
+   "properties": {
+    "upload_id": {
+     "type": "string",
+     "pattern": "^upl_[0-9A-Z]{26}$"
+    },
+    "size_bytes": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "sha256": {
+     "type": "string",
+     "pattern": "^[0-9a-f]{64}$"
+    },
+    "filename": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "expires_at": {
+     "$ref": "#/$defs/Timestamp",
+     "description": "沒有用來送件的話，這個時間之後刪除"
+    }
+   }
+  },
+  "MeetingSummary": {
+   "type": "object",
+   "required": [
+    "summary_schema_version",
+    "job_id",
+    "language",
+    "model",
+    "generated_at",
+    "llm_calls",
+    "summary",
+    "items",
+    "chapters",
+    "speakers",
+    "segments",
+    "dropped_count"
+   ],
+   "additionalProperties": false,
+   "description": "api_revision 2.4：GET /jobs/{id}/summary 的回應。與 jt-doc-tools 的會議摘要同一套分析：每一條都必須指得回逐字稿、引用經過比對，驗不過的不輸出；摘要只從驗證過的項目寫。空陣列表示分析沒有在逐字稿裡找到該類內容，不代表會議一定沒有",
+   "properties": {
+    "summary_schema_version": {
+     "type": "string",
+     "pattern": "^1\\.[0-9]+$"
+    },
+    "job_id": {
+     "$ref": "#/$defs/JobId"
+    },
+    "language": {
+     "const": "zh-Hant",
+     "description": "摘要與分類的文字語言（英文會議的項目文字可能保留英文原文）"
+    },
+    "model": {
+     "type": "string"
+    },
+    "generated_at": {
+     "$ref": "#/$defs/Timestamp"
+    },
+    "llm_calls": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "summary": {
+     "type": "object",
+     "required": [
+      "text",
+      "grounded",
+      "unsupported"
+     ],
+     "additionalProperties": false,
+     "properties": {
+      "text": {
+       "type": "string",
+       "description": "三到五句的中文摘要；分析失敗時為空字串"
+      },
+      "grounded": {
+       "type": "boolean",
+       "description": "false：摘要裡有數字或英文詞在素材中找不到（列在 unsupported）"
+      },
+      "unsupported": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       }
+      }
+     }
+    },
+    "items": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "impacts",
+      "decisions",
+      "actions",
+      "risks",
+      "questions"
+     ],
+     "properties": {
+      "impacts": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/SummaryItem"
+       }
+      },
+      "decisions": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/SummaryItem"
+       }
+      },
+      "actions": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/SummaryItem"
+       }
+      },
+      "risks": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/SummaryItem"
+       }
+      },
+      "questions": {
+       "type": "array",
+       "items": {
+        "$ref": "#/$defs/SummaryItem"
+       }
+      }
+     },
+     "description": "impacts 事件與影響、decisions 決議、actions 待辦、risks 風險、questions 未決問題"
+    },
+    "chapters": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "required": [
+       "title",
+       "first_seq",
+       "last_seq"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "title": {
+        "type": "string"
+       },
+       "start_ms": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "end_ms": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "duration_ms": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "percentage": {
+        "type": [
+         "number",
+         "null"
+        ]
+       },
+       "first_seq": {
+        "type": "integer"
+       },
+       "last_seq": {
+        "type": "integer"
+       }
+      }
+     }
+    },
+    "speakers": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "speaker_id",
+       "turn_count",
+       "chars",
+       "char_pct"
+      ],
+      "properties": {
+       "speaker_id": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "turn_count": {
+        "type": "integer"
+       },
+       "chars": {
+        "type": "integer"
+       },
+       "char_pct": {
+        "type": "number"
+       },
+       "speaking_ms": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "percentage": {
+        "type": [
+         "number",
+         "null"
+        ]
+       }
+      }
+     }
+    },
+    "segments": {
+     "type": "array",
+     "description": "分析用的段落：同一講者連續的短句合併（≤400 字、間隔 ≤3 秒）、超長的切開。引用的 seq 指這裡",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "seq",
+       "speaker_id",
+       "start_ms",
+       "end_ms",
+       "text",
+       "source_seqs"
+      ],
+      "properties": {
+       "seq": {
+        "type": "integer",
+        "minimum": 1
+       },
+       "speaker_id": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "start_ms": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "end_ms": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "text": {
+        "type": "string"
+       },
+       "source_seqs": {
+        "type": "array",
+        "items": {
+         "$ref": "#/$defs/Seq"
+        }
+       }
+      }
+     }
+    },
+    "dropped_count": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "模型提出、但引用驗不過而沒有輸出的項目數"
+    }
+   }
+  }
+ }
+}

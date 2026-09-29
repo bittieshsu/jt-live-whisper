@@ -244,7 +244,7 @@
         </div>
         <p><span class="zh">錄影在 jt-live-whisper 這邊處理完就刪除；逐字稿與摘要在對方取回並確認後刪除。</span><span class="en">jt-live-whisper deletes the recording once it's processed, and the transcript and summary once the portal has fetched and acknowledged them.</span></p>
 
-        <p class="note"><span class="zh">整合介面（REST）是<b>另行提供的元件</b>，不包含在本專案的公開發行內容裡。有整合需求請透過 GitHub Issues 聯繫。</span><span class="en">The REST integration layer is a <b>separate component</b>, not part of this repository's public release. Get in touch via GitHub Issues if you need it.</span></p>
+        <p class="note"><span class="zh">上面兩個整合是透過 REST API（<code>jtlw_api/</code>）接進來的。v2.25.1 起它隨 jt-live-whisper 一起發佈，伺服器版裝好就有；要不要啟用由你決定，設定方式見完整手冊<a href="sop.html#啟用-rest-api">「啟用 REST API」</a>。</span><span class="en">Both integrations above connect through a REST API (<code>jtlw_api/</code>). Since v2.25.1 it ships with jt-live-whisper and is ready on a server install; it stays off until you enable it — see <a href="sop.html#啟用-rest-api">"Enable the REST API"</a> in the manual.</span></p>
       </div>
       <div class="feat-block">
         <h3><span class="zh">字幕轉發</span><span class="en">Subtitle forwarding</span></h3>

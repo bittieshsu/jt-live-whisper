@@ -308,7 +308,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.1 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -330,7 +330,12 @@ if ($Upgrade) {
                        # 會議摘要（v2.25.0）：第一個放在子資料夾的，複製時要先建資料夾
                        "jtdt_meeting/__init__.py","jtdt_meeting/meeting_insight.py",
                        "jtdt_meeting/meeting_charts.py","jtdt_meeting/transcript_parse.py",
-                       "jtdt_meeting/zip_guard.py")
+                       "jtdt_meeting/zip_guard.py",
+                       # REST API（v2.25.1 起公開；伺服器版用，Windows 上不會執行，只是一起更新）
+                       "jtlw_api/__init__.py","jtlw_api/__main__.py","jtlw_api/app.py",
+                       "jtlw_api/config.py","jtlw_api/engine.py","jtlw_api/events.py",
+                       "jtlw_api/keys.py","jtlw_api/log.py","jtlw_api/store.py","jtlw_api/tls.py",
+                       "jtlw_api/schemas/jtlw-api-v1.schema.json")
 
     section "從 GitHub 升級程式"
 

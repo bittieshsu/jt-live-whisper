@@ -1,5 +1,30 @@
 # Changelog
 
+### v2.25.1 (2026-09-29)
+
+**REST API（`jtlw_api/`）公開，隨程式一起發佈**
+
+jt-doc-tools 與 jt-vc-portal 串接用的 REST API，原本只有另外部署的伺服器才有，現在跟著 jt-live-whisper 一起發佈，
+`--upgrade` 會一起更新。介面規格（JSON Schema）在 `jtlw_api/schemas/`。
+
+- **不會自動啟動**：伺服器版會裝好它需要的套件，要不要對外開 API 由你決定。
+  手冊「四之二、REST API」新增「啟用 REST API」一節，附背景服務範本
+- 伺服器版（`install.sh --server`）多裝 `jsonschema`；Linux 伺服器從舊版 `--upgrade` 時會自動補裝
+- 安裝程式認得照範本建立的 `jtlw-api` 服務（名稱加上工作目錄判斷，別的服務不碰）：
+  - `--upgrade` 後**只提示**重啟、不自動重啟（時機由你決定；重啟時進行中的作業會自動接續，不會失敗）
+  - `--doctor` 檢查它需要的套件與服務狀態
+  - `--uninstall` 一併移除，不會留下一個虛擬環境被刪掉後一直重啟失敗的服務
+- `python -m jtlw_api` 缺套件時直接說明缺什麼、怎麼補，不再噴一長串錯誤
+- `.gitignore` 加上 `api_data/`（API 的作業紀錄、上傳暫存、自簽憑證與私鑰）
+
+**升級**
+- 用戶端（Mac、Windows、Linux 桌面）也會收到 `jtlw_api/`，但用不到，不影響任何功能
+- `jtlw_api/` 要**第二次** `--upgrade`（Windows：`-Upgrade`）才會到：第一次跑的是舊版的升級程式，清單裡還沒有它。
+  從 v2.24.0 以前升級的，`jtdt_meeting/` 也是第二次才到
+
+**其他**
+- GPU 伺服器程式只有版本號變動
+
 ### v2.25.0 (2026-09-28)
 
 **會議摘要改用 jt-doc-tools 的會議分析：每一條都指得回逐字稿**

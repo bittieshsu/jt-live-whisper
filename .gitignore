@@ -17,6 +17,9 @@ config.json
 logs/
 recordings/
 
+# REST API 的作業資料庫、上傳暫存、自簽憑證與私鑰（v2.25.1 起 jtlw_api/ 公開）
+api_data/
+
 # 暫存檔
 .whisper_output.txt
 .tmp_*

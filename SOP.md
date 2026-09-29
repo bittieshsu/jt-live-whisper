@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.25.0 (by Jason Cheng)
+即時英翻中字幕系統 v2.25.1 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [使用流程總結](#五使用流程總結) · [常見問題](#六常見問題) · [檔案說明](#七檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -136,11 +136,16 @@ jt-live-whisper/
   install-linux.sh         安裝腳本（Linux）
   install.ps1              安裝腳本（Windows）
   remote_whisper_server.py GPU 伺服器端 Whisper 辨識服務（選配）
+  jtlw_tls.py              WebUI 與 REST API 共用的 TLS（HTTPS）模組
+  sck_audio_capture.swift  macOS 系統音訊擷取元件（安裝時自動編譯）
+  jtdt_meeting/            會議摘要的會議分析（jt-doc-tools 的程式，原封不動）
+  jtlw_api/                REST API（給其他系統串接，伺服器版；介面規格在 schemas/）
   config.json              使用者設定（自動產生，含 LLM/GPU/WebUI 密碼等）
   SOP.md                   完整使用手冊
   CHANGELOG.md             版本更新記錄
   logs/                    記錄檔、摘要檔、HTML 逐字稿（自動建立）
   recordings/              暫存音訊轉檔（自動建立）
+  api_data/                REST API 的作業紀錄、上傳暫存、憑證（啟用 API 後自動建立）
   whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 下載預編譯版本）
   venv/                    Python 虛擬環境
 ```
@@ -1892,8 +1897,9 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
 
 ## 四之二、REST API（給其他系統串接）
 
-與特定系統串接時，會另外部署一組 REST API（`jtlw_api/`），讓別的系統送音檔進來、取回逐字稿與講者標記。
-**這個模組不包含在公開發行內容裡，`install.sh --server` 不會安裝它**（見本節後段說明）。
+要讓別的系統送音檔進來、取回逐字稿、講者標記與會議摘要時，啟用 REST API（`jtlw_api/`）。
+**v2.25.1 起它隨 jt-live-whisper 一起發佈、`--upgrade` 會一起更新**；伺服器版（`install.sh --server`）會裝好它需要的套件，
+但**不會自動啟動**——要不要對外開這個服務由你決定，照本節「啟用 REST API」設定。
 
 ### 已上線的整合：jt-doc-tools
 
@@ -1946,15 +1952,50 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
 - 日文、韓文的會議目前不能摘要（送件當下回 422 `language_not_supported`），逐字稿不受影響
 
 
-> **這個模組（`jtlw_api/`）不包含在本專案的公開發行內容裡**，
-> 是與特定系統串接時另外部署的元件。這一節寫給已經拿到它的管理者，
-> 說明金鑰與憑證放在哪裡、怎麼查、怎麼換。
+### 啟用 REST API
 
-啟動方式：
+REST API 跑在伺服器版（Linux，`install.sh --server`）上，與 WebUI 是兩個獨立的服務。
+
+1. 確認套件：`./install.sh --doctor`。從 v2.25.0 以前升級上來的，執行一次 `./install.sh --server` 補裝 `jsonschema`
+2. 建一把金鑰給要串接的系統（見下方「API Key」）
+3. 對方用「下載網址」送音檔的話，設定允許的來源主機（見下方「允許的來源主機」）；只用上傳的不必設
+4. 建立背景服務（`<帳號>` 換成執行 jt-live-whisper 的帳號，路徑換成你的安裝資料夾）：
+
+```ini
+# /etc/systemd/system/jtlw-api.service
+[Unit]
+Description=jt-live-whisper REST API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=<帳號>
+WorkingDirectory=/home/<帳號>/Apps/jt-live-whisper
+ExecStart=/home/<帳號>/Apps/jt-live-whisper/venv/bin/python -m jtlw_api --host 0.0.0.0 --port 8790
+Restart=on-failure
+RestartSec=5
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-venv/bin/python -m jtlw_api --host 0.0.0.0 --port 8790
+sudo systemctl daemon-reload
+sudo systemctl enable --now jtlw-api
+venv/bin/python -m jtlw_api --info               # 金鑰、憑證指紋、允許的來源主機
+curl -k https://127.0.0.1:8790/api/v1/health     # 回 {"status":"ok"}
 ```
+
+- **服務名稱用 `jtlw-api`、`WorkingDirectory` 寫安裝資料夾**：安裝程式靠這兩點認得它——
+  `--doctor` 會檢查它、`--uninstall` 會一併移除（否則刪掉虛擬環境後它會一直重啟失敗）
+- **`--upgrade` 不會重啟 API 服務**：更新完會提示 `sudo systemctl restart jtlw-api`，
+  挑沒有作業的時候執行（重啟約 1 秒，進行中的作業會自動接續，不會失敗）
+- 第一次啟動會自動產生自簽憑證，要串接的系統要信任它（見下方「憑證」）
+- 作業紀錄、上傳暫存、憑證都在安裝資料夾的 `api_data/`，解除安裝時保留
+- 介面規格（JSON Schema）：`jtlw_api/schemas/jtlw-api-v1.schema.json`
+- 防火牆只開給要串接的主機；沒有金鑰的請求一律 401（`/health` 除外）
 
 ### 金鑰與憑證要去哪裡看
 

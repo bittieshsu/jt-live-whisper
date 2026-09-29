@@ -1,4 +1,4 @@
-# jt-live-whisper v2.25.0
+# jt-live-whisper v2.25.1
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -715,11 +715,16 @@ jt-live-whisper/
   install-linux.sh         安裝腳本（Linux，含 --server / --doctor / --uninstall）
   install.ps1              安裝腳本（Windows）
   remote_whisper_server.py GPU 伺服器端 Whisper 辨識服務（選配）
+  jtlw_tls.py              WebUI 與 REST API 共用的 TLS（HTTPS）模組
+  sck_audio_capture.swift  macOS 系統音訊擷取元件（安裝時自動編譯）
+  jtdt_meeting/            會議摘要的會議分析（jt-doc-tools 的程式，原封不動）
+  jtlw_api/                REST API（給其他系統串接，伺服器版；介面規格在 schemas/）
   config.json              使用者設定（自動產生，含 LLM/GPU/WebUI 密碼等）
   SOP.md                   完整使用手冊
   CHANGELOG.md             版本更新記錄
   logs/                    轉錄記錄檔、AI 摘要檔、HTML 逐字稿（自動建立）
   recordings/              暫存音訊轉檔（自動建立）
+  api_data/                REST API 的作業紀錄、上傳暫存、憑證（啟用 API 後自動建立）
   whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用）
   venv/                    Python 虛擬環境（安裝時自動建立）
 ```

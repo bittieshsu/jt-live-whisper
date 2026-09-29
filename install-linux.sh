@@ -33,6 +33,15 @@ done
 
 SERVICE_NAME="jt-live-whisper-webui"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+
+# REST API（jtlw_api/，v2.25.1 起公開）的背景服務。安裝程式**不自動建立**（手冊附範本），
+# 但要認得照範本建的那一份：升級後提示重啟、解除安裝時一併移除（否則 venv 刪掉後它會每 5 秒重啟失敗一次）、
+# 相依套件照伺服器模式補裝。只認「名稱是 jtlw-api 而且工作目錄就是這個資料夾」的，別的程式的服務不碰
+API_SERVICE_NAME="jtlw-api"
+API_SERVICE_FILE="/etc/systemd/system/${API_SERVICE_NAME}.service"
+_api_unit_is_ours() {
+    [ -f "$API_SERVICE_FILE" ] && grep -qxF -e "WorkingDirectory=${SCRIPT_DIR}" -e "WorkingDirectory=${SCRIPT_DIR}/" "$API_SERVICE_FILE"
+}
 DESKTOP_FILE="$HOME/.local/share/applications/jt-live-whisper.desktop"
 
 # ARM64 + NVIDIA 本機編譯的 CTranslate2 函式庫位置（不裝進 /usr/local，避免覆蓋同一台主機上
@@ -223,6 +232,9 @@ check_linux_venv() {
     )
     if [ "$LINUX_MODE" = "desktop" ]; then
         pkgs+=("PyQt6|PyQt6|PyQt6（懸浮字幕視窗）")
+    fi
+    if [ "$LINUX_MODE" = "server" ] || _api_unit_is_ours; then
+        pkgs+=("jsonschema|jsonschema|jsonschema（REST API 送件格式檢查）")
     fi
 
     local item mod pkg label
@@ -608,6 +620,23 @@ PY
         echo -e "  ${C_DIM}未設定 LLM 伺服器${NC}"
     fi
 
+    if command -v systemctl >/dev/null 2>&1 && _api_unit_is_ours; then
+        section "REST API 服務"
+        local amod
+        for amod in "jsonschema|jsonschema" "multipart|python-multipart"; do
+            if "$VENV_DIR/bin/python3" -c "import ${amod%%|*}" >/dev/null 2>&1; then
+                check_ok "${amod#*|}"
+            else
+                _dr_fail "${amod#*|} 無法載入（請執行 ./install.sh --server）"
+            fi
+        done
+        if systemctl is-active --quiet "$API_SERVICE_NAME"; then
+            check_ok "${API_SERVICE_NAME} 執行中"
+        else
+            _dr_fail "${API_SERVICE_NAME} 未執行（journalctl -u ${API_SERVICE_NAME}）"
+        fi
+    fi
+
     if command -v systemctl >/dev/null 2>&1 && [ -f "$SERVICE_FILE" ]; then
         section "WebUI 服務"
         if systemctl is-active --quiet "$SERVICE_NAME"; then
@@ -630,11 +659,26 @@ PY
 # ─── 解除安裝 ────────────────────────────────────
 linux_uninstall() {
     section "解除安裝"
-    echo -e "  ${C_WHITE}將移除：虛擬環境（venv/）、WebUI 服務、應用程式選單捷徑${NC}"
-    echo -e "  ${C_DIM}保留：程式檔、config.json、logs/、recordings/、下載的模型（~/.cache/huggingface、~/.local/share）${NC}"
+    echo -e "  ${C_WHITE}將移除：虛擬環境（venv/）、WebUI 服務、REST API 服務（有的話）、應用程式選單捷徑${NC}"
+    echo -e "  ${C_DIM}保留：程式檔、config.json、logs/、recordings/、api_data/（API 的作業紀錄與憑證）、下載的模型（~/.cache/huggingface、~/.local/share）${NC}"
     read -p "  確定要解除安裝？(y/N) " -n 1 -r
     echo
     [[ $REPLY =~ ^[Yy]$ ]] || { echo "  已取消"; return 0; }
+    if command -v systemctl >/dev/null 2>&1 && _api_unit_is_ours; then
+        # 與下面的 WebUI 服務同一個原則：移除失敗就不要接著刪 venv
+        $SUDO systemctl disable --now "$API_SERVICE_NAME" >/dev/null 2>&1
+        $SUDO rm -f "$API_SERVICE_FILE" >/dev/null 2>&1
+        if [ -f "$API_SERVICE_FILE" ]; then
+            check_fail "無法移除 ${API_SERVICE_NAME} 服務（需要 sudo 權限），未做任何變更"
+            echo -e "  ${C_DIM}請在終端機手動執行：${NC}"
+            echo -e "  ${C_DIM}  sudo systemctl disable --now ${API_SERVICE_NAME} && sudo rm -f ${API_SERVICE_FILE} && sudo systemctl daemon-reload${NC}"
+            echo -e "  ${C_DIM}完成後再執行一次 ./install.sh --uninstall${NC}"
+            return 1
+        fi
+        $SUDO systemctl daemon-reload >/dev/null 2>&1
+        $SUDO systemctl reset-failed "$API_SERVICE_NAME" >/dev/null 2>&1
+        check_ok "已移除 ${API_SERVICE_NAME} 服務"
+    fi
     if command -v systemctl >/dev/null 2>&1 && [ -f "$SERVICE_FILE" ]; then
         # sudo 失敗（例如沒有終端機可輸入密碼）時不可謊報成功，也不要接著刪 venv，
         # 否則會留下一個指向已刪除環境、仍在執行的服務
@@ -713,10 +757,21 @@ print_linux_summary() {
     echo -e "  ${C_WHITE}環境診斷: ${C_OK}./install.sh --doctor${NC}"
     echo -e "  ${C_WHITE}升級方式: ${C_OK}./install.sh --upgrade${NC}"
     echo ""
+    _api_restart_hint
     if [ -n "$INSTALL_LOG" ] && [ -f "$INSTALL_LOG" ]; then
         echo -e "  ${C_DIM}安裝 log: $INSTALL_LOG${NC}"
         echo ""
     fi
+}
+
+# 升級後 REST API 服務仍在跑舊版（已載入記憶體）：提示重啟，不自動重啟
+_api_restart_hint() {
+    [ -n "${JTLW_RESTART_SERVICE:-}" ] && _api_unit_is_ours || return 0
+    command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$API_SERVICE_NAME" || return 0
+    echo -e "  ${C_WARN}REST API 服務（${API_SERVICE_NAME}）仍在執行舊版，要重啟才會換成新版：${NC}"
+    echo -e "  ${C_OK}  sudo systemctl restart ${API_SERVICE_NAME}${NC}"
+    echo -e "  ${C_DIM}  重啟約 1 秒；進行中的作業會自動接續、不會失敗，挑沒有作業的時候最好${NC}"
+    echo ""
 }
 
 # ─── 主流程 ──────────────────────────────────────
@@ -733,6 +788,8 @@ case "$LINUX_ACTION" in
         do_upgrade || exit $?
         _ver_after=$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null)
         [ "$_ver_before" != "$_ver_after" ] && export JTLW_RESTART_SERVICE=1
+        # 不接著檢查相依套件時（JTLW_SKIP_DEP_CHECK），摘要不會出現，提示要在這裡印
+        [ -n "${JTLW_SKIP_DEP_CHECK:-}" ] && _api_restart_hint
         # 程式更新後，用「新版」安裝腳本重新檢查相依套件（新版可能新增系統或 Python 套件）；
         # 已安裝的項目會自動略過。伺服器版沿用伺服器模式。
         if [ -z "${JTLW_SKIP_DEP_CHECK:-}" ]; then
