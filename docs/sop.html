@@ -58,15 +58,15 @@
       <a class="lv3" href="#4-3-字幕轉發功能">4-3. 字幕轉發功能</a>
       <a class="lv3" href="#4-4-懸浮字幕功能感謝-osslab-熊大提供建議">4-4. 懸浮字幕功能（感謝 OSSLab 熊大提供建議）</a>
       <a class="lv3" href="#4-5-關鍵字即時通知">4-5. 關鍵字即時通知</a>
-      <a class="lv3" href="#4-8-命令列參數跳過選單直接啟動">4-8. 命令列參數（跳過選單直接啟動）</a>
-      <a class="lv3" href="#4-8-互動式選單">4-8. 互動式選單</a>
+      <a class="lv3" href="#4-6-命令列參數跳過選單直接啟動">4-6. 命令列參數（跳過選單直接啟動）</a>
+      <a class="lv3" href="#4-7-互動式選單">4-7. 互動式選單</a>
       <a class="lv3" href="#4-8-字幕顯示">4-8. 字幕顯示</a>
-      <a class="lv3" href="#4-8-自動過濾機制">4-8. 自動過濾機制</a>
-      <a class="lv3" href="#4-8-停止">4-8. 停止</a>
-      <a class="lv3" href="#4-8---summarize-批次摘要">4-8. --summarize 批次摘要</a>
-      <a class="lv3" href="#4-8---input-音訊檔離線處理">4-8. --input 音訊檔離線處理</a>
-      <a class="lv3" href="#4-8-台語台灣閩南語辨識">4-8. 台語（台灣閩南語）辨識</a>
-      <a class="lv3" href="#4-9---diarize-講者辨識">4-9. --diarize 講者辨識</a>
+      <a class="lv3" href="#4-9-自動過濾機制">4-9. 自動過濾機制</a>
+      <a class="lv3" href="#4-10-停止">4-10. 停止</a>
+      <a class="lv3" href="#4-11---summarize-批次摘要">4-11. --summarize 批次摘要</a>
+      <a class="lv3" href="#4-12---input-音訊檔離線處理">4-12. --input 音訊檔離線處理</a>
+      <a class="lv3" href="#4-13-台語台灣閩南語辨識">4-13. 台語（台灣閩南語）辨識</a>
+      <a class="lv3" href="#4-14---diarize-講者辨識">4-14. --diarize 講者辨識</a>
       <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
       <a class="" href="#五rest-api給其他系統串接">五、REST API（給其他系統串接）</a>
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
@@ -127,7 +127,7 @@
 <thead>
 <tr>
 <th><strong>目錄</strong></th>
-<th><a href="#%E4%B8%80%E7%B3%BB%E7%B5%B1%E6%9E%B6%E6%A7%8B">系統架構</a> · <a href="#%E4%BA%8C%E4%BA%8B%E5%89%8D%E6%BA%96%E5%82%99%E9%9F%B3%E8%A8%8A%E8%A8%AD%E5%AE%9A">音訊設定</a> · <a href="#%E4%B8%89%E5%AE%89%E8%A3%9D%E7%A8%8B%E5%BC%8F">安裝程式</a> · <a href="#%E5%9B%9B%E5%95%9F%E5%8B%95%E8%88%87%E4%BD%BF%E7%94%A8">啟動與使用</a> · <a href="#%E4%BA%94%E4%BD%BF%E7%94%A8%E6%B5%81%E7%A8%8B%E7%B8%BD%E7%B5%90">使用流程總結</a> · <a href="#%E5%85%AD%E5%B8%B8%E8%A6%8B%E5%95%8F%E9%A1%8C">常見問題</a> · <a href="#%E4%B8%83%E6%AA%94%E6%A1%88%E8%AA%AA%E6%98%8E">檔案說明</a> · <a href="#%E7%A1%AC%E9%AB%94%E5%BB%BA%E8%AD%B0">硬體建議</a></th>
+<th><a href="#%E4%B8%80%E7%B3%BB%E7%B5%B1%E6%9E%B6%E6%A7%8B">系統架構</a> · <a href="#%E4%BA%8C%E4%BA%8B%E5%89%8D%E6%BA%96%E5%82%99%E9%9F%B3%E8%A8%8A%E8%A8%AD%E5%AE%9A">音訊設定</a> · <a href="#%E4%B8%89%E5%AE%89%E8%A3%9D%E7%A8%8B%E5%BC%8F">安裝程式</a> · <a href="#%E5%9B%9B%E5%95%9F%E5%8B%95%E8%88%87%E4%BD%BF%E7%94%A8">啟動與使用</a> · <a href="#%E4%BA%94rest-api%E7%B5%A6%E5%85%B6%E4%BB%96%E7%B3%BB%E7%B5%B1%E4%B8%B2%E6%8E%A5">REST API</a> · <a href="#%E5%85%AD%E4%BD%BF%E7%94%A8%E6%B5%81%E7%A8%8B%E7%B8%BD%E7%B5%90">使用流程總結</a> · <a href="#%E4%B8%83%E5%B8%B8%E8%A6%8B%E5%95%8F%E9%A1%8C">常見問題</a> · <a href="#%E5%85%AB%E6%AA%94%E6%A1%88%E8%AA%AA%E6%98%8E">檔案說明</a> · <a href="#%E7%A1%AC%E9%AB%94%E5%BB%BA%E8%AD%B0">硬體建議</a></th>
 </tr>
 </thead>
 </table>
@@ -1373,7 +1373,7 @@ cd C:\jt-live-whisper
 <p><strong>字幕模式</strong> - 電影風格，黑底大字</p>
 <p><img src="images/webui-subtitle-bidi.png" alt="WebUI 字幕模式 - 雙向"></p>
 <p>WebUI 需要 fastapi、uvicorn、websockets 套件（安裝腳本已自動安裝）。</p>
-<h3 id="4-8-命令列參數跳過選單直接啟動">4-8. 命令列參數（跳過選單直接啟動）</h3>
+<h3 id="4-6-命令列參數跳過選單直接啟動">4-6. 命令列參數（跳過選單直接啟動）</h3>
 <p>除了互動式選單，也可以透過命令列參數直接啟動，跳過所有選單：</p>
 <pre><code class="language-bash">./start.sh [參數...]           # macOS / Linux
 .\start.ps1 [參數...]          # Windows
@@ -1623,7 +1623,7 @@ cd C:\jt-live-whisper
 ./start.sh --summarize logs/log1.txt logs/log2.txt --summary-model phi4:14b
 </code></pre>
 <p>只要帶任何參數，程式就會進入 CLI 模式，未指定的參數自動使用預設值。不帶任何參數則進入互動式選單。<code>--input</code> 不帶 <code>--mode</code> 時也會進入互動選單（選擇模式、講者辨識、摘要）。互動式選單第一步為「輸入來源」，可選擇即時音訊擷取或從 <code>recordings/</code> 讀入已有的錄音檔。</p>
-<h3 id="4-8-互動式選單">4-8. 互動式選單</h3>
+<h3 id="4-7-互動式選單">4-7. 互動式選單</h3>
 <p><img src="images/interactive-menu.png" alt="互動式選單"></p>
 <p>啟動後會依序出現以下選單（都可按 Enter 使用預設值）：</p>
 <p><strong>0) 輸入來源</strong></p>
@@ -2367,19 +2367,19 @@ cd C:\jt-live-whisper
 </ul>
 <p>預設皆為顯示，不設定或設為 <code>false</code> 即維持顯示。</p>
 <p>同時會自動儲存翻譯記錄到 <code>logs/{模式}_逐字稿_YYYYMMDD_HHMMSS.txt</code>（例如 <code>英翻中_逐字稿_20260315_140000.txt</code>）。</p>
-<h3 id="4-8-自動過濾機制">4-8. 自動過濾機制</h3>
+<h3 id="4-9-自動過濾機制">4-9. 自動過濾機制</h3>
 <p>程式內建多種自動過濾，減少雜訊干擾：</p>
 <ul>
 <li><strong>Whisper 幻覺過濾</strong>：靜音時 Whisper 可能產生假輸出（如 &quot;thank you&quot;、&quot;subscribe&quot;、&quot;thanks for watching&quot; 等），程式會自動過濾這些常見幻覺文字。</li>
 <li><strong>非預期語言過濾</strong>：LLM 偶爾會輸出俄文等非預期語言的字元，程式會自動偵測並重試翻譯。</li>
 <li><strong>繁體中文輸出</strong>：翻譯 prompt 直接要求 LLM 輸出台灣繁體中文，不再依賴外部簡繁轉換套件。</li>
 </ul>
-<h3 id="4-8-停止">4-8. 停止</h3>
+<h3 id="4-10-停止">4-10. 停止</h3>
 <ul>
 <li><strong>Ctrl+P</strong>：暫停 / 繼續</li>
 <li><strong>Ctrl+C</strong>：停止轉錄，翻譯記錄自動儲存。按兩次可強制結束</li>
 </ul>
-<h3 id="4-8---summarize-批次摘要">4-8. --summarize 批次摘要</h3>
+<h3 id="4-11---summarize-批次摘要">4-11. --summarize 批次摘要</h3>
 <p>對已有的翻譯記錄檔進行後處理摘要，不啟動即時轉錄：</p>
 <pre><code class="language-bash"># 單檔摘要
 ./start.sh --summarize logs/英翻中_逐字稿_20260303_140000.txt
@@ -2452,7 +2452,7 @@ cd C:\jt-live-whisper
 <td>「[降級] 會議分析失敗（原因），這次用舊的摘要方式」</td>
 </tr>
 </tbody></table>
-<h3 id="4-8---input-音訊檔離線處理">4-8. --input 音訊檔離線處理</h3>
+<h3 id="4-12---input-音訊檔離線處理">4-12. --input 音訊檔離線處理</h3>
 <p><img src="images/offline-menu-1.png" alt="離線處理選單：模式與模型選擇"></p>
 <p><img src="images/offline-menu-2.png" alt="離線處理選單：LLM 伺服器與講者辨識"></p>
 <p><img src="images/offline-menu-3.png" alt="離線處理選單：設定總覽與等效 CLI 指令"></p>
@@ -2581,7 +2581,7 @@ cd C:\jt-live-whisper
 [00:10-00:15] ▶ [日] いいえ、よろしくお願いいたします
 </code></pre>
 <p>其中 ◀ 表示系統音訊（對方），▶ 表示麥克風（自己）。配對條件：檔名含「_系統音訊」和「_麥克風」，且時間戳部分相同。</p>
-<h3 id="4-8-台語台灣閩南語辨識">4-8. 台語（台灣閩南語）辨識</h3>
+<h3 id="4-13-台語台灣閩南語辨識">4-13. 台語（台灣閩南語）辨識</h3>
 <p>台語模式使用 <strong>MediaTek Breeze-ASR-26</strong>（Whisper large-v2 的台語微調版，Apache-2.0 授權），
 辨識結果<strong>直接輸出漢字</strong>，不需要再經過翻譯。即時模式與離線處理都可以使用。</p>
 <pre><code class="language-bash">./start.sh --mode nan                        # 即時台語字幕
@@ -2659,7 +2659,7 @@ cd C:\jt-live-whisper
 <li><strong>時間戳精細度較低</strong>：本模型訓練時不產生時間戳，程式改用語音活動偵測把音訊切成最長 28 秒的視窗，時間戳取自切段邊界。因此 SRT / VTT 字幕的每一段會比一般模式長，適合定位與對照，不適合逐句字幕</li>
 <li>極短的單詞片段（1～2 秒）容易出現重複幻覺，連續語音的表現明顯較好</li>
 </ul>
-<h3 id="4-9---diarize-講者辨識">4-9. --diarize 講者辨識</h3>
+<h3 id="4-14---diarize-講者辨識">4-14. --diarize 講者辨識</h3>
 <p>對音訊檔進行講者辨識，區分不同講者。使用 <strong>resemblyzer</strong>（d-vector 聲紋特徵提取）+ <strong>spectralcluster</strong>（Google 頻譜分群），不需要 HuggingFace token。在 M2 上處理 30 分鐘音訊約 30-60 秒；有 GPU 伺服器設定時自動使用 GPU 伺服器執行，速度可加快到 5-10 秒。伺服器失敗會自動降級本機。</p>
 <p><code>--diarize</code> 需搭配 <code>--input</code> 使用，不適用於即時模式。即時模式無法即時辨識講者，因此建議在即時模式啟用錄音功能（<code>--record</code>），事後再將錄音檔以 <code>--input</code> + <code>--diarize</code> 匯入做講者辨識：</p>
 <pre><code class="language-bash"># 步驟 1：即時模式啟用錄音
