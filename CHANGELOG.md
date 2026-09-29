@@ -1,5 +1,27 @@
 # Changelog
 
+### v2.25.3 (2026-09-29)
+
+**REST API：上傳的錄影辨識失敗後可以直接重試**
+
+- 以前作業一結束就刪掉上傳的錄影，辨識失敗（例如 GPU 伺服器暫時不能用）之後 `retry` 一定再失敗一次
+  （`source_unreachable`／`upload_consumed`），錯誤卻標 `retryable: true`，只能重新上傳、送新的一件
+- 現在逐字稿失敗、而且錯誤可以重試時保留上傳的檔案，`POST /jobs/{id}/retry` 直接重做；
+  保留到重試成功、ACK、刪除作業或 7 天後內容到期（每分鐘另有一次清掃，任何一條路漏了都會收掉）
+- 成功、取消、不可重試的失敗（例如檔案解不開）照舊立刻刪除；這時 `upload_consumed` 改標 `retryable: false`
+- 用下載網址送件的不受影響（重試時照舊重新下載）
+
+**REST API：`meeting.detailed`（會議（精細））標為停用**
+- 說明寫「較慢但更準」，程式卻從來沒有對應的處理，結果與 `meeting.balanced` 完全相同
+- 仍然可以送件、照 balanced 處理（已經選了它的系統不會失敗）；回應的 `warnings` 帶 `profile_deprecated`，
+  `/profiles` 標 `deprecated: true`、`replacement_profile_id: meeting.balanced`，名稱與說明也寫明已停用
+- 台語模式（`transcribe.taiwanese`）的說明寫明適用情境：也能處理夾雜的華語、英文大多會被翻成中文、不分講者，
+  華語為主的會議用一般模式比較好（呼叫端的設定頁直接顯示這段說明）
+
+**會議摘要：標題改用正式說法（與 jt-doc-tools v1.16.27 同步）**
+- 「誰講了多少」→「發言統計」；圖表：「誰在什麼時候講話」→「發言者時間軸」、「各發言者佔多少」→「發言佔比」、
+  「各議題佔多少時間」→「各議題時間佔比」。只改文字，分析結果不變
+
 ### v2.25.2 (2026-09-29)
 
 **REST API 的台語模式修好了：改用 GPU 伺服器的台語模型**

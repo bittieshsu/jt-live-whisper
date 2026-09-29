@@ -97,7 +97,7 @@ def _spk(name: object) -> str:
 
 def speaker_timeline(segments: Sequence[dict], stats: dict, *,
                      width: int = 760) -> Optional[str]:
-    """誰在什麼時候講話 —— **跟畫面上那一欄同一件事**。
+    """發言者時間軸 —— **跟畫面上那一欄同一件事**。
 
     ## 為什麼不是長條圖
 
@@ -155,7 +155,7 @@ def speaker_timeline(segments: Sequence[dict], stats: dict, *,
     unit_note = ("橫軸是會議時間，色塊是那個人在講話" if use_time
                  else "這份逐字稿沒有時間戳記，橫軸改用逐字稿的順序")
     body = [f'<text x="0" y="20" font-size="14" font-weight="700" fill="#0f172a">'
-            f'誰在什麼時候講話</text>',
+            f'發言者時間軸</text>',
             f'<text x="0" y="36" font-size="11" fill="#64748b">{unit_note}</text>']
 
     for i, (name, v) in enumerate(rows):
@@ -188,11 +188,11 @@ def speaker_timeline(segments: Sequence[dict], stats: dict, *,
                      (width, f"{v.get('turn_count') or 0} 次")):
             body.append(f'<text x="{x}" y="{y + row_h // 2 + 4}" font-size="11.5" '
                         f'text-anchor="end" fill="#64748b">{_esc(s)}</text>')
-    return _svg(width, h, "".join(body), "誰在什麼時候講話")
+    return _svg(width, h, "".join(body), "發言者時間軸")
 
 
 def speaker_share(stats: dict, *, width: int = 760) -> Optional[str]:
-    """誰講了多少（長條圖）。
+    """發言佔比（長條圖）。
 
     **只在沒有逐字稿可用時才畫** —— 有逐字稿的話 `speaker_timeline()` 說得
     更多（同樣看得出佔比，還看得出什麼時候講）。公開 API 只給分析結果、
@@ -216,7 +216,7 @@ def speaker_share(stats: dict, *, width: int = 760) -> Optional[str]:
     bar_w = width - bar_x - 96
     unit = "發言時間" if use_time else "發言字數"
     body = [f'<text x="0" y="20" font-size="14" font-weight="700" fill="#0f172a">'
-            f'各發言者佔多少（依{unit}）</text>',
+            f'發言佔比（依{unit}）</text>',
             f'<text x="0" y="36" font-size="11" fill="#64748b">'
             f'{"重疊的插話只算一次" if use_time else "這份逐字稿沒有時間戳記，改用字數"}</text>']
     for i, (name, val, turns) in enumerate(rows):
@@ -231,7 +231,7 @@ def speaker_share(stats: dict, *, width: int = 760) -> Optional[str]:
             f'<rect x="{bar_x}" y="{y + 4}" width="{w}" height="14" rx="3" fill="{colour}"/>'
             f'<text x="{bar_x + w + 8}" y="{y + 15}" font-size="11.5" fill="#475569">'
             f'{pct:.1f}%　{_esc(shown)}　{turns} 次</text>')
-    return _svg(width, h, "".join(body), f"各發言者佔多少（依{unit}）")
+    return _svg(width, h, "".join(body), f"發言佔比（依{unit}）")
 
 
 # ------------------------------------------------------------------ 章節時間軸
@@ -253,7 +253,7 @@ def chapter_timeline(chapters: Sequence[dict], *, width: int = 760) -> Optional[
     h = bar_y + bar_h + 18 + legend_h
     unit = "時間" if use_time else "發言段數"
     body = [f'<text x="0" y="20" font-size="14" font-weight="700" fill="#0f172a">'
-            f'各議題佔多少{unit}</text>']
+            f'各議題{unit}佔比</text>']
     if not use_time:
         body.append('<text x="0" y="36" font-size="11" fill="#64748b">'
                     '這份逐字稿沒有時間戳記，改用發言段數</text>')
@@ -272,7 +272,7 @@ def chapter_timeline(chapters: Sequence[dict], *, width: int = 760) -> Optional[
             f'<text x="18" y="{y}" font-size="12" fill="#334155">{_esc(c.get("title"))}</text>'
             f'<text x="{width}" y="{y}" font-size="11.5" text-anchor="end" fill="#64748b">'
             f'{v * 100 / total:.1f}%　{_esc(extra)}</text>')
-    return _svg(width, h, "".join(body), f"各議題佔多少{unit}")
+    return _svg(width, h, "".join(body), f"各議題{unit}佔比")
 
 
 # ------------------------------------------------------------------ 心智圖
@@ -421,7 +421,7 @@ def build_all(analysis: dict, segments: Optional[Sequence[dict]] = None) -> dict
     mm = mindmap(analysis.get("mindmap") or [])
     if mm:
         out["mindmap"] = mm
-    # **有逐段資料就畫「誰在什麼時候講話」** —— 跟畫面上那一欄同一件事。
+    # **有逐段資料就畫「發言者時間軸」** —— 跟畫面上那一欄同一件事。
     # 沒有（公開 API 只給分析結果）才退到長條圖。
     stats = analysis.get("speaker_stats") or {}
     sp = speaker_timeline(segments, stats) if segments else None

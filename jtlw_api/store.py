@@ -150,7 +150,13 @@ class Store:
                 self._db.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
             self._db.execute("DELETE FROM jobs WHERE job_id=?", (job_id,))
             self._db.execute("DELETE FROM idempotency WHERE job_id=?", (job_id,))
-            self._db.execute("DELETE FROM uploads WHERE job_id=?", (job_id,))    # 檔案處理完就刪了，這裡清紀錄
+            # 上傳的錄影可能還留著（失敗、等 retry 的作業會留，v2.25.3）：紀錄刪掉之後就找不到它了，先刪檔
+            for row in self._db.execute("SELECT path FROM uploads WHERE job_id=?", (job_id,)).fetchall():
+                try:
+                    os.unlink(row["path"])
+                except OSError:
+                    pass
+            self._db.execute("DELETE FROM uploads WHERE job_id=?", (job_id,))
             self._db.commit()
 
     def clear_content(self, job_id):
@@ -201,6 +207,12 @@ class Store:
         with self._lock:
             self._db.execute("DELETE FROM uploads WHERE upload_id=?", (upload_id,))
             self._db.commit()
+
+    def claimed_uploads(self):
+        """已經交給作業的上傳（檔案可能已刪，呼叫端自己看）"""
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM uploads WHERE job_id IS NOT NULL").fetchall()
+        return [dict(r) for r in rows]
 
     def stale_uploads(self, ttl):
         """沒有被任何作業用掉、放超過 ttl 秒的上傳"""

@@ -88,7 +88,8 @@ ERROR_MESSAGES = {
     "internal_error": "內部錯誤",
 }
 
-PROFILE_VERSION = "2026-09-28.1"   # 09-23：會議 profile 加韓文（2.3）；09-24：名稱與說明補日文、mock 對齊；09-28：加 summarize（2.4）
+PROFILE_VERSION = "2026-09-29.1"   # 09-23：會議 profile 加韓文（2.3）；09-24：名稱與說明補日文、mock 對齊；09-28：加 summarize（2.4）；
+                                   # 09-29：meeting.detailed 標為停用（從來沒有與 balanced 不同的處理）；台語說明寫明適用情境
 PROFILES = [
     {"id": "meeting.balanced", "version": PROFILE_VERSION, "default": True, "deprecated": False,
      "replacement_profile_id": None,
@@ -98,20 +99,28 @@ PROFILES = [
                      "ja": "一般的な会議録音。速度と精度のバランス"},
      "capabilities": ["transcribe", "diarize", "correct", "summarize"],
      "languages": ["zh-Hant", "en", "ja", "ko", "und"]},
-    {"id": "meeting.detailed", "version": PROFILE_VERSION, "default": False, "deprecated": False,
-     "replacement_profile_id": None,
-     "name": {"zh-Hant": "會議（精細）", "en": "Meeting (detailed)", "ja": "会議（詳細）"},
-     "description": {"zh-Hant": "較慢但更準，適合重要會議",
-                     "en": "Slower but more accurate, for important meetings",
-                     "ja": "時間はかかるがより正確。重要な会議向け"},
+    # 停用（v2.25.3）：說明寫「較慢但更準」，程式卻從來沒有對應的處理，結果與 balanced 完全相同。
+    # 仍然接受、照 balanced 處理（送件的回應帶 profile_deprecated 警告），不讓已經選了它的呼叫端失敗
+    {"id": "meeting.detailed", "version": PROFILE_VERSION, "default": False, "deprecated": True,
+     "replacement_profile_id": "meeting.balanced",
+     "name": {"zh-Hant": "會議（精細，已停用）", "en": "Meeting (detailed, deprecated)", "ja": "会議（詳細・廃止）"},
+     "description": {"zh-Hant": "已停用：處理方式與「會議（平衡）」相同，請改用平衡",
+                     "en": "Deprecated: processed exactly like Meeting (balanced); use that instead",
+                     "ja": "廃止：「会議（バランス）」と同じ処理です。そちらを使ってください"},
      "capabilities": ["transcribe", "diarize", "correct", "summarize"],
      "languages": ["zh-Hant", "en", "ja", "ko", "und"]},
     {"id": "transcribe.taiwanese", "version": PROFILE_VERSION, "default": False, "deprecated": False,
      "replacement_profile_id": None,
      "name": {"zh-Hant": "台語轉錄", "en": "Taiwanese transcription", "ja": "台湾語の文字起こし"},
-     "description": {"zh-Hant": "台語（台灣閩南語）專用模型，直接輸出漢字",
-                     "en": "Taiwanese Hokkien model, outputs Han characters",
-                     "ja": "台湾語（台湾閩南語）専用モデル。漢字で直接出力"},
+     # 適用情境寫在這裡（JTDT 回覆 v2.21：呼叫端的設定頁直接顯示這段，不另外寫）；依據見 BENCHMARKS.md
+     "description": {"zh-Hant": "台語（台灣閩南語）轉錄，也能處理夾雜的華語，文字寫成華語用字；英文大多會被翻成中文；"
+                                "不分講者。華語為主、只偶爾一兩句台語的會議，一般模式比較好",
+                     "en": "Taiwanese Hokkien transcription; also handles mixed-in Mandarin, written in Mandarin wording. "
+                           "English is mostly translated into Chinese. No speaker separation. For mostly-Mandarin "
+                           "meetings with only occasional Taiwanese, the general meeting profile works better",
+                     "ja": "台湾語（台湾閩南語）の文字起こし。混ざった華語も認識し、華語の表記で出力します。"
+                           "英語はほとんど中国語に翻訳されます。話者は区別しません。華語が中心で台湾語が時々入る程度の会議は、"
+                           "一般の会議モードのほうが適しています"},
      "capabilities": ["transcribe", "correct", "summarize"],
      "languages": ["nan-Hant", "zh-Hant"]},
 ]
@@ -340,6 +349,8 @@ class ApiState:
         job["result_url"] = (f"/api/v1/jobs/{job['job_id']}/result"
                              if status in ("succeeded", "partially_succeeded") else None)
         self.store.put_job(job)
+        if not self._keeps_upload(job):
+            self._release_upload(job)
         # 每種終態事件要帶的欄位不同（見 schema 的 Event）
         if status == "failed":
             data = {"tasks": dict(job["tasks"]), "errors": job.get("errors") or []}
@@ -350,6 +361,38 @@ class ApiState:
                     "segment_count": job.get("segment_count", 0)}
         self.bus.emit(job, f"job.{status}", data)
         self.store.put_job(job)
+
+    # ── 上傳的來源檔（v2.25.3）─────────────────────────────
+    # 2.4 時作業一結束就刪（engine._cleanup），辨識失敗後 retry 必定再失敗一次（upload_consumed），
+    # 錯誤卻標 retryable: true——只用上傳的 jtvc 只能重新上傳。現在：逐字稿失敗、而且錯誤可以重試時保留，
+    # 直到 retry 成功、ACK、DELETE 或內容到期；_expire_loop 每分鐘再掃一次，任何一條路漏了都會被收掉。
+    @staticmethod
+    def _keeps_upload(job):
+        return (job.get("status") == "failed" and job.get("content_available")
+                and not job.get("acknowledged")
+                and (job.get("tasks") or {}).get("transcribe") == "failed"
+                and any(e.get("retryable") for e in job.get("errors") or []))
+
+    def _release_upload(self, job):
+        src = job.get("_source") or {}
+        if src.get("type") != "upload":
+            return
+        up = self.store.get_upload(src.get("upload_id") or "")
+        if up and os.path.isfile(up["path"]):
+            with contextlib.suppress(OSError):
+                os.unlink(up["path"])
+            jlog.log("upload.released", upload_id=up["upload_id"], job_id=job.get("job_id"))
+
+    def _sweep_uploads(self):
+        """保險：已交給作業的上傳檔，作業不在了、或已結束而且不需要留給 retry 的就刪"""
+        for up in self.store.claimed_uploads():
+            if not os.path.isfile(up["path"]):
+                continue
+            job = self.store.get_job(up["job_id"])
+            if job is None or (job["status"] in TERMINAL and not self._keeps_upload(job)):
+                with contextlib.suppress(OSError):
+                    os.unlink(up["path"])
+                jlog.log("upload.released", upload_id=up["upload_id"], job_id=up["job_id"], by="sweep")
 
     def _fail(self, job, code, stage, details=None):
         self._sweep_work_files(job["job_id"])
@@ -370,7 +413,8 @@ class ApiState:
                 self.bus.emit(job, "job.expired", {"expired_at": now_iso(), "reason": "unacked_ttl"})
                 self.store.put_job(job)
             for job in to_delete:
-                self.store.delete_job(job["job_id"])
+                self.store.delete_job(job["job_id"])          # 留著的上傳檔由 store 一起刪
+            self._sweep_uploads()        # 內容過期（上面清掉的）、ACK 漏刪等，留著的上傳檔都在這裡收
             for up in self.store.stale_uploads(config.UPLOAD_TTL_SEC):
                 with contextlib.suppress(OSError):
                     os.unlink(up["path"])
@@ -380,6 +424,8 @@ class ApiState:
 
 def make_error(code, stage=None, task=None, retry_after_ms=None, details=None):
     category, retryable = ERROR_META.get(code, ("internal", False))
+    if (details or {}).get("reason") == "upload_consumed":
+        retryable = False       # 上傳的錄影已經刪了：retry 一定再失敗，要重新上傳送新的一件
     err = {"code": code, "category": category, "retryable": retryable,
            "message": ERROR_MESSAGES.get(code, code)}
     if stage:
@@ -805,7 +851,8 @@ async def create_job(request: Request, authorization: str = Header(None),
         "glossary": ({"entries": len(terms), "keep_terms": len(keep),
                       "asr_bias_terms": min(len(terms), config.ASR_BIAS_MAX_TERMS)} if terms else None),
         "correction_level": (body.get("correction_level") or "standard") if "correct" in tasks else None,
-        "errors": [], "warnings": [],
+        "errors": [],
+        "warnings": ([{"code": "profile_deprecated", "fields": ["profile_id"]}] if profile.get("deprecated") else []),
         "_language": lang, "_hints": body.get("hints") or {},
         "_client": client, "_stages": stages, "_source": src,
         "_glossary_terms": terms, "_glossary_keep": keep,
@@ -1153,6 +1200,7 @@ async def ack_job(job_id: str, authorization: str = Header(None)):
         job["_terminal_at"] = job.get("_terminal_at") or time.time()
         STATE.store.clear_content(job_id)
         STATE.store.put_job(job)
+        STATE._release_upload(job)
     return public_job(job)          # 冪等：重送一律回 200
 
 
@@ -1163,5 +1211,5 @@ async def delete_job(job_id: str, authorization: str = Header(None)):
         return err
     job = get_job(client, job_id)
     if job:
-        STATE.store.delete_job(job_id)
+        STATE.store.delete_job(job_id)       # 留給 retry 的上傳檔也一起刪（store.delete_job）
     return Response(status_code=204)     # 不存在也回 204，可安全重送

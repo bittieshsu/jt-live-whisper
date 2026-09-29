@@ -801,14 +801,16 @@ class Engine:
         return doc, md
 
     def _cleanup(self, job, wav_path):
+        # 上傳的來源檔不在這裡刪：逐字稿失敗、之後可能 retry 時要留著（由 app.py 的 _release_upload 決定）
+        upload = job.get("_source_path") if (job.get("_source") or {}).get("type") == "upload" else None
         for p in (job.get("_source_path"), wav_path):
-            if p and p != "(fake)" and os.path.isfile(p) and p.startswith(self.settings.work_dir):
+            if p and p != upload and p != "(fake)" and os.path.isfile(p) and p.startswith(self.settings.work_dir):
                 try:
                     os.unlink(p)
                 except OSError:
                     pass
         # _convert_to_wav 產生的暫存檔在 recordings/ 底下
-        if wav_path and os.path.isfile(wav_path) and "tmp_" in os.path.basename(wav_path):
+        if wav_path and wav_path != upload and os.path.isfile(wav_path) and "tmp_" in os.path.basename(wav_path):
             try:
                 os.unlink(wav_path)
             except OSError:

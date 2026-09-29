@@ -2067,7 +2067,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.25.2"
+APP_VERSION = "2.25.3"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -14356,7 +14356,7 @@ def _meeting_cite(ids, by_seq):
 
 
 def _meeting_speaker_rows(pub, measured):
-    """誰講了多少：[(名稱, 次數, 字數, 字數佔比, 發言時間文字)]；有時間照時間排、否則照字數"""
+    """發言統計：[(名稱, 次數, 字數, 字數佔比, 發言時間文字)]；有時間照時間排、否則照字數"""
     stats = pub.get("speaker_stats") or {}
     rows = []
     for name, st in stats.items():
@@ -14374,7 +14374,7 @@ def _meeting_speaker_rows(pub, measured):
 
 
 def meeting_summary_markdown(pub, segments, measured=True):
-    """會議分析 → Markdown（JTDT 匯出的章節順序：摘要、五類項目、議題、誰講了多少）。
+    """會議分析 → Markdown（JTDT 匯出的章節順序：摘要、五類項目、議題、發言統計）。
     引用寫成逐字稿的時間點（jtlw 的逐字稿與字幕檔都用時間找），沒有時間才寫段號"""
     by_seq = {s["seq"]: s for s in segments}
     out = ["## 重點摘要", ""]
@@ -14411,7 +14411,7 @@ def meeting_summary_markdown(pub, segments, measured=True):
     rows = _meeting_speaker_rows(pub, measured)
     if len(rows) >= 2:
         tcol = "發言時間" if measured else "推估發言時間"
-        out += ["", "## 誰講了多少", "", f"| 發言者 | 發言次數 | 字數 | 字數佔比 | {tcol} |",
+        out += ["", "## 發言統計", "", f"| 發言者 | 發言次數 | 字數 | 字數佔比 | {tcol} |",
                 "|---|--:|--:|--:|--:|"]
         for label, turns, chars, pct, t, _ms in rows:
             out.append(f"| {label} | {turns} | {chars} | {pct}% | {t or '—'} |")
@@ -14480,7 +14480,7 @@ def _meeting_html_body(pub, segments, measured, corrected=""):
     rows = _meeting_speaker_rows(pub, measured)
     if len(rows) >= 2:
         tcol = "發言時間" if measured else "推估發言時間"
-        parts.append(f'<h2>誰講了多少</h2><table class="tbl"><tr><th>發言者</th><th>發言次數</th><th>字數</th>'
+        parts.append(f'<h2>發言統計</h2><table class="tbl"><tr><th>發言者</th><th>發言次數</th><th>字數</th>'
                      f'<th>字數佔比</th><th>{tcol}</th></tr>')
         for label, turns, chars, pct, t, _ms in rows:
             parts.append(f"<tr><td>{H.escape(str(label))}</td><td>{turns}</td><td>{chars}</td><td>{pct}%</td>"

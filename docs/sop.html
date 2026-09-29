@@ -123,7 +123,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.25.2 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.25.3 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -234,7 +234,7 @@
 </tr>
 <tr>
 <td><code>摘要_*.txt</code></td>
-<td>會議摘要（重點摘要、事件與影響、決議、待辦、風險、未決問題、議題、誰講了多少，每一條附時間點）+ 校正逐字稿（純文字）</td>
+<td>會議摘要（重點摘要、事件與影響、決議、待辦、風險、未決問題、議題、發言統計，每一條附時間點）+ 校正逐字稿（純文字）</td>
 <td>是</td>
 </tr>
 <tr>
@@ -2416,7 +2416,7 @@ cd C:\jt-live-whisper
 <td>會議分成幾段、各段的起訖時間與佔比</td>
 </tr>
 <tr>
-<td>誰講了多少</td>
+<td>發言統計</td>
 <td>每位發言者的發言次數、字數、發言時間（需搭配講者辨識）</td>
 </tr>
 <tr>
@@ -2920,7 +2920,7 @@ cd C:\jt-live-whisper
 <td>兩邊共同</td>
 </tr>
 </tbody></table>
-<p>錄影在 jt-live-whisper 這邊處理完就刪除；逐字稿與摘要在對方取回並確認（ACK）後刪除。</p>
+<p>錄影在 jt-live-whisper 這邊處理成功就刪除（辨識失敗而且可以重試時保留，見下一節）；逐字稿與摘要在對方取回並確認（ACK）後刪除。</p>
 <h3 id="會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</h3>
 <p>沒有自己的摘要功能、或拿不出下載網址的系統（例如 jt-vc-portal 的會議錄影），可以整段交給 jt-live-whisper：</p>
 <table>
@@ -2951,7 +2951,8 @@ cd C:\jt-live-whisper
 <li>摘要與命令列的會議摘要是<strong>同一套分析</strong>：每一條都附引用，引用對回逐字稿的段號（<code>source_seqs</code>）與時間</li>
 <li>摘要用的模型：<code>config.json</code> 的 <code>api.summary_model</code>；沒設時沿用 API 的模型設定（<code>api.correction_model</code>，預設 qwen3.8:27b）</li>
 <li>摘要由另一條執行緒一次做一件，不會卡住別件作業的辨識；摘要失敗只讓 <code>summarize</code> 失敗（<code>partially_succeeded</code>），逐字稿照樣交付，可以只重做摘要</li>
-<li>上傳的檔案處理完就刪除；沒用來送件的 24 小時後刪除。會議摘要與逐字稿一樣，ACK 或刪除作業時一起刪除</li>
+<li>上傳的檔案處理成功就刪除；沒用來送件的 24 小時後刪除。會議摘要與逐字稿一樣，ACK 或刪除作業時一起刪除</li>
+<li><strong>辨識失敗而且錯誤是可以重試的（<code>retryable: true</code>，例如 GPU 伺服器暫時不能用）時，上傳的檔案會保留</strong>，<code>POST /api/v1/jobs/{id}/retry</code> 直接重做，不必重新上傳（v2.25.3 起）。保留到重試成功、ACK、刪除作業或 7 天後內容到期。不可重試的失敗（例如檔案解不開）檔案會立刻刪除，這時要重新上傳、送新的一件</li>
 <li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
 </ul>
 <h3 id="台語會議transcribetaiwanesev2252-起">台語會議（<code>transcribe.taiwanese</code>，v2.25.2 起）</h3>
@@ -2965,6 +2966,9 @@ GPU 伺服器不能用時這一件直接失敗（<code>asr_failed</code>），<s
 <li>有台語就用台語模式；華語為主、只偶爾一兩句台語的，用一般模式（時間精細、可分發言者、英文照原文）。
 實測見 <code>BENCHMARKS.md</code>「華語、台語、英文混在同一場會議」</li>
 </ul>
+<p><code>meeting.detailed</code>（會議（精細））<strong>已停用</strong>（v2.25.3）：它從來沒有與 <code>meeting.balanced</code> 不同的處理。
+仍然可以送件、照 balanced 處理，回應的 <code>warnings</code> 帶 <code>profile_deprecated</code>；<code>GET /profiles</code> 標 <code>deprecated: true</code>、
+<code>replacement_profile_id</code> 是 <code>meeting.balanced</code>。請改用 <code>meeting.balanced</code>。</p>
 <h3 id="啟用-rest-api">啟用 REST API</h3>
 <p>REST API 跑在伺服器版（Linux，<code>install.sh --server</code>）上，與 WebUI 是兩個獨立的服務。</p>
 <ol>
