@@ -2,10 +2,10 @@
 
 ### v2.25.0 (2026-09-28)
 
-**會議摘要改用 Jason Tools 文件工具箱的會議分析：每一條都指得回逐字稿**
+**會議摘要改用 jt-doc-tools 的會議分析：每一條都指得回逐字稿**
 
 摘要（`--summarize`、互動選單、WebUI 的「產生摘要與校正逐字稿」）改用
-[Jason Tools 文件工具箱](https://jasoncheng7115.github.io/jt-doc-tools/)（jt-doc-tools）的會議分析。
+[jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/) 的會議分析。
 程式原封不動搬過來，放在新資料夾 `jtdt_meeting/`（與 jt-doc-tools v1.16.25 逐位元組相同，有測試把關）。
 
 - 產出：**重點摘要、事件與影響、決議、待辦（負責人、期限）、風險、未決問題、議題（起訖時間與佔比）、誰講了多少**，
@@ -28,7 +28,7 @@
 
 **REST API（伺服器版，不含在公開發行內容）**
 - api_revision 2.4：新增選用任務 `summarize`（與命令列同一套會議分析，結果以 JSON 與 Markdown 取回）、
-  上傳來源（給拿不出下載網址的系統，例如視訊會議的錄影）、`hints.meeting`（會議名稱、主持人、與會者）。
+  上傳來源（給拿不出下載網址的系統，例如 jt-vc-portal 的會議錄影；已上線）、`hints.meeting`（會議名稱、主持人、與會者）。
   既有的送件方式與結果完全不變
 - 摘要用的模型可以單獨設定（`api.summary_model`），沒設時沿用 API 的模型設定
 - 重送（retry）只重做還沒成功的任務：已經校正好的逐字稿不會再校正一次

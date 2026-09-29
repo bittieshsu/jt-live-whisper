@@ -69,7 +69,8 @@
       <a class="lv3" href="#4-9---diarize-講者辨識">4-9. --diarize 講者辨識</a>
       <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
       <a class="" href="#四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</a>
-      <a class="lv3" href="#已上線的整合jason-tools-文件工具箱">已上線的整合：Jason Tools 文件工具箱</a>
+      <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
+      <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
       <a class="lv3" href="#api-key">API Key</a>
@@ -2386,7 +2387,7 @@ cd C:\jt-live-whisper
 <p>摘要完成後狀態列會凍結顯示最終統計（時間、tokens、速度），按 ESC 鍵退出。</p>
 <p>摘要檔會儲存在 <code>logs/</code> 子資料夾下，與記錄檔相同位置。</p>
 <h4 id="會議摘要的內容v2250-起">會議摘要的內容（v2.25.0 起）</h4>
-<p>摘要改用 <a href="https://jasoncheng7115.github.io/jt-doc-tools/">Jason Tools 文件工具箱</a>的會議分析（程式原封不動搬過來，放在 <code>jtdt_meeting/</code>）：</p>
+<p>摘要改用 <a href="https://jasoncheng7115.github.io/jt-doc-tools/">jt-doc-tools</a> 的會議分析（程式原封不動搬過來，放在 <code>jtdt_meeting/</code>）：</p>
 <table>
 <thead>
 <tr>
@@ -2833,8 +2834,8 @@ cd C:\jt-live-whisper
 <h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
 <p>與特定系統串接時，會另外部署一組 REST API（<code>jtlw_api/</code>），讓別的系統送音檔進來、取回逐字稿與講者標記。
 <strong>這個模組不包含在公開發行內容裡，<code>install.sh --server</code> 不會安裝它</strong>（見本節後段說明）。</p>
-<h3 id="已上線的整合jason-tools-文件工具箱">已上線的整合：Jason Tools 文件工具箱</h3>
-<p><strong>Jason Tools 文件工具箱</strong>（<a href="https://jasoncheng7115.github.io/jt-doc-tools/">https://jasoncheng7115.github.io/jt-doc-tools/</a>）已經接上 jt-live-whisper。完整流程：</p>
+<h3 id="已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</h3>
+<p><strong>jt-doc-tools</strong>（<a href="https://jasoncheng7115.github.io/jt-doc-tools/">https://jasoncheng7115.github.io/jt-doc-tools/</a>）已經接上 jt-live-whisper。完整流程：</p>
 <table>
 <thead>
 <tr>
@@ -2846,7 +2847,7 @@ cd C:\jt-live-whisper
 <tbody><tr>
 <td>1</td>
 <td>在「<strong>會議錄音轉逐字稿</strong>」上傳錄音或錄影</td>
-<td>文件工具箱</td>
+<td>jt-doc-tools</td>
 </tr>
 <tr>
 <td>2</td>
@@ -2856,12 +2857,12 @@ cd C:\jt-live-whisper
 <tr>
 <td>3</td>
 <td>逐字稿邊聽邊看：波形圖、點波形跳播、播到哪段就亮起來、每位發言者一個顏色、點代號改成人名</td>
-<td>文件工具箱</td>
+<td>jt-doc-tools</td>
 </tr>
 <tr>
 <td>4</td>
 <td>一鍵轉交「<strong>會議摘要</strong>」，產出摘要、決議、待辦、風險與章節</td>
-<td>文件工具箱</td>
+<td>jt-doc-tools</td>
 </tr>
 <tr>
 <td>5</td>
@@ -2875,8 +2876,41 @@ cd C:\jt-live-whisper
 <p>實測（28.3 分鐘的真實會議、GPU 伺服器）：辨識 37 秒、講者分離 2 秒、
 校正 67 秒，<strong>總共 1 分 52 秒</strong>，約為即時的 15 倍速。
 送件當下就開始拉檔，輪到處理時音訊已在本機（預抓耗時 0 毫秒）。</p>
+<h3 id="已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</h3>
+<p><strong>jt-vc-portal</strong>（<a href="https://jasoncheng7115.github.io/jt-vc-portal/">https://jasoncheng7115.github.io/jt-vc-portal/</a>，Jitsi Meet 會議管理系統）把會議錄影交給 jt-live-whisper，
+拿回逐字稿與<strong>會議摘要</strong>。它自己沒有摘要功能，所以摘要也在這邊做（用的是下一節的 <code>summarize</code> 與上傳）：</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>做什麼</th>
+<th>誰做</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>會議結束後上傳錄影（影片直接傳），會議室、主持人、與會者一起送上</td>
+<td>jt-vc-portal</td>
+</tr>
+<tr>
+<td>2</td>
+<td>取出音軌、辨識、講者分離、逐字稿校正、會議摘要</td>
+<td><strong>jt-live-whisper</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>取回逐字稿與會議摘要（重點摘要、決議、待辦、風險、議題）</td>
+<td>jt-vc-portal</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>每一條決議與待辦都附錄影裡的時間點與講者</strong></td>
+<td>兩邊共同</td>
+</tr>
+</tbody></table>
+<p>錄影在 jt-live-whisper 這邊處理完就刪除；逐字稿與摘要在對方取回並確認（ACK）後刪除。</p>
 <h3 id="會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</h3>
-<p>沒有自己的摘要功能、或拿不出下載網址的系統（例如視訊會議的錄影），可以整段交給 jt-live-whisper：</p>
+<p>沒有自己的摘要功能、或拿不出下載網址的系統（例如 jt-vc-portal 的會議錄影），可以整段交給 jt-live-whisper：</p>
 <table>
 <thead>
 <tr>
