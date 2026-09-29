@@ -1895,7 +1895,7 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
 > 送件被擋 `source_not_allowed` 時要改的是**後者**，而且不是把對方的伺服器 IP
 > 加進去，是把**音檔網址的主機**加進去。
 
-## 四之二、REST API（給其他系統串接）
+## 五、REST API（給其他系統串接）
 
 要讓別的系統送音檔進來、取回逐字稿、講者標記與會議摘要時，啟用 REST API（`jtlw_api/`）。
 **v2.25.1 起它隨 jt-live-whisper 一起發佈、`--upgrade` 會一起更新**；伺服器版（`install.sh --server`）會裝好它需要的套件，
@@ -2143,7 +2143,7 @@ journalctl -u <服務名> | grep source.rejected
 > 清單上的任何主機都等於允許這台機器去抓取那裡的網址。
 > 不要為了省事填萬用字元或把整個網段加進去。
 
-## 五、使用流程總結
+## 六、使用流程總結
 
 **即時轉錄：**
 
@@ -2298,7 +2298,7 @@ journalctl -u <服務名> | grep source.rejected
 
 ---
 
-## 六、常見問題
+## 七、常見問題
 
 ### Q: 找不到音訊裝置？
 - **macOS（ScreenCaptureKit）：** 確認已授權「螢幕錄製」（macOS 15 為「螢幕與系統音訊錄製」）給你的終端機程式，且授權後已完全結束該程式（Cmd+Q）再重新開啟。可執行 `./start.sh --sck-permission` 重新授權。另請確認系統音量未設為靜音——靜音時只會收到無聲訊號。
@@ -2367,7 +2367,7 @@ AirPods 已連線但在系統設定的「聲音 → 輸入」看不到麥克風�
 對方的介面不一定會顯示它，伺服器的 log 也有：
 `journalctl -u <服務名> | grep source.rejected`。
 
-詳細步驟見「四之二、REST API」的「允許的來源主機」。
+詳細步驟見「五、REST API」的「允許的來源主機」。
 
 ### Q: --diarize 辨識出的講者數不正確？
 
@@ -2482,7 +2482,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ### Q: Linux 上用 NVIDIA GPU 辨識出現找不到 cuBLAS / cuDNN？（Linux）
 請用 `./start.sh` 啟動（不要直接執行 `python3 translate_meeting.py`），啟動腳本會把 venv 內 PyTorch 附帶的 cuBLAS / cuDNN 加入函式庫路徑。ARM64 主機（如 DGX Spark）的 CTranslate2 預建套件不含 CUDA，`install.sh` 會自動在本機編譯 CUDA 版；若是先前用舊版安裝的，重新執行 `./install.sh` 即可補上。
 
-## 七、檔案說明
+## 八、檔案說明
 
 | 檔案 | 說明 |
 |---|---|

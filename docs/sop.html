@@ -68,7 +68,7 @@
       <a class="lv3" href="#4-8-台語台灣閩南語辨識">4-8. 台語（台灣閩南語）辨識</a>
       <a class="lv3" href="#4-9---diarize-講者辨識">4-9. --diarize 講者辨識</a>
       <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
-      <a class="" href="#四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</a>
+      <a class="" href="#五rest-api給其他系統串接">五、REST API（給其他系統串接）</a>
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
       <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
@@ -77,9 +77,9 @@
       <a class="lv3" href="#api-key">API Key</a>
       <a class="lv3" href="#憑證tls">憑證（TLS）</a>
       <a class="lv3" href="#允許的來源主機source_not_allowed-就是這個">允許的來源主機（source_not_allowed 就是這個）</a>
-      <a class="" href="#五使用流程總結">五、使用流程總結</a>
+      <a class="" href="#六使用流程總結">六、使用流程總結</a>
       <a class="lv3" href="#互動選單流程圖">互動選單流程圖</a>
-      <a class="" href="#六常見問題">六、常見問題</a>
+      <a class="" href="#七常見問題">七、常見問題</a>
       <a class="lv3" href="#q-找不到音訊裝置">Q: 找不到音訊裝置？</a>
       <a class="lv3" href="#q-偵測到音訊裝置但沒有辨識到任何語音">Q: 偵測到音訊裝置但沒有辨識到任何語音？</a>
       <a class="lv3" href="#q-應用程式沒有提供音訊輸出裝置的選項怎麼讓它走多重輸出裝置macos">Q: 應用程式沒有提供音訊輸出裝置的選項，怎麼讓它走多重輸出裝置？（macOS）</a>
@@ -106,7 +106,7 @@
       <a class="lv3" href="#q-windows-上找不到-stereo-mixwindows">Q: Windows 上找不到 Stereo Mix？（Windows）</a>
       <a class="lv3" href="#q-linux-上懸浮字幕沒有出現linux">Q: Linux 上懸浮字幕沒有出現？（Linux）</a>
       <a class="lv3" href="#q-linux-上用-nvidia-gpu-辨識出現找不到-cublas-cudnnlinux">Q: Linux 上用 NVIDIA GPU 辨識出現找不到 cuBLAS / cuDNN？（Linux）</a>
-      <a class="" href="#七檔案說明">七、檔案說明</a>
+      <a class="" href="#八檔案說明">八、檔案說明</a>
       <a class="" href="#品質與效能說明">品質與效能說明</a>
       <a class="" href="#硬體建議">硬體建議</a>
       <a class="lv3" href="#macos-建議配置">macOS 建議配置</a>
@@ -2837,7 +2837,7 @@ cd C:\jt-live-whisper
 <p>送件被擋 <code>source_not_allowed</code> 時要改的是<strong>後者</strong>，而且不是把對方的伺服器 IP
 加進去，是把<strong>音檔網址的主機</strong>加進去。</p>
 </blockquote>
-<h2 id="四之二rest-api給其他系統串接">四之二、REST API（給其他系統串接）</h2>
+<h2 id="五rest-api給其他系統串接">五、REST API（給其他系統串接）</h2>
 <p>要讓別的系統送音檔進來、取回逐字稿、講者標記與會議摘要時，啟用 REST API（<code>jtlw_api/</code>）。
 <strong>v2.25.1 起它隨 jt-live-whisper 一起發佈、<code>--upgrade</code> 會一起更新</strong>；伺服器版（<code>install.sh --server</code>）會裝好它需要的套件，
 但<strong>不會自動啟動</strong>——要不要對外開這個服務由你決定，照本節「啟用 REST API」設定。</p>
@@ -3124,7 +3124,7 @@ sudo systemctl restart jtlw-api
 清單上的任何主機都等於允許這台機器去抓取那裡的網址。
 不要為了省事填萬用字元或把整個網段加進去。</p>
 </blockquote>
-<h2 id="五使用流程總結">五、使用流程總結</h2>
+<h2 id="六使用流程總結">六、使用流程總結</h2>
 <p><strong>即時轉錄：</strong></p>
 <ol>
 <li><strong>確認音訊設定</strong>：macOS 切換到「多重輸出裝置」（系統設定 → 聲音 → 輸出）；Windows 確認 WASAPI Loopback 裝置可用</li>
@@ -3274,7 +3274,7 @@ sudo systemctl restart jtlw-api
       [確認設定總覽] --&gt; process_audio_file()
 </code></pre>
 <hr>
-<h2 id="六常見問題">六、常見問題</h2>
+<h2 id="七常見問題">七、常見問題</h2>
 <h3 id="q-找不到音訊裝置">Q: 找不到音訊裝置？</h3>
 <ul>
 <li><strong>macOS（ScreenCaptureKit）：</strong> 確認已授權「螢幕錄製」（macOS 15 為「螢幕與系統音訊錄製」）給你的終端機程式，且授權後已完全結束該程式（Cmd+Q）再重新開啟。可執行 <code>./start.sh --sck-permission</code> 重新授權。另請確認系統音量未設為靜音——靜音時只會收到無聲訊號。</li>
@@ -3337,7 +3337,7 @@ sudo systemctl restart jtlw-api
 <p>回應的 <code>details.host</code> 就是要加進 <code>api.allowed_hosts</code> 的那個主機；
 對方的介面不一定會顯示它，伺服器的 log 也有：
 <code>journalctl -u &lt;服務名&gt; | grep source.rejected</code>。</p>
-<p>詳細步驟見「四之二、REST API」的「允許的來源主機」。</p>
+<p>詳細步驟見「五、REST API」的「允許的來源主機」。</p>
 <h3 id="q---diarize-辨識出的講者數不正確">Q: --diarize 辨識出的講者數不正確？</h3>
 <p>可以用 <code>--num-speakers N</code> 指定，但<strong>不要填「現場有幾個人」，要填「發言量足以辨認的人數」</strong>。</p>
 <p>2026-09-22 用有標準答案的 7 人會議（37 分鐘）實測，指定不同人數時的「講者搞錯」比例：</p>
@@ -3453,7 +3453,7 @@ sudo systemctl restart jtlw-api
 <p>懸浮字幕需要圖形桌面。請確認在桌面工作階段內執行（<code>echo $DISPLAY</code> 有值），並已安裝 <code>libxcb-cursor0</code>（缺少時 PyQt6 會直接結束）。重新執行 <code>./install.sh</code> 會自動補齊。Wayland 桌面上視窗置頂的行為依桌面環境而定。</p>
 <h3 id="q-linux-上用-nvidia-gpu-辨識出現找不到-cublas-cudnnlinux">Q: Linux 上用 NVIDIA GPU 辨識出現找不到 cuBLAS / cuDNN？（Linux）</h3>
 <p>請用 <code>./start.sh</code> 啟動（不要直接執行 <code>python3 translate_meeting.py</code>），啟動腳本會把 venv 內 PyTorch 附帶的 cuBLAS / cuDNN 加入函式庫路徑。ARM64 主機（如 DGX Spark）的 CTranslate2 預建套件不含 CUDA，<code>install.sh</code> 會自動在本機編譯 CUDA 版；若是先前用舊版安裝的，重新執行 <code>./install.sh</code> 即可補上。</p>
-<h2 id="七檔案說明">七、檔案說明</h2>
+<h2 id="八檔案說明">八、檔案說明</h2>
 <table>
 <thead>
 <tr>

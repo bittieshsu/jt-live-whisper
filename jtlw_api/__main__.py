@@ -22,10 +22,11 @@ for _mod, _pkg in (("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("jsonschema"
     except ImportError:
         _missing.append(_pkg)
 if _missing:
+    _pip = r"venv\Scripts\pip" if os.name == "nt" else "venv/bin/pip"
     sys.stderr.write(
         f"  [錯誤] REST API 缺少套件：{'、'.join(_missing)}\n"
-        f"  補裝：./install.sh --server（Linux 伺服器版會自動安裝），"
-        f"或 venv/bin/pip install {' '.join(_missing)}\n")
+        f"  補裝：{_pip} install {' '.join(_missing)}"
+        f"（REST API 是伺服器版的功能；Linux 用 ./install.sh --server 會自動安裝）\n")
     sys.exit(1)
 
 import uvicorn  # noqa: E402

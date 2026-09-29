@@ -68,7 +68,7 @@
 
     <h3 style="margin:34px 0 12px"><span class="zh">磁碟空間需求</span><span class="en">Disk space</span></h3>
     <p style="margin:0 0 14px;color:var(--muted);font-size:14px"><span class="zh">安裝腳本會在安裝前自動檢查可用空間是否足夠。</span><span class="en">The installer checks free space before starting.</span></p>
-    <div class="grid g2">
+    <div class="grid">
       <div>
         <div class="cmd-label"><span class="zh">本機</span><span class="en">Local machine</span></div>
         <div class="tbl-wrap"><table>
@@ -242,7 +242,7 @@ journalctl -u jt-live-whisper-webui -f
   <div class="wrap">
     <div class="sec-head"><h2><span class="zh">互動式選單功能一覽</span><span class="en">Interactive menu</span></h2>
       <p><span class="zh">不帶任何參數啟動即進入選單，逐步引導完成設定；最後顯示等效 CLI 指令。</span><span class="en">Launch with no flags to enter the menu; it prints the equivalent CLI command at the end.</span></p></div>
-    <div class="grid g2">
+    <div class="grid">
       <div>
         <div class="cmd-label"><span class="zh">即時模式選單</span><span class="en">Live-mode menu</span></div>
         <div class="tbl-wrap"><table>
@@ -323,7 +323,7 @@ journalctl -u jt-live-whisper-webui -f
 <section id="arch" class="alt">
   <div class="wrap">
     <div class="sec-head"><h2><span class="zh">目錄結構與技術架構</span><span class="en">Layout &amp; architecture</span></h2></div>
-    <div class="grid g2">
+    <div class="grid">
       <div>
         <div class="cmd-label"><span class="zh">目錄結構</span><span class="en">Directory layout</span></div>
 <pre>jt-live-whisper/
@@ -334,9 +334,13 @@ journalctl -u jt-live-whisper-webui -f
   install.sh / install.ps1 <span class="c"># 安裝腳本</span>
   install-linux.sh         <span class="c"># Linux 安裝腳本（install.sh 自動轉交）</span>
   remote_whisper_server.py <span class="c"># GPU 伺服器端服務（選配）</span>
+  jtlw_tls.py              <span class="c"># WebUI 與 REST API 共用的 HTTPS 模組</span>
+  jtdt_meeting/            <span class="c"># 會議摘要的會議分析（jt-doc-tools）</span>
+  jtlw_api/                <span class="c"># REST API（伺服器版，給其他系統串接）</span>
   config.json              <span class="c"># 使用者設定（自動產生）</span>
   SOP.md / CHANGELOG.md    <span class="c"># 手冊 / 版本記錄</span>
   logs/  recordings/       <span class="c"># 記錄檔 / 暫存音訊</span>
+  api_data/                <span class="c"># REST API 的作業紀錄與憑證（啟用後產生）</span>
   whisper.cpp/  venv/      <span class="c"># 即時引擎（macOS / Windows）/ 虛擬環境</span></pre>
       </div>
       <div>
