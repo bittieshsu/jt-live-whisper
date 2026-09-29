@@ -72,6 +72,7 @@
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
       <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
+      <a class="lv3" href="#台語會議transcribetaiwanesev2252-起">台語會議（transcribe.taiwanese，v2.25.2 起）</a>
       <a class="lv3" href="#啟用-rest-api">啟用 REST API</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
       <a class="lv3" href="#api-key">API Key</a>
@@ -122,7 +123,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.25.1 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.25.2 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -386,6 +387,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
   config.json              使用者設定（自動產生，含 LLM/GPU/WebUI 密碼等）
   SOP.md                   完整使用手冊
   CHANGELOG.md             版本更新記錄
+  BENCHMARKS.md            實測紀錄（選模型、改預設值的依據）
   logs/                    記錄檔、摘要檔、HTML 逐字稿（自動建立）
   recordings/              暫存音訊轉檔（自動建立）
   api_data/                REST API 的作業紀錄、上傳暫存、憑證（啟用 API 後自動建立）
@@ -2653,6 +2655,9 @@ cd C:\jt-live-whisper
 <li>純 CPU 機器建議只用離線處理，並預留足夠時間</li>
 <li>台語離線處理固定走本機，不使用 GPU 伺服器（伺服器套用的是一般模型的辨識參數，對本模型反而會大幅劣化）</li>
 </ul>
+<h4 id="華台英混在同一場">華台英混在同一場</h4>
+<p>台語模型也能處理夾雜的華語；英文大多會被翻成中文（細節可能翻錯）。一般模型與 Qwen3-ASR 都聽不懂台語。
+實測數字與例句見 <code>BENCHMARKS.md</code>。</p>
 <h4 id="已知限制">已知限制</h4>
 <ul>
 <li><strong>辨識結果是華語漢字</strong>，不是台語正字。例如台語的「烏白試」會輸出「亂試」、「我沒咧驚」會輸出「我沒在怕」——語意正確，但用字是華語寫法</li>
@@ -2948,6 +2953,17 @@ cd C:\jt-live-whisper
 <li>摘要由另一條執行緒一次做一件，不會卡住別件作業的辨識；摘要失敗只讓 <code>summarize</code> 失敗（<code>partially_succeeded</code>），逐字稿照樣交付，可以只重做摘要</li>
 <li>上傳的檔案處理完就刪除；沒用來送件的 24 小時後刪除。會議摘要與逐字稿一樣，ACK 或刪除作業時一起刪除</li>
 <li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
+</ul>
+<h3 id="台語會議transcribetaiwanesev2252-起">台語會議（<code>transcribe.taiwanese</code>，v2.25.2 起）</h3>
+<p>送件時 <code>profile_id</code> 填 <code>transcribe.taiwanese</code>，就會用台語模型（MediaTek Breeze-ASR-26）辨識；其他模式一律用一般模型。</p>
+<ul>
+<li><code>language</code> 填 <code>nan-Hant</code>（<code>zh-Hant</code> 結果相同）；一般模式不會自動改用台語模型，語言自動判斷也認不出台語</li>
+<li><strong>台語模型跑在 GPU 伺服器上</strong>（需 v2.25.2 以上），API 主機本身不跑：只有 CPU 的主機跑一小時的台語會議要約 4 小時。
+GPU 伺服器不能用時這一件直接失敗（<code>asr_failed</code>），<strong>不會退回一般模型</strong>——一般模型會把台語辨識成諧音的華語</li>
+<li>可做：辨識、校正、會議摘要（摘要算實驗，還沒用真實台語會議驗證品質）；<strong>不能分發言者</strong>，送 <code>diarize</code> 回 422 <code>task_not_supported</code></li>
+<li>時間是每段最長 28 秒；英文大多會被翻成中文</li>
+<li>有台語就用台語模式；華語為主、只偶爾一兩句台語的，用一般模式（時間精細、可分發言者、英文照原文）。
+實測見 <code>BENCHMARKS.md</code>「華語、台語、英文混在同一場會議」</li>
 </ul>
 <h3 id="啟用-rest-api">啟用 REST API</h3>
 <p>REST API 跑在伺服器版（Linux，<code>install.sh --server</code>）上，與 WebUI 是兩個獨立的服務。</p>

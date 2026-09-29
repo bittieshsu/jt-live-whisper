@@ -1,5 +1,27 @@
 # Changelog
 
+### v2.25.2 (2026-09-29)
+
+**REST API 的台語模式修好了：改用 GPU 伺服器的台語模型**
+
+- REST API 的 `transcribe.taiwanese`（台語轉錄）模式從來沒有接上台語模型：`language=nan-Hant` 送件**一定失敗**
+  （`asr_failed`，`'nan' is not a valid language code`），`zh-Hant` 則照一般模型辨識，把台語變成諧音的華語
+  （「李有志」→「黎柚子」）。現在改由 GPU 伺服器的 Breeze-ASR-26 辨識
+- 開關就是 `profile_id: "transcribe.taiwanese"`（`language` 填 `nan-Hant`，`zh-Hant` 結果相同）；其他模式一律用一般模型
+- GPU 伺服器不能用時這一件直接失敗並說明原因，**不退回一般模型**；API 主機本身不跑台語模型（只有 CPU 的主機一小時要約 4 小時）
+- 台語模式不能分發言者（送 `diarize` 回 422）；會議摘要可以做，但還沒用真實台語會議驗證品質
+- 實測：98 秒台語錄音辨識＋校正＋摘要 26 秒完成，第一句與標準答案一字不差
+
+**GPU 伺服器：新增台語辨識**
+- 處理方式與命令列的台語模式完全相同（專屬參數、依說話段落切成最長 28 秒一段），有測試逐段比對兩邊結果
+- `/health` 新增 `taiwanese` 欄位；只支援離線辨識、faster-whisper 後端
+- 命令列的台語模式照舊在本機執行（行為不變）
+
+**新增實測紀錄 `BENCHMARKS.md`**
+- 華語、台語、英文混在同一場會議：台語模型也能處理夾雜的華語，英文大多會被翻成中文；一般模型與 Qwen3-ASR 都聽不懂台語
+- 台語模型比較（Breeze-ASR-26 vs Qwen3-ASR）、台語模型本身，以及其他實測的整理
+- 升級清單加上 `BENCHMARKS.md`（第二次 `--upgrade` 才會到）
+
 ### v2.25.1 (2026-09-29)
 
 **REST API（`jtlw_api/`）公開，隨程式一起發佈**

@@ -165,7 +165,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.25.1"
+SERVER_VERSION = "2.25.2"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -1158,6 +1158,40 @@ def _transcribe_faster_stream(wav_path, model_size, language, noisy=False):
             yield out, info.duration
 
 
+# ── 台語（Breeze-ASR-26，v2.25.2）─────────────────────────────────────────
+# REST API 的台語模式送到這裡（本機 CPU 跑一小時的會議要約 4 小時）。用戶端送來的 model 是
+# translate_meeting._resolve_fw_model(remote=True) 轉好的 repo 名稱。處理方式與用戶端的
+# _nan_transcribe_windows **完全相同**（tools/test_breeze_server.py 逐一比對）：
+#   - language 一律 "en"：微調沿用 <|en|> token
+#   - _FW_NAN_KW：專案的防幻覺參數組（上面的 _FW_KW）會讓台語 CER 17.99% → 56.42%、慢 4.7 倍
+#   - 模型不產生時間戳：先用 _nan_vad_windows 切成 ≤28 秒視窗，時間取自視窗邊界
+_BREEZE_REPO = "paulpengtw/faster-whisper-Breeze-ASR-26"
+_BREEZE_MODELS = (_BREEZE_REPO, "breeze-asr-26")
+_BREEZE_WHISPER_LANG = "en"
+_FW_NAN_KW = dict(
+    beam_size=5,
+    condition_on_previous_text=False,
+    vad_filter=False,
+    word_timestamps=False,
+)
+
+
+def _transcribe_breeze_stream(wav_path):
+    """台語辨識串流版：逐視窗辨識，yield (segment_dict, duration)。language 標成 "nan"（用戶端據此標台語）"""
+    from faster_whisper.audio import decode_audio
+    m = _get_model_faster(_BREEZE_REPO)
+    audio = decode_audio(wav_path, sampling_rate=16000)
+    duration = len(audio) / 16000.0
+    for w_start, w_end in _nan_vad_windows(audio, 16000):
+        chunk = audio[int(w_start * 16000):int(w_end * 16000)]
+        if not len(chunk):
+            continue
+        segs, _info = m.transcribe(chunk, language=_BREEZE_WHISPER_LANG, **_FW_NAN_KW)
+        text = "".join(x.text for x in segs).strip()
+        if text:
+            yield {"start": round(w_start, 3), "end": round(w_end, 3), "text": text, "language": "nan"}, duration
+
+
 class _ProgressCapture:
     """攔截 stdout，解析 openai-whisper verbose 輸出追蹤辨識進度。
     whisper verbose=True 每段輸出格式: [00:00.000 --> 00:30.000]  text..."""
@@ -1274,6 +1308,8 @@ def health():
         "qwen": ({"ready": _qwen_ready(), "model": "qwen3-asr-0.6b", "languages": list(_QWEN_LANG),
                   "error": _QWEN["error"], "restarts": _QWEN["restarts"]}
                  if (_QWEN["proc"] is not None or _QWEN["error"]) else None),
+        # 台語（v2.25.2）：只有 faster-whisper 後端能跑 Breeze-ASR-26；null＝這台不支援
+        "taiwanese": ({"model": "breeze-asr-26"} if _backend == "faster-whisper" else None),
         # 講者辨識可用的方法；auto 時優先 nemotron
         "diar_engines": [e for e, ok in (("nemotron", _HAS_NEMO), ("legacy", _HAS_DIARIZE)) if ok],
         # 用戶端用這個判斷「能不能自動更新」，不必試了才知道
@@ -1587,6 +1623,16 @@ async def transcribe(
             pass
         raise
 
+    is_breeze = model in _BREEZE_MODELS
+    if is_breeze and (not is_stream or _backend != "faster-whisper"):
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return JSONResponse(status_code=400, content={"error": (
+            "台語（Breeze-ASR-26）只支援離線辨識（stream=true）" if not is_stream
+            else "這台伺服器的辨識後端不是 faster-whisper，無法執行台語（Breeze-ASR-26）")})
+
     is_qwen = model in _QWEN_MODELS
     if is_qwen:
         err = None
@@ -1681,7 +1727,9 @@ async def transcribe(
                         count = 0
                         dur = 0
                         try:
-                            for seg, dur in _transcribe_faster_stream(tmp_path, model, language, noisy=is_noisy):
+                            seg_iter = (_transcribe_breeze_stream(tmp_path) if is_breeze else
+                                        _transcribe_faster_stream(tmp_path, model, language, noisy=is_noisy))
+                            for seg, dur in seg_iter:
                                 count += 1
                                 yield json.dumps({
                                     "type": "segment", "index": count - 1,

@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.2 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1410,7 +1410,7 @@ check_sck() {
 # jtdt_meeting/ 是第一個放在子資料夾的（v2.25.0，會議摘要）：複製時要先建資料夾
 # jtlw_api/（REST API）v2.25.1 起公開：只放程式與介面規格，測試（test_*.py）跟 tools/ 一樣不發佈
 _UPGRADE_FILES="translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh \
-SOP.md README.md CHANGELOG.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
+SOP.md README.md CHANGELOG.md BENCHMARKS.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
 jtlw_tls.py remote_whisper_server.py \
 jtdt_meeting/__init__.py jtdt_meeting/meeting_insight.py jtdt_meeting/meeting_charts.py \
 jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py \

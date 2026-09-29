@@ -308,7 +308,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.1 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.2 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -324,7 +324,7 @@ if ($Upgrade) {
     # 原本補檔與升級各自維護一份且內容不同，漏掉 README.md / CHANGELOG.md，
     # 升級後看不到改了什麼、README 版本號還停在舊版（2026-09-18 Windows 實機發現）。
     $UPGRADE_FILES = @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1",
-                       "install-linux.sh","SOP.md","README.md","CHANGELOG.md","webui.py",
+                       "install-linux.sh","SOP.md","README.md","CHANGELOG.md","BENCHMARKS.md","webui.py",
                        "webui.html","subtitle_overlay.py","sck_audio_capture.swift",
                        "jtlw_tls.py","remote_whisper_server.py",
                        # 會議摘要（v2.25.0）：第一個放在子資料夾的，複製時要先建資料夾

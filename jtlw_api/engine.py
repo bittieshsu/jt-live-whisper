@@ -33,6 +33,8 @@ STAGE_FOR_TASK = {"transcribe": "asr", "diarize": "diarization", "correct": "cor
                   "summarize": "summary"}
 #: 會議摘要（api_revision 2.4）的結果格式版本
 SUMMARY_SCHEMA_VERSION = "1.0"
+#: 台語模式：用 GPU 伺服器的 Breeze-ASR-26（見 Engine._taiwanese_asr）
+TAIWANESE_PROFILE = "transcribe.taiwanese"
 
 
 def _to_tw(text):
@@ -423,7 +425,9 @@ class Engine:
                        "segments": batch})
 
     def _real_asr(self, job, wav_path):
-        """遠端 GPU 伺服器優先，失敗降級本機"""
+        """遠端 GPU 伺服器優先，失敗降級本機（台語模式另走 _taiwanese_asr）"""
+        if job.get("profile_id") == TAIWANESE_PROFILE:
+            return self._taiwanese_asr(job, wav_path)
         model = job.get("_asr_model") or self.settings.asr_model
         lang = None if job.get("_language", "auto") == "auto" else job["_language"].split("-")[0]
         rw = self.settings.remote_whisper
@@ -443,6 +447,31 @@ class Engine:
                 job.setdefault("warnings", []).append(
                     {"code": "asr_fallback_local", "message": f"GPU 伺服器不可用，改用本機辨識: {e}"[:200]})
         return self._local_asr(job, wav_path, model, lang)
+
+    def _taiwanese_asr(self, job, wav_path):
+        """台語模式（profile transcribe.taiwanese）：GPU 伺服器上的 Breeze-ASR-26（v2.25.2 起）。
+
+        2.4 以前這個 profile 雖然列在 /profiles，程式卻從來沒有換模型：language=nan-Hant 送到伺服器
+        直接失敗（'nan' is not a valid language code），zh-Hant 則照一般模型辨識成諧音的華語。
+        **不退回本機**：只有 CPU 的 API 主機跑一小時的台語會議要約 4 小時，一般模型則會把台語
+        辨識成諧音的華語——兩種「成功」都比明講失敗更糟。時間戳是伺服器依語音活動切的 ≤28 秒視窗"""
+        rw = self.settings.remote_whisper
+        if not (rw and rw.get("host")):
+            raise EngineError("asr_failed", "asr", {
+                "reason": "台語辨識需要 GPU 伺服器（config.json 的 remote_whisper），API 主機本身不跑台語模型"})
+        try:
+            segs, _dur, _pt, _dev = tm._remote_whisper_transcribe(
+                rw, wav_path, tm.BREEZE_MODEL, "nan", on_event=self._gpu_event_handler(job))
+        except Exception as e:
+            msg = str(e)
+            details = {"reason": msg[:200]}
+            if "not a valid language code" in msg or "Breeze" in msg or "400" in msg:
+                details["hint"] = "GPU 伺服器需 v2.25.2 以上才支援台語"
+            raise EngineError("asr_failed", "asr", details)
+        job["_use_remote_asr"] = True
+        job["_detected_language"] = "nan-Hant"
+        return [{"start": s["start"], "end": s["end"], "text": s["text"], "confidence": None,
+                 "language": "nan-Hant"} for s in segs]
 
     def _detect_language(self, wav_path):
         """用最小的模型偵測語言（只讀前 30 秒），失敗時回退英文"""
