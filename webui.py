@@ -13,6 +13,7 @@ import asyncio
 import json
 import re
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -745,7 +746,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.25.3",
+        "last": last, "version": "2.25.4",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1475,6 +1476,49 @@ def _tls_hosts_default():
 
 
 # ─── 主程式 ──────────────────────────────────────────────────
+def _no_gui():
+    """Linux 沒有圖形桌面（SSH / 伺服器）時不開瀏覽器，避免開出文字模式瀏覽器佔住終端機"""
+    return (sys.platform.startswith("linux")
+            and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
+
+
+def _open_browser(url):
+    """開瀏覽器。Linux 要脫離 session：從桌面捷徑啟動時視窗一關，同一個 session 裡剛開的瀏覽器會被一起帶走"""
+    if sys.platform.startswith("linux") and shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", url], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        webbrowser.open(url)
+
+
+def _running_webui_url(port):
+    """這個 port 上跑的是 jt-live-whisper 的 WebUI 時回傳它的網址，否則 None（v2.25.4）。
+
+    用 /api/config 認：本機連線不需要密碼，回的 JSON 有 version（有密碼的遠端才會是 auth_required）。
+    TLS 開關兩種都試，不看這一次的設定——原本那個可能是用 --no-tls 啟動的"""
+    import ssl
+    import urllib.error
+    import urllib.request
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE                 # 只連本機，自簽憑證不驗
+    for scheme in ("http", "https"):
+        try:
+            with urllib.request.urlopen(f"{scheme}://127.0.0.1:{port}/api/config", timeout=2,
+                                        context=ctx if scheme == "https" else None) as r:
+                body = json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                body = json.loads(e.read() or b"{}")
+            except Exception:
+                continue
+        except Exception:
+            continue
+        if isinstance(body, dict) and ("version" in body or "auth_required" in body):
+            return f"{scheme}://localhost:{port}"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="jt-live-whisper WebUI")
     parser.add_argument("--port", type=int, default=WEB_PORT, help=f"HTTP port (預設 {WEB_PORT})")
@@ -1491,13 +1535,33 @@ def main():
         _s.settimeout(0.5)
         if _s.connect_ex(("127.0.0.1", _port)) == 0:
             _s.close()
-            print(f"\n  [注意] Port {_port} 被佔用（可能是上次未正常結束的殘留程序）")
-            print(f"  [1] 結束佔用的程序，繼續使用此 Port")
-            print(f"  [2] 改用其他 Port")
-            try:
-                _choice = input("  選擇 (1/2) [1]：").strip()
-            except (EOFError, KeyboardInterrupt):
-                sys.exit(0)
+            _running = _running_webui_url(_port) if _port == args.port else None
+            if _running:
+                # 佔住的就是另一個 WebUI（例如桌面捷徑又點了一次）：先開瀏覽器連過去。
+                # v2.25.4 前這裡預設是「結束佔用的程序」，按一下 Enter 就把正在錄音、處理中的那個砍掉
+                print(f"\n  WebUI 已經在執行中：{_running}")
+                if not args.no_browser and not _no_gui():
+                    _open_browser(_running)
+                    print("  已在瀏覽器開啟")
+                if not sys.stdin.isatty():
+                    sys.exit(0)
+                print("  [Enter] 關閉這個視窗（原本的 WebUI 繼續執行）")
+                print("  [1] 結束原本的 WebUI，重新啟動")
+                print("  [2] 改用其他 Port，另外啟動一個")
+                try:
+                    _choice = input("  選擇 [Enter]：").strip()
+                except (EOFError, KeyboardInterrupt):
+                    sys.exit(0)
+                if _choice not in ("1", "2"):
+                    sys.exit(0)
+            else:
+                print(f"\n  [注意] Port {_port} 被佔用（可能是上次未正常結束的殘留程序）")
+                print(f"  [1] 結束佔用的程序，繼續使用此 Port")
+                print(f"  [2] 改用其他 Port")
+                try:
+                    _choice = input("  選擇 (1/2) [1]：").strip()
+                except (EOFError, KeyboardInterrupt):
+                    sys.exit(0)
             if _choice == "2":
                 if _port == args.port:
                     try:
@@ -1566,9 +1630,7 @@ def main():
     sys.stdout.flush()
 
     # Linux 沒有圖形桌面（SSH / 伺服器）時不自動開瀏覽器，避免開出文字模式瀏覽器佔住終端機
-    _headless = (sys.platform.startswith("linux")
-                 and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")))
-    if not args.no_browser and not _headless:
+    if not args.no_browser and not _no_gui():
         threading.Timer(1.0, lambda: webbrowser.open(f"{scheme}://localhost:{args.port}")).start()
 
     # Ctrl+C 強制退出（uvicorn 可能攔截 SIGINT）

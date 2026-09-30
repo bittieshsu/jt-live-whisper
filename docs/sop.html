@@ -52,6 +52,7 @@
       <a class="lv3" href="#gpu-伺服器的版本檢查與更新v2211-起">GPU 伺服器的版本檢查與更新（v2.21.1 起）</a>
       <a class="lv3" href="#3-2-升級至最新版本">3-2. 升級至最新版本</a>
       <a class="lv3" href="#3-3-搬遷資料夾後">3-3. 搬遷資料夾後</a>
+      <a class="lv3" href="#3-4-桌面與應用程式選單捷徑v2254-起">3-4. 桌面與應用程式選單捷徑（v2.25.4 起）</a>
       <a class="" href="#四啟動與使用">四、啟動與使用</a>
       <a class="lv3" href="#4-1-啟動">4-1. 啟動</a>
       <a class="lv3" href="#4-2-webui-瀏覽器介面">4-2. WebUI 瀏覽器介面</a>
@@ -123,7 +124,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.25.3 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.25.4 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1236,9 +1237,46 @@ systemctl restart jt-whisper-server@8978
 .\install.ps1 -Upgrade
 </code></pre>
 <p>自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。升級後建議重新執行安裝腳本（macOS / Linux: <code>./install.sh</code>、Windows: <code>.\install.ps1</code>）確認相依套件完整。</p>
+<p>升級結束時，還沒建過捷徑的電腦會問一次要不要建立桌面與應用程式選單捷徑（見 3-4）。</p>
 <p>Linux 的 <code>--upgrade</code> 下載完新檔案後會自動重新執行安裝檢查，補齊新版本需要的相依套件；伺服器版若程式版本有變更，會一併重新啟動 <code>jt-live-whisper-webui</code> 服務。不想在升級時檢查相依套件，可設定 <code>JTLW_SKIP_DEP_CHECK=1</code>。</p>
 <h3 id="3-3-搬遷資料夾後">3-3. 搬遷資料夾後</h3>
-<p>如果將資料夾搬到其他位置，只需重新執行安裝腳本（macOS / Linux: <code>./install.sh</code>、Windows: <code>.\install.ps1</code>），它會自動偵測並修復損壞的 venv 和 whisper.cpp。</p>
+<p>如果將資料夾搬到其他位置，只需重新執行安裝腳本（macOS / Linux: <code>./install.sh</code>、Windows: <code>.\install.ps1</code>），它會自動偵測並修復損壞的 venv 和 whisper.cpp；建過的桌面與應用程式選單捷徑也會一併改指到新位置。</p>
+<h3 id="3-4-桌面與應用程式選單捷徑v2254-起">3-4. 桌面與應用程式選單捷徑（v2.25.4 起）</h3>
+<p>有圖形桌面的電腦，安裝（或升級）結束時會問一次要不要建立捷徑，點兩下就以 WebUI（瀏覽器介面）模式啟動：</p>
+<table>
+<thead>
+<tr>
+<th>平台</th>
+<th>位置</th>
+<th>怎麼選</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>macOS</td>
+<td>桌面（<code>jt-live-whisper.command</code>）、「應用程式」（<code>jt-live-whisper.app</code>，Launchpad、Spotlight 找得到）</td>
+<td>按 Enter 兩邊都建；<code>1</code> 只建桌面、<code>2</code> 只建「應用程式」、<code>n</code> 都不要</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td>桌面、「開始」功能表的所有程式（<code>jt-live-whisper.lnk</code>）</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td>桌面（<code>jt-live-whisper.desktop</code>）</td>
+<td>應用程式選單安裝時就會建立，只問要不要也放桌面（<code>Y/n</code>）</td>
+</tr>
+</tbody></table>
+<ul>
+<li>macOS 兩種捷徑都在「終端機」裡執行，擷取系統音訊需要的「螢幕錄製」權限仍然是給終端機，不必另外授權</li>
+<li>Linux 第一次點兩下若出現「不受信任的啟動器」，按右鍵選「允許啟動」</li>
+<li><strong>選了「都不要」之後升級不會再問</strong>；想建立時刪掉安裝資料夾裡的 <code>.desktop_shortcut</code>，再執行一次安裝腳本</li>
+<li>建過之後自己刪掉捷徑，升級也不會再建回來；捷徑還在的話，搬過資料夾後重新執行安裝腳本會一併更新</li>
+<li>用 SSH、排程等沒有人可以回答的方式執行時不問（也不記錄），下次在終端機前執行時再問；伺服器版（<code>--server</code>）不問</li>
+<li><strong>從 v2.25.3 以前升級上來的</strong>：macOS、Windows 第一次 <code>--upgrade</code> 跑的是舊版安裝腳本，不會問；
+第二次 <code>--upgrade</code>（或重新執行一次安裝腳本）才會問。Linux 的 <code>--upgrade</code> 會接著用新版安裝腳本檢查相依套件，第一次就會問</li>
+<li>已經開著 WebUI 時再點一次捷徑，會直接在瀏覽器開啟原本那個，不會把它關掉重開；啟動失敗時視窗會停住，看得到錯誤訊息</li>
+</ul>
 <hr>
 <h2 id="四啟動與使用">四、啟動與使用</h2>
 <h3 id="4-1-啟動">4-1. 啟動</h3>
@@ -1263,7 +1301,7 @@ cd C:\jt-live-whisper
 </code></pre>
 </blockquote>
 <h3 id="4-2-webui-瀏覽器介面">4-2. WebUI 瀏覽器介面</h3>
-<p>除了終端機互動選單，也可以使用瀏覽器介面操作：</p>
+<p>除了終端機互動選單，也可以使用瀏覽器介面操作（安裝時建立的桌面、應用程式選單捷徑就是用這個模式啟動，見 3-4）：</p>
 <pre><code class="language-bash"># macOS / Linux
 ./start.sh --webui
 

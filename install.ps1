@@ -300,6 +300,113 @@ except Exception as e:
     return "fail"
 }
 
+# ─── 桌面與「開始」功能表捷徑（v2.25.4）───────────────────────
+# 安裝或升級結束時問一次要不要建捷徑（點兩下＝WebUI 模式），桌面與「開始」功能表（所有程式）可只選一邊。
+# 規則與 install.sh 相同：答案記在安裝資料夾的 .desktop_shortcut（no，或建在哪裡：desktop／menu）；
+# 選 no 之後升級不再問；建過之後使用者自己刪掉也不再問，還在的話內容過期（例如安裝資料夾搬過）就更新。
+# 沒有人可以回答時（SSH、輸入被導向）不問、也不記錄，等下次有人在視窗前再問
+$SHORTCUT_STATE_FILE = Join-Path $SCRIPT_DIR ".desktop_shortcut"
+
+function desktop_shortcut_spec {
+    $ps = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $startPs1 = (Join-Path $SCRIPT_DIR "start.ps1") -replace "'", "''"
+    # WebUI 異常結束才停住（錯誤訊息才看得到）；正常結束、或 WebUI 已經在執行（只開瀏覽器）時視窗直接關
+    $cmdArgs = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$startPs1' --webui; " +
+               "if (`$LASTEXITCODE -ne 0) { Read-Host '按 Enter 關閉視窗' | Out-Null }`""
+    return @{ Target = $ps; Arguments = $cmdArgs; WorkingDirectory = $SCRIPT_DIR }
+}
+
+function write_desktop_shortcut([string]$lnkPath) {
+    try {
+        $spec = desktop_shortcut_spec
+        $ws = New-Object -ComObject WScript.Shell
+        $lnk = $ws.CreateShortcut($lnkPath)
+        $lnk.TargetPath = $spec.Target
+        $lnk.Arguments = $spec.Arguments
+        $lnk.WorkingDirectory = $spec.WorkingDirectory
+        $lnk.Description = "jt-live-whisper（WebUI）"
+        $lnk.IconLocation = "$($spec.Target),0"
+        $lnk.Save()
+        return (Test-Path $lnkPath)
+    } catch {
+        return $false
+    }
+}
+
+function desktop_shortcut_is_current([string]$lnkPath) {
+    try {
+        $spec = desktop_shortcut_spec
+        $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
+        return ($lnk.TargetPath -eq $spec.Target -and $lnk.Arguments -eq $spec.Arguments -and
+                $lnk.WorkingDirectory -eq $spec.WorkingDirectory)
+    } catch {
+        return $true      # 讀不出來就不動它
+    }
+}
+
+# $answer / $desktopDir / $programsDir 只給測試用：正常呼叫時問使用者、用目前使用者的桌面與「開始」功能表
+function offer_desktop_shortcut($answer = $null, $desktopDir = $null, $programsDir = $null) {
+    $state = ""
+    if (Test-Path $SHORTCUT_STATE_FILE) { $state = ((Get-Content $SHORTCUT_STATE_FILE -Raw) + "").Trim() }
+    if ($state -eq "no") { return }
+    if (-not $desktopDir) { $desktopDir = [Environment]::GetFolderPath("Desktop") }     # OneDrive 轉向的桌面也對
+    if (-not $programsDir) { $programsDir = [Environment]::GetFolderPath("Programs") }  # 「開始」功能表的所有程式
+    $paths = [ordered]@{}
+    if ($desktopDir -and (Test-Path $desktopDir)) { $paths["desktop"] = Join-Path $desktopDir "jt-live-whisper.lnk" }
+    if ($programsDir -and (Test-Path $programsDir)) { $paths["menu"] = Join-Path $programsDir "jt-live-whisper.lnk" }
+    $labels = @{ desktop = "桌面"; menu = "「開始」功能表" }
+    if ($state) {
+        foreach ($loc in ($state -split '\s+')) {
+            if (-not $paths.Contains($loc)) { continue }
+            $p = $paths[$loc]
+            if ((Test-Path $p) -and -not (desktop_shortcut_is_current $p)) {
+                if (write_desktop_shortcut $p) { check_ok "已更新捷徑：$p" }
+            }
+        }
+        return
+    }
+    if ($paths.Count -eq 0) { return }
+    $found = @($paths.Keys | Where-Object { Test-Path $paths[$_] })   # 已經有了（自己建的）：當作建過
+    if ($found.Count -gt 0) {
+        Set-Content -Path $SHORTCUT_STATE_FILE -Value ($found -join " ") -Encoding ASCII
+        return
+    }
+    if ($null -eq $answer) {
+        if ([Console]::IsInputRedirected) { return }
+        section "捷徑"
+        Write-Host "  ${C_WHITE}建立 jt-live-whisper 捷徑，點兩下就以 WebUI（瀏覽器介面）模式啟動${NC}"
+        Write-Host "  ${C_WHITE}  [Enter] 桌面和「開始」功能表都建立${NC}"
+        Write-Host "  ${C_WHITE}  [1] 只建立在桌面${NC}"
+        Write-Host "  ${C_WHITE}  [2] 只建立在「開始」功能表（所有程式）${NC}"
+        Write-Host "  ${C_WHITE}  [n] 都不要${NC}"
+        for ($i = 0; $i -lt 3; $i++) {
+            $a = ("" + (Read-Host "  是否建立捷徑？選擇 [Enter]")).Trim()
+            if ($a -match '^(|[Yy].*|1|2|[Nn].*)$') { $answer = $a; break }
+            Write-Host "  ${C_DIM}請輸入 Enter、1、2 或 n${NC}"
+        }
+        if ($null -eq $answer) { return }
+    }
+    $a = ("" + $answer).Trim()
+    if ($a -match '^[Nn]') {
+        Set-Content -Path $SHORTCUT_STATE_FILE -Value "no" -Encoding ASCII
+        Write-Host "  ${C_DIM}不建立；之後升級不會再問。想建立時刪掉 ${SHORTCUT_STATE_FILE}，再執行一次 .\install.ps1${NC}"
+        return
+    }
+    $want = if ($a -eq "1") { @("desktop") } elseif ($a -eq "2") { @("menu") } else { @("desktop", "menu") }
+    $made = @()
+    foreach ($loc in $want) {
+        if (-not $paths.Contains($loc)) { continue }
+        if (write_desktop_shortcut $paths[$loc]) {
+            $made += $loc
+            check_ok "已建立捷徑（$($labels[$loc])）：$($paths[$loc])"
+        } else {
+            check_fail "無法在$($labels[$loc])建立捷徑：$($paths[$loc])"
+        }
+    }
+    # 至少建成一個才記下來；全部失敗的話下次再問
+    if ($made.Count -gt 0) { Set-Content -Path $SHORTCUT_STATE_FILE -Value ($made -join " ") -Encoding ASCII }
+}
+
 # ─── Banner ───────────────────────────────────────────────────
 
 $cols = try { $Host.UI.RawUI.WindowSize.Width } catch { 60 }
@@ -308,7 +415,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.3 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.4 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -395,6 +502,7 @@ if ($Upgrade) {
             check_ok "已經是最新版本 (v${localVer})"
         }
         Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        offer_desktop_shortcut
         exit 0
     }
 
@@ -444,6 +552,7 @@ if ($Upgrade) {
     check_ok "已升級 v${localVer} -> v${remoteVer}（更新 ${updated} 個檔案）"
     Write-Host ""
     Write-Host "  ${C_WARN}建議重新執行 .\install.ps1 確認相依套件完整${NC}"
+    offer_desktop_shortcut
     exit 0
 }
 
@@ -2643,6 +2752,8 @@ Write-Host "  ${C_WHITE}升級方式: ${C_OK}.\install.ps1 -Upgrade${NC}"
 Write-Host ""
 Write-Host "  ${C_DIM}提示：若日後將此資料夾搬移到其他位置，請重新執行 .\install.ps1${NC}"
 Write-Host "  ${C_DIM}      安裝程式會自動偵測並修復因路徑變更而損壞的環境${NC}"
+Write-Host ""
+offer_desktop_shortcut
 Write-Host ""
 Write-Host "  ${C_DIM}安裝 log: $INSTALL_LOG${NC}"
 Write-Host ""

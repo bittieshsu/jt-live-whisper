@@ -20,6 +20,9 @@ recordings/
 # REST API 的作業資料庫、上傳暫存、自簽憑證與私鑰（v2.25.1 起 jtlw_api/ 公開）
 api_data/
 
+# 桌面捷徑要不要建的回答（每台機器各自的，v2.25.4）
+.desktop_shortcut
+
 # 暫存檔
 .whisper_output.txt
 .tmp_*

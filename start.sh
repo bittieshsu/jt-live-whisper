@@ -29,7 +29,7 @@ _COLS=$(tput cols 2>/dev/null || echo 60)
 [ "$_COLS" -lt 40 ] && _COLS=40
 _LINE=$(printf '%*s' "$_COLS" '' | tr ' ' '=')
 echo -e "${C_TITLE}${_LINE}${NC}"
-echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.3 - 100% 全地端 AI 語音工具箱${NC}"
+echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.4 - 100% 全地端 AI 語音工具箱${NC}"
 echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 echo -e "${C_TITLE}${_LINE}${NC}"
 echo ""
@@ -50,12 +50,20 @@ fi
 # --input 和 --summarize 模式不需要 BlackHole
 SKIP_BLACKHOLE=0
 WEBUI_MODE=0
+FROM_SHORTCUT=0
 for arg in "$@"; do
     case "$arg" in
         --input|--summarize|--diarize|--sck-permission|--list-devices) SKIP_BLACKHOLE=1 ;;
         --webui) WEBUI_MODE=1 ;;
+        --shortcut) FROM_SHORTCUT=1 ;;
     esac
 done
+
+# 從桌面捷徑啟動（--webui --shortcut，v2.25.4）：視窗會跟著程式結束而關掉，
+# 異常結束時先停住，錯誤訊息才看得到。正常結束（Ctrl+C）不停；不帶 --shortcut 時行為完全不變
+if [ "$FROM_SHORTCUT" = "1" ]; then
+    trap '_rc=$?; if [ "$_rc" -ne 0 ]; then echo; read -r -p "  按 Enter 關閉視窗" _ || true; fi' EXIT
+fi
 
 # Linux：系統音訊走 PipeWire / PulseAudio 的 monitor 來源，不需要 BlackHole
 if [ "$(uname -s)" = "Linux" ]; then
@@ -189,9 +197,13 @@ for _arg in "$@"; do [ "$_arg" = "--webui" ] && _is_webui=1 && break; done
 
 if [ $_is_webui -eq 1 ]; then
     python3 "$SCRIPT_DIR/webui.py"
+    _webui_rc=$?
 else
     python3 "$SCRIPT_DIR/translate_meeting.py" "$@"
 fi
 
 # 安全網：確保終端機恢復正常（防止 Ctrl+S raw mode 殘留）
 stty sane 2>/dev/null || true
+# 桌面捷徑：把 WebUI 的結束碼交給上面的 trap（其他情況照舊以 0 結束，systemd 服務不受影響）
+# （不能寫成 [ ... ] && exit：條件不成立時那一行回 1，整支腳本就以失敗結束——systemd 服務踩過同一個坑）
+if [ "$FROM_SHORTCUT" = "1" ]; then exit "${_webui_rc:-0}"; fi

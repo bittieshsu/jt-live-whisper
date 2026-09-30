@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.3 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.4 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1573,6 +1573,7 @@ do_upgrade() {
         else
             check_ok "已經是最新版本 (v${local_version})"
         fi
+        offer_desktop_shortcut
         return 0
     fi
 
@@ -1606,6 +1607,7 @@ do_upgrade() {
     check_ok "已升級 v${local_version} → v${remote_version}（更新 ${files_updated} 個檔案）"
     echo ""
     echo -e "  ${C_WARN}建議重新執行 ./install.sh 確認相依套件完整${NC}"
+    offer_desktop_shortcut
     return 0
 }
 
@@ -2936,6 +2938,265 @@ check_disk_space() {
     fi
 }
 
+# ─── 桌面與應用程式選單捷徑（v2.25.4）──────────────────
+# 有圖形桌面的機器，安裝或升級結束時問一次要不要建捷徑（點兩下＝WebUI 模式）：
+#   macOS：桌面（.command）與「應用程式」（.app，交給「終端機」執行），可只選一邊
+#   Linux：應用程式選單安裝時就會建（install-linux.sh），只問要不要也放桌面
+# 答案記在安裝資料夾的 .desktop_shortcut：no，或建在哪裡（desktop／menu）。選 no 之後升級不再問；
+# 建過之後使用者自己刪掉也不再問，還在的話內容過期（例如安裝資料夾搬過）就更新。
+# 沒有人可以回答時（SSH 非互動、排程、測試）不問、也不記錄，等下次有人在終端機前再問。
+# Windows 版在 install.ps1（offer_desktop_shortcut），規則相同
+SHORTCUT_STATE_FILE="$SCRIPT_DIR/.desktop_shortcut"
+SHORTCUT_NAME="jt-live-whisper"
+_GUI_SESSION_DIRS="/usr/share/xsessions /usr/share/wayland-sessions"
+_MAC_APPS_DIRS="/Applications $HOME/Applications"      # 先放得進去的那一個；找舊的兩個都找
+
+# Linux 有沒有圖形桌面：正在圖形環境裡，或裝了桌面工作階段（從 SSH 安裝一台桌機時也算）
+_linux_has_gui() {
+    [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}${XDG_CURRENT_DESKTOP:-}" ] && return 0
+    local d
+    for d in $_GUI_SESSION_DIRS; do
+        ls "$d"/*.desktop >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+# 桌面資料夾（Linux 依語系可能是 ~/桌面）；沒有就回 1
+_desktop_dir() {
+    local d=""
+    if [ "$(uname -s)" = "Linux" ] && command -v xdg-user-dir >/dev/null 2>&1; then
+        d=$(xdg-user-dir DESKTOP 2>/dev/null || true)
+        [ "$d" = "$HOME" ] && d=""          # 沒設定桌面資料夾時 xdg-user-dir 回家目錄
+    fi
+    [ -n "$d" ] || d="$HOME/Desktop"
+    [ -d "$d" ] || return 1
+    printf '%s\n' "$d"
+}
+
+# 捷徑的位置：$1＝desktop／menu。menu 只有 macOS（Linux 的選單由 install-linux.sh 管）。
+# $2＝find：找已經存在的那一份（macOS 的 .app 兩個資料夾都找）；沒有就回 1
+_shortcut_path() {
+    local d
+    case "$1" in
+        desktop)
+            d=$(_desktop_dir) || return 1
+            if [ "$(uname -s)" = "Darwin" ]; then
+                printf '%s\n' "$d/$SHORTCUT_NAME.command"
+            else
+                printf '%s\n' "$d/$SHORTCUT_NAME.desktop"
+            fi
+            return 0
+            ;;
+        menu)
+            [ "$(uname -s)" = "Darwin" ] || return 1
+            for d in $_MAC_APPS_DIRS; do
+                if [ "${2:-}" = "find" ]; then
+                    [ -d "$d/$SHORTCUT_NAME.app" ] && { printf '%s\n' "$d/$SHORTCUT_NAME.app"; return 0; }
+                elif [ -d "$d" ] && [ -w "$d" ]; then
+                    printf '%s\n' "$d/$SHORTCUT_NAME.app"; return 0
+                elif [ "$d" = "$HOME/Applications" ] && mkdir -p "$d" 2>/dev/null; then
+                    printf '%s\n' "$d/$SHORTCUT_NAME.app"; return 0
+                fi
+            done
+            return 1
+            ;;
+    esac
+    return 1
+}
+
+# 依 Desktop Entry 規格把一個參數放進 Exec 的雙引號裡：引號內的 " ` $ \ 要跳脫，
+# 而檔案本身的字串跳脫先套用一次，所以反斜線要寫成四個；% 是欄位代碼，要寫成 %%
+_desktop_exec_quote() {
+    local s="$1"
+    s=${s//\\/\\\\\\\\}
+    s=${s//\"/\\\\\"}
+    s=${s//\`/\\\\\`}
+    s=${s//\$/\\\\\$}
+    s=${s//%/%%}
+    printf '"%s"' "$s"
+}
+
+# Linux 的 .desktop（應用程式選單與桌面捷徑共用同一份內容）
+# --shortcut：WebUI 異常結束時視窗先停住，錯誤訊息才看得到（start.sh）
+_write_linux_desktop_entry() {  # $1＝檔案路徑
+    local exec_path
+    exec_path=$(_desktop_exec_quote "$SCRIPT_DIR/start.sh")
+    cat > "$1" 2>/dev/null <<EOF || return 1
+[Desktop Entry]
+Type=Application
+Name=jt-live-whisper
+Comment=100% 全地端 AI 語音工具箱（WebUI）
+Exec=${exec_path} --webui --shortcut
+Path=${SCRIPT_DIR//\\/\\\\}
+Icon=audio-input-microphone
+Terminal=true
+Categories=AudioVideo;Audio;
+EOF
+}
+
+# macOS 的 .command：點兩下由「終端機」執行（螢幕錄製權限也是給終端機，WebUI 擷取系統音訊要用）
+_write_mac_command() {          # $1＝檔案路徑
+    {
+        printf '#!/bin/bash\n'
+        printf '# jt-live-whisper 捷徑（安裝程式建立）：以 WebUI（瀏覽器介面）模式啟動\n'
+        printf 'cd %q && exec ./start.sh --webui --shortcut\n' "$SCRIPT_DIR"
+    } > "$1" 2>/dev/null || return 1
+    chmod +x "$1"
+}
+
+# macOS 的 .app（放在「應用程式」，Launchpad、Spotlight 找得到）：
+# 本身只把裡面的 .command 交給「終端機」打開，WebUI 仍在終端機裡跑，權限與桌面捷徑相同。
+# **執行檔不能是 shell 腳本**：macOS 26 上 LaunchServices 打不開（open 回 -10669，2026-09-30 實測），
+# 所以用系統內建的 osacompile 產生 AppleScript applet（Mach-O），放進 .command 之後重新 ad-hoc 簽章
+_MAC_APP_SCRIPT='do shell script "open -a Terminal " & quoted form of (POSIX path of (path to me) & "Contents/Resources/webui.command")'
+_write_mac_app() {              # $1＝.app 路徑
+    local app="$1"
+    command -v osacompile >/dev/null 2>&1 || return 1
+    rm -rf "$app" 2>/dev/null
+    osacompile -o "$app" -e "$_MAC_APP_SCRIPT" >/dev/null 2>&1 || return 1
+    _write_mac_command "$app/Contents/Resources/webui.command" || return 1
+    # 不在 Dock 留圖示（它只是把 .command 交給終端機就結束）
+    plutil -replace LSUIElement -bool YES "$app/Contents/Info.plist" >/dev/null 2>&1 || true
+    # 加了檔案、改了 Info.plist 之後簽章就不完整了，重新做 ad-hoc 簽章
+    codesign --force -s - "$app" >/dev/null 2>&1 || true
+    return 0
+}
+
+# 判斷捷徑內容是不是最新的時要比的那個檔（.app 只比裡面的 .command：applet 每次產生不一定逐位元組相同）
+_shortcut_content() {           # $1＝desktop／menu  $2＝捷徑路徑
+    if [ "$1" = "menu" ] && [ "$(uname -s)" = "Darwin" ]; then
+        printf '%s\n' "$2/Contents/Resources/webui.command"
+    else
+        printf '%s\n' "$2"
+    fi
+}
+
+_write_shortcut() {             # $1＝desktop／menu  $2＝路徑
+    if [ "$(uname -s)" = "Darwin" ]; then
+        if [ "$1" = "menu" ]; then _write_mac_app "$2"; else _write_mac_command "$2"; fi
+        return
+    fi
+    _write_linux_desktop_entry "$2" || return 1
+    chmod +x "$2" || return 1
+    # GNOME 桌面要標成「信任」才點得開；沒有圖形工作階段（例如從 SSH 安裝）時會失敗，第一次點的時候再允許
+    command -v gio >/dev/null 2>&1 && gio set "$2" metadata::trusted true >/dev/null 2>&1 || true
+    return 0
+}
+
+# 建過的捷徑還在就確認內容是最新的（安裝資料夾搬過、啟動方式改過）；刪掉了就不管
+_refresh_shortcuts() {          # $@＝記錄的位置
+    local loc path tmp
+    for loc in "$@"; do
+        path=$(_shortcut_path "$loc" find) || continue
+        [ -e "$path" ] || continue
+        tmp=$(mktemp -d) || continue
+        # 期望的內容先寫到暫存檔（.app 只產生裡面那份 .command），跟現在的比
+        if [ "$loc" = "menu" ] && [ "$(uname -s)" = "Darwin" ]; then
+            _write_mac_command "$tmp/x"
+        else
+            _write_shortcut "$loc" "$tmp/x"
+        fi
+        if [ -f "$tmp/x" ] && ! cmp -s "$tmp/x" "$(_shortcut_content "$loc" "$path")"; then
+            _write_shortcut "$loc" "$path" && check_ok "已更新捷徑：$path"
+        fi
+        rm -rf "$tmp"
+    done
+    return 0
+}
+
+_shortcut_label() {             # 給使用者看的位置名稱
+    case "$1" in
+        desktop) echo "桌面" ;;
+        menu) echo "「應用程式」" ;;
+    esac
+}
+
+offer_desktop_shortcut() {
+    [ "$(id -u)" -ne 0 ] || return 0            # root 的桌面不是使用者的桌面
+    local state
+    state=$(cat "$SHORTCUT_STATE_FILE" 2>/dev/null || true)
+    [ "$state" = "no" ] && return 0
+    if [ -n "$state" ]; then
+        # shellcheck disable=SC2086
+        _refresh_shortcuts $state
+        return 0
+    fi
+    local locs="desktop"
+    if [ "$(uname -s)" = "Linux" ]; then
+        [ "${LINUX_MODE:-desktop}" = "desktop" ] || return 0
+        if [ -n "${SERVICE_FILE:-}" ] && [ -f "$SERVICE_FILE" ]; then return 0; fi   # 伺服器版
+        _linux_has_gui || return 0
+        _desktop_dir >/dev/null || return 0
+    else
+        locs="desktop menu"
+    fi
+    # 已經有了（自己建的、或舊版留下的）：當作建過，不問
+    local loc found=""
+    for loc in $locs; do
+        _shortcut_path "$loc" find >/dev/null 2>&1 && [ -e "$(_shortcut_path "$loc" find)" ] && found="$found $loc"
+    done
+    if [ -n "$found" ]; then
+        printf '%s\n' "${found# }" > "$SHORTCUT_STATE_FILE" 2>/dev/null || true
+        return 0
+    fi
+    # 只在有人可以回答時問。curl | bash 時標準輸入是管線，改從 /dev/tty 讀
+    local tty_in
+    if [ -t 0 ]; then
+        tty_in=/dev/stdin
+    elif { : </dev/tty; } 2>/dev/null; then
+        tty_in=/dev/tty
+    else
+        return 0
+    fi
+    section "捷徑"
+    local ans="" want="" tries=0
+    if [ "$(uname -s)" = "Linux" ]; then
+        echo -e "  ${C_WHITE}應用程式選單裡已經有 jt-live-whisper；也可以在桌面放一個，點兩下就以 WebUI（瀏覽器介面）模式啟動${NC}"
+        if ! read -r -p "  是否建立桌面捷徑？(Y/n) " ans < "$tty_in"; then echo; return 0; fi
+        case "$ans" in [Nn]*) want="no" ;; *) want="desktop" ;; esac
+    else
+        echo -e "  ${C_WHITE}建立 jt-live-whisper 捷徑，點兩下就以 WebUI（瀏覽器介面）模式啟動${NC}"
+        echo -e "  ${C_WHITE}  [Enter] 桌面和「應用程式」都建立${NC}"
+        echo -e "  ${C_WHITE}  [1] 只建立在桌面${NC}"
+        echo -e "  ${C_WHITE}  [2] 只建立在「應用程式」（Launchpad、Spotlight 找得到）${NC}"
+        echo -e "  ${C_WHITE}  [n] 都不要${NC}"
+        while [ -z "$want" ]; do
+            if ! read -r -p "  是否建立捷徑？選擇 [Enter] " ans < "$tty_in"; then echo; return 0; fi
+            case "$ans" in
+                ""|[Yy]*) want="desktop menu" ;;
+                1) want="desktop" ;;
+                2) want="menu" ;;
+                [Nn]*) want="no" ;;
+                *) tries=$((tries + 1)); [ $tries -ge 3 ] && return 0
+                   echo -e "  ${C_DIM}請輸入 Enter、1、2 或 n${NC}" ;;
+            esac
+        done
+    fi
+    if [ "$want" = "no" ]; then
+        printf 'no\n' > "$SHORTCUT_STATE_FILE" 2>/dev/null || true
+        echo -e "  ${C_DIM}不建立；之後升級不會再問。想建立時刪掉 ${SHORTCUT_STATE_FILE}，再執行一次 ./install.sh${NC}"
+        return 0
+    fi
+    local made="" path
+    for loc in $want; do
+        if path=$(_shortcut_path "$loc") && _write_shortcut "$loc" "$path"; then
+            made="$made $loc"
+            check_ok "已建立捷徑（$(_shortcut_label "$loc")）：$path"
+        else
+            check_fail "無法在$(_shortcut_label "$loc")建立捷徑${path:+：$path}"
+            if [ "$(uname -s)" = "Darwin" ] && [ "$loc" = "desktop" ]; then
+                echo -e "  ${C_DIM}終端機可能沒有「桌面」資料夾的存取權限：系統設定 → 隱私權與安全性 → 檔案與檔案夾${NC}"
+            fi
+        fi
+    done
+    # 至少建成一個才記下來；全部失敗的話下次再問
+    [ -n "$made" ] && printf '%s\n' "${made# }" > "$SHORTCUT_STATE_FILE" 2>/dev/null
+    if [ -n "$made" ] && [ "$(uname -s)" = "Linux" ]; then
+        echo -e "  ${C_DIM}第一次點兩下時如果出現「不受信任的啟動器」，按右鍵選「允許啟動」${NC}"
+    fi
+    return 0
+}
+
 # 被 install-linux.sh 當函式庫載入時到此為止
 if [ -n "${JTLW_INSTALL_LIB:-}" ]; then
     return 0
@@ -2973,3 +3234,4 @@ check_mlx_whisper
 check_qwen_local_mac
 setup_remote_whisper
 print_summary
+offer_desktop_shortcut

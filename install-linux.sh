@@ -375,16 +375,8 @@ install_desktop_entry() {
     [ "$LINUX_MODE" = "desktop" ] || return 0
     section "應用程式選單捷徑"
     mkdir -p "$(dirname "$DESKTOP_FILE")"
-    cat > "$DESKTOP_FILE" <<EOF
-[Desktop Entry]
-Type=Application
-Name=jt-live-whisper
-Comment=100% 全地端 AI 語音工具箱（WebUI）
-Exec=bash -c 'cd "$SCRIPT_DIR" && ./start.sh --webui'
-Icon=audio-input-microphone
-Terminal=true
-Categories=AudioVideo;Audio;Utility;
-EOF
+    # 內容與桌面捷徑共用（install.sh 的 _write_linux_desktop_entry）
+    _write_linux_desktop_entry "$DESKTOP_FILE" || { check_fail "無法寫入 ${DESKTOP_FILE}"; return 0; }
     chmod +x "$DESKTOP_FILE"
     command -v update-desktop-database >/dev/null 2>&1 && \
         update-desktop-database "$(dirname "$DESKTOP_FILE")" >/dev/null 2>&1
@@ -699,6 +691,18 @@ linux_uninstall() {
         rm -f "$DESKTOP_FILE"
         check_ok "已移除應用程式選單捷徑"
     fi
+    # 桌面捷徑：只移除指向這個安裝資料夾的那一份（比對 Path= 那一行）；
+    # 移除後重新安裝時會再問一次，選過「不要」的照舊不問
+    local _dsk_file
+    if _dsk_file=$(_shortcut_path desktop); then
+        if [ -f "$_dsk_file" ] && grep -qxF "Path=${SCRIPT_DIR//\\/\\\\}" "$_dsk_file"; then
+            rm -f "$_dsk_file"
+            check_ok "已移除桌面捷徑"
+        fi
+    fi
+    local _st
+    _st=$(cat "$SHORTCUT_STATE_FILE" 2>/dev/null)
+    if [ -n "$_st" ] && [ "$_st" != "no" ]; then rm -f "$SHORTCUT_STATE_FILE"; fi
     if [ -d "$VENV_DIR" ]; then
         rm -rf "$VENV_DIR"
         check_ok "已移除虛擬環境"
@@ -827,3 +831,4 @@ setup_remote_whisper_linux
 install_desktop_entry
 install_systemd_service
 print_linux_summary
+offer_desktop_shortcut
