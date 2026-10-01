@@ -320,7 +320,10 @@ function desktop_shortcut_spec {
     # WebUI 異常結束才停住（錯誤訊息才看得到）；正常結束、或 WebUI 已經在執行（只開瀏覽器）時視窗直接關
     $cmdArgs = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$startPs1' --webui; " +
                "if (`$LASTEXITCODE -ne 0) { Read-Host '按 Enter 關閉視窗' | Out-Null }`""
-    return @{ Target = $ps; Arguments = $cmdArgs; WorkingDirectory = $SCRIPT_DIR }
+    # 圖示用我們的 logo（v2.26.2）；從舊版第一次 -Upgrade 時 icons\ 還沒到，先用 PowerShell 的，第二次升級再換
+    $ico = Join-Path $SCRIPT_DIR "icons\jt-live-whisper.ico"
+    $icon = if (Test-Path $ico) { "$ico,0" } else { "$ps,0" }
+    return @{ Target = $ps; Arguments = $cmdArgs; WorkingDirectory = $SCRIPT_DIR; Icon = $icon }
 }
 
 function write_desktop_shortcut([string]$lnkPath) {
@@ -332,7 +335,7 @@ function write_desktop_shortcut([string]$lnkPath) {
         $lnk.Arguments = $spec.Arguments
         $lnk.WorkingDirectory = $spec.WorkingDirectory
         $lnk.Description = "jt-live-whisper（WebUI）"
-        $lnk.IconLocation = "$($spec.Target),0"
+        $lnk.IconLocation = $spec.Icon
         $lnk.Save()
         return (Test-Path $lnkPath)
     } catch {
@@ -345,7 +348,7 @@ function desktop_shortcut_is_current([string]$lnkPath) {
         $spec = desktop_shortcut_spec
         $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
         return ($lnk.TargetPath -eq $spec.Target -and $lnk.Arguments -eq $spec.Arguments -and
-                $lnk.WorkingDirectory -eq $spec.WorkingDirectory)
+                $lnk.WorkingDirectory -eq $spec.WorkingDirectory -and $lnk.IconLocation -eq $spec.Icon)
     } catch {
         return $true      # 讀不出來就不動它
     }
@@ -422,7 +425,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.1 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.2 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -449,7 +452,9 @@ if ($Upgrade) {
                        "jtlw_api/__init__.py","jtlw_api/__main__.py","jtlw_api/app.py",
                        "jtlw_api/config.py","jtlw_api/engine.py","jtlw_api/events.py",
                        "jtlw_api/keys.py","jtlw_api/log.py","jtlw_api/store.py","jtlw_api/tls.py",
-                       "jtlw_api/schemas/jtlw-api-v1.schema.json")
+                       "jtlw_api/schemas/jtlw-api-v1.schema.json",
+                       # 捷徑的 logo 圖示（v2.26.2，tools/build_icons.py 產生）
+                       "icons/jt-live-whisper.png","icons/jt-live-whisper.ico","icons/jt-live-whisper.icns")
 
     section "從 GitHub 升級程式"
 

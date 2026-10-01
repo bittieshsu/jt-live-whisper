@@ -1,5 +1,17 @@
 # Changelog
 
+### v2.26.2 (2026-10-02)
+
+**安裝程式：捷徑圖示改用 jt-live-whisper 的 logo**
+- macOS 的「應用程式」`.app` 與桌面 `.command`、Windows 的桌面與「開始」功能表 `.lnk`、Linux 的桌面與應用程式選單 `.desktop`，
+  圖示都換成網站上的 logo（以前是系統的終端機、PowerShell、麥克風圖示）
+- 圖示檔放在安裝資料夾的 `icons/`（PNG、ICO、ICNS）；之前建的捷徑升級時會自動換上。
+  從 v2.26.1 以前升級：Linux 第一次 `--upgrade` 就會換；macOS、Windows 第一次升級跑的是舊版安裝腳本、還拿不到 `icons/`，**第二次 `--upgrade`** 才換
+
+**文件與網站**
+- 升級說明補上「先切到安裝資料夾」（README、手冊、網站），並更正：Linux 升級後會自動補齊套件，macOS、Windows 要再執行一次安裝腳本
+- 網站：伺服器模式指令區補上切換資料夾；`--num-speakers` 範例註解改成上限的說法
+
 ### v2.26.1 (2026-10-01)
 
 **REST API（api_revision 2.6）：講者辨識退回現行方法時附原因代碼**

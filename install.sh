@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.2 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1465,7 +1465,9 @@ jtdt_meeting/__init__.py jtdt_meeting/meeting_insight.py jtdt_meeting/meeting_ch
 jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py \
 jtlw_api/__init__.py jtlw_api/__main__.py jtlw_api/app.py jtlw_api/config.py jtlw_api/engine.py \
 jtlw_api/events.py jtlw_api/keys.py jtlw_api/log.py jtlw_api/store.py jtlw_api/tls.py \
-jtlw_api/schemas/jtlw-api-v1.schema.json"
+jtlw_api/schemas/jtlw-api-v1.schema.json \
+icons/jt-live-whisper.png icons/jt-live-whisper.ico icons/jt-live-whisper.icns"
+# icons/（v2.26.2）：捷徑的 logo 圖示，由 tools/build_icons.py 照網站 favicon 產生
 
 # ─── GPU 伺服器 server.py 的啟停與版本比較 ──────────────────────
 # 這三支是 2026-09-23 補的。先前 install.sh / install.ps1 各自inline 一份，
@@ -3008,6 +3010,14 @@ check_disk_space() {
 # Windows 版在 install.ps1（offer_desktop_shortcut），規則相同
 SHORTCUT_STATE_FILE="$SCRIPT_DIR/.desktop_shortcut"
 SHORTCUT_NAME="jt-live-whisper"
+
+# 捷徑圖示（v2.26.2，網站的 logo）：$1＝png／icns；檔案在就印路徑，不在回 1
+# （從舊版第一次 --upgrade 時 icons/ 還沒到，捷徑先用系統圖示，第二次升級補檔後再換上）
+_shortcut_icon() {
+    local f="$SCRIPT_DIR/icons/$SHORTCUT_NAME.$1"
+    [ -f "$f" ] || return 1
+    printf '%s\n' "$f"
+}
 _GUI_SESSION_DIRS="/usr/share/xsessions /usr/share/wayland-sessions"
 _MAC_APPS_DIRS="/Applications $HOME/Applications"      # 先放得進去的那一個；找舊的兩個都找
 
@@ -3079,8 +3089,9 @@ _desktop_exec_quote() {
 # Linux 的 .desktop（應用程式選單與桌面捷徑共用同一份內容）
 # --shortcut：WebUI 異常結束時視窗先停住，錯誤訊息才看得到（start.sh）
 _write_linux_desktop_entry() {  # $1＝檔案路徑
-    local exec_path
+    local exec_path icon
     exec_path=$(_desktop_exec_quote "$SCRIPT_DIR/start.sh")
+    icon=$(_shortcut_icon png) || icon="audio-input-microphone"
     cat > "$1" 2>/dev/null <<EOF || return 1
 [Desktop Entry]
 Type=Application
@@ -3088,7 +3099,7 @@ Name=jt-live-whisper
 Comment=100% 全地端 AI 語音工具箱（WebUI）
 Exec=${exec_path} --webui --shortcut
 Path=${SCRIPT_DIR//\\/\\\\}
-Icon=audio-input-microphone
+Icon=${icon//\\/\\\\}
 Terminal=true
 Categories=AudioVideo;Audio;
 EOF
@@ -3117,9 +3128,40 @@ _write_mac_app() {              # $1＝.app 路徑
     _write_mac_command "$app/Contents/Resources/webui.command" || return 1
     # 不在 Dock 留圖示（它只是把 .command 交給終端機就結束）
     plutil -replace LSUIElement -bool YES "$app/Contents/Info.plist" >/dev/null 2>&1 || true
+    # 換成我們的 logo：applet 的圖示是 Resources/applet.icns（CFBundleIconFile）；
+    # 有 Assets.car／CFBundleIconName 時系統會優先用它，一併拿掉
+    local icns
+    if icns=$(_shortcut_icon icns); then
+        cp "$icns" "$app/Contents/Resources/applet.icns" 2>/dev/null || true
+        rm -f "$app/Contents/Resources/Assets.car" 2>/dev/null
+        plutil -remove CFBundleIconName "$app/Contents/Info.plist" >/dev/null 2>&1 || true
+    fi
     # 加了檔案、改了 Info.plist 之後簽章就不完整了，重新做 ad-hoc 簽章
     codesign --force -s - "$app" >/dev/null 2>&1 || true
     return 0
+}
+
+# macOS 桌面的 .command 換成我們的 logo（Finder 的自訂圖示，寫在檔案的延伸屬性裡；內容照舊）
+_mac_set_file_icon() {          # $1＝檔案  $2＝.icns
+    osascript -l JavaScript - "$2" "$1" >/dev/null 2>&1 <<'JXA'
+function run(argv) {
+    ObjC.import('AppKit');
+    var img = $.NSImage.alloc.initWithContentsOfFile(argv[0]);
+    return $.NSWorkspace.sharedWorkspace.setIconForFileOptions(img, argv[1], 0);
+}
+JXA
+}
+
+# 已經建好的捷徑還沒換上 logo（v2.26.1 以前建的，或 icons/ 那時還沒到）
+_shortcut_icon_stale() {        # $1＝desktop／menu  $2＝捷徑路徑
+    [ "$(uname -s)" = "Darwin" ] || return 1          # Linux 的圖示寫在 .desktop 內容裡，比內容就會發現
+    local icns
+    icns=$(_shortcut_icon icns) || return 1
+    if [ "$1" = "menu" ]; then
+        ! cmp -s "$icns" "$2/Contents/Resources/applet.icns"
+    else
+        ! xattr "$2" 2>/dev/null | grep -q com.apple.ResourceFork
+    fi
 }
 
 # 判斷捷徑內容是不是最新的時要比的那個檔（.app 只比裡面的 .command：applet 每次產生不一定逐位元組相同）
@@ -3133,8 +3175,11 @@ _shortcut_content() {           # $1＝desktop／menu  $2＝捷徑路徑
 
 _write_shortcut() {             # $1＝desktop／menu  $2＝路徑
     if [ "$(uname -s)" = "Darwin" ]; then
-        if [ "$1" = "menu" ]; then _write_mac_app "$2"; else _write_mac_command "$2"; fi
-        return
+        if [ "$1" = "menu" ]; then _write_mac_app "$2"; return; fi
+        _write_mac_command "$2" || return 1
+        local icns
+        icns=$(_shortcut_icon icns) && { _mac_set_file_icon "$2" "$icns" || true; }
+        return 0
     fi
     _write_linux_desktop_entry "$2" || return 1
     chmod +x "$2" || return 1
@@ -3150,13 +3195,14 @@ _refresh_shortcuts() {          # $@＝記錄的位置
         path=$(_shortcut_path "$loc" find) || continue
         [ -e "$path" ] || continue
         tmp=$(mktemp -d) || continue
-        # 期望的內容先寫到暫存檔（.app 只產生裡面那份 .command），跟現在的比
-        if [ "$loc" = "menu" ] && [ "$(uname -s)" = "Darwin" ]; then
+        # 期望的內容先寫到暫存檔（.app 只產生裡面那份 .command），跟現在的比；圖示另外看（v2.26.2 起是 logo）
+        if [ "$(uname -s)" = "Darwin" ]; then
             _write_mac_command "$tmp/x"
         else
-            _write_shortcut "$loc" "$tmp/x"
+            _write_linux_desktop_entry "$tmp/x"
         fi
-        if [ -f "$tmp/x" ] && ! cmp -s "$tmp/x" "$(_shortcut_content "$loc" "$path")"; then
+        if { [ -f "$tmp/x" ] && ! cmp -s "$tmp/x" "$(_shortcut_content "$loc" "$path")"; } \
+                || _shortcut_icon_stale "$loc" "$path"; then
             _write_shortcut "$loc" "$path" && check_ok "已更新捷徑：$path"
         fi
         rm -rf "$tmp"

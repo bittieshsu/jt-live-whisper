@@ -125,7 +125,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.1 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.2 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1231,13 +1231,16 @@ systemctl restart jt-whisper-server@8978
   全部就緒！可以執行 .\start.ps1 啟動系統。       ← Windows
 </code></pre>
 <h3 id="3-2-升級至最新版本">3-2. 升級至最新版本</h3>
+<p>先切到安裝資料夾再執行（下面是預設位置，裝在別的地方就換成你的安裝資料夾）：</p>
 <pre><code class="language-bash"># macOS / Linux
+cd ~/Apps/jt-live-whisper
 ./install.sh --upgrade
 
 # Windows (PowerShell)
+cd C:\jt-live-whisper
 .\install.ps1 -Upgrade
 </code></pre>
-<p>自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。升級後建議重新執行安裝腳本（macOS / Linux: <code>./install.sh</code>、Windows: <code>.\install.ps1</code>）確認相依套件完整。</p>
+<p>自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。macOS 與 Windows 升級後請再執行一次安裝腳本（macOS: <code>./install.sh</code>、Windows: <code>.\install.ps1</code>），新版本需要的套件才會裝上。</p>
 <p>升級結束時，還沒建過捷徑的電腦會問一次要不要建立桌面與應用程式選單捷徑（見 3-4）。</p>
 <p>Linux 的 <code>--upgrade</code> 下載完新檔案後會自動重新執行安裝檢查，補齊新版本需要的相依套件；伺服器版若程式版本有變更，會一併重新啟動 <code>jt-live-whisper-webui</code> 服務。不想在升級時檢查相依套件，可設定 <code>JTLW_SKIP_DEP_CHECK=1</code>。</p>
 <h3 id="3-3-搬遷資料夾後">3-3. 搬遷資料夾後</h3>
@@ -1277,6 +1280,7 @@ systemctl restart jt-whisper-server@8978
 <li><strong>從 v2.25.3 以前升級上來的</strong>：macOS、Windows 第一次 <code>--upgrade</code> 跑的是舊版安裝腳本，不會問；
 第二次 <code>--upgrade</code>（或重新執行一次安裝腳本）才會問。Linux 的 <code>--upgrade</code> 會接著用新版安裝腳本檢查相依套件，第一次就會問</li>
 <li>已經開著 WebUI 時再點一次捷徑，會直接在瀏覽器開啟原本那個，不會把它關掉重開；啟動失敗時視窗會停住，看得到錯誤訊息</li>
+<li><strong>捷徑圖示是 jt-live-whisper 的 logo</strong>（v2.26.2 起，圖示檔在安裝資料夾的 <code>icons/</code>）。之前建的捷徑升級時會換上；從 v2.26.1 以前升級的，macOS、Windows 要第二次 <code>--upgrade</code>（<code>icons/</code> 那時才會到）才換。Windows 的桌面若還顯示舊圖示，是系統的圖示快取，重新登入後就會更新</li>
 </ul>
 <hr>
 <h2 id="四啟動與使用">四、啟動與使用</h2>

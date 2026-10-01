@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.26.1 (by Jason Cheng)
+即時英翻中字幕系統 v2.26.2 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -727,15 +727,19 @@ cd ~/jt-whisper-server && JT_WHISPER_UPDATE_TOKEN='自訂一組夠長的隨機�
 
 ### 3-2. 升級至最新版本
 
+先切到安裝資料夾再執行（下面是預設位置，裝在別的地方就換成你的安裝資料夾）：
+
 ```bash
 # macOS / Linux
+cd ~/Apps/jt-live-whisper
 ./install.sh --upgrade
 
 # Windows (PowerShell)
+cd C:\jt-live-whisper
 .\install.ps1 -Upgrade
 ```
 
-自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。升級後建議重新執行安裝腳本（macOS / Linux: `./install.sh`、Windows: `.\install.ps1`）確認相依套件完整。
+自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。macOS 與 Windows 升級後請再執行一次安裝腳本（macOS: `./install.sh`、Windows: `.\install.ps1`），新版本需要的套件才會裝上。
 
 升級結束時，還沒建過捷徑的電腦會問一次要不要建立桌面與應用程式選單捷徑（見 3-4）。
 
@@ -763,6 +767,7 @@ Linux 的 `--upgrade` 下載完新檔案後會自動重新執行安裝檢查，�
 - **從 v2.25.3 以前升級上來的**：macOS、Windows 第一次 `--upgrade` 跑的是舊版安裝腳本，不會問；
   第二次 `--upgrade`（或重新執行一次安裝腳本）才會問。Linux 的 `--upgrade` 會接著用新版安裝腳本檢查相依套件，第一次就會問
 - 已經開著 WebUI 時再點一次捷徑，會直接在瀏覽器開啟原本那個，不會把它關掉重開；啟動失敗時視窗會停住，看得到錯誤訊息
+- **捷徑圖示是 jt-live-whisper 的 logo**（v2.26.2 起，圖示檔在安裝資料夾的 `icons/`）。之前建的捷徑升級時會換上；從 v2.26.1 以前升級的，macOS、Windows 要第二次 `--upgrade`（`icons/` 那時才會到）才換。Windows 的桌面若還顯示舊圖示，是系統的圖示快取，重新登入後就會更新
 
 ---
 
