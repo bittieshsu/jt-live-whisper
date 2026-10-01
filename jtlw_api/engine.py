@@ -515,25 +515,32 @@ class Engine:
         if not raw:
             job["tasks"]["diarize"] = "failed"
             return
+        hints = job.get("_hints") or {}
+        # api_revision 2.5：呼叫端用 hints.diarize_engine 選（legacy／auto）；沒送＝現行方法（JTDT v2.17 要求，預設不變）
+        requested = hints.get("diarize_engine") or config.DIARIZE_ENGINE_DEFAULT
+        info = {}
         if self.settings.fake_engine:
             labels = [0 if i % 3 else 1 for i in range(len(raw))]
+            info = {"engine": "nemotron" if requested == "auto" else "legacy", "note": None}
         else:
             segs = [{"start": r["start_ms"] / 1000, "end": r["end_ms"] / 1000, "text": r["text"]}
                     for r in raw]
-            hints = job.get("_hints") or {}
             try:
                 rw = self.settings.remote_whisper
                 if rw and rw.get("host") and job.get("_use_remote_asr"):
                     labels, _proc = tm._remote_diarize(rw, wav_path, segs,
                                                        num_speakers=hints.get("num_speakers"),
                                                        on_event=self._gpu_event_handler(job),
-                                                       engine=config.DIARIZE_ENGINE_DEFAULT)
+                                                       engine=requested, info=info)
                 else:
                     labels = tm._diarize_segments(wav_path, segs,
                                                   num_speakers=hints.get("num_speakers"),
-                                                  engine=config.DIARIZE_ENGINE_DEFAULT)
+                                                  engine=requested, info=info)
             except Exception:
                 labels = None
+        # 回報實際用了哪個方法（Result.diarization）：auto 在 >8 人、偵測到 8 人全滿、或伺服器沒有 Nemotron 時會退回現行方法
+        job["_diarization"] = {"requested": requested, "engine": info.get("engine") if labels is not None else None,
+                               "note": info.get("note") if labels is not None else None}
         degraded = labels is None
         if degraded:
             labels = [0] * len(raw)

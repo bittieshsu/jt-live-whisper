@@ -1,4 +1,4 @@
-# jt-live-whisper v2.25.4
+# jt-live-whisper v2.26.0
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -57,7 +57,7 @@ Author: Jason Cheng (Jason Tools)
 | 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯模型，支援中日韓英互譯（`en2zh`/`zh2en`/`ja2zh`/`zh2ja`/`ko2zh`/`zh2ko`） |
 | 翻譯 (離線備援) | **Argos Translate** | 完全離線的輕量翻譯模型，僅支援英翻中 |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + Google 頻譜分群演算法，可在本機或 GPU 伺服器執行 |
-| 講者辨識 | **Nemotron 3 Diarization** (NVIDIA) | v2.23.0 起程式已支援，需 transformers 5.18 以上才會啟用（尚未推出）；啟用前沿用上一列的方法 |
+| 講者辨識 | **Nemotron 3 Diarization** (NVIDIA，OpenMDW-1.1) | **v2.26.0 起預設使用**（transformers 5.18 以上，安裝程式自動安裝並下載模型 0.71 GB）；Intel Mac、超過 8 人時沿用上一列的方法 |
 
 所有模型皆在自有設備上推論（本機或區域網路內的 GPU 伺服器），**不需要任何第三方雲端 API**。
 
@@ -71,7 +71,7 @@ Author: Jason Cheng (Jason Tools)
 | **Moonshine** | 英文超低延遲串流 | Moonshine medium / small / tiny |
 | **vLLM** | GPU 伺服器的離線辨識（實驗） | Qwen3-ASR 0.6B |
 | **mlx-audio** | Apple Silicon 本機離線辨識（實驗，v2.24.0） | Qwen3-ASR 0.6B（MLX 8bit） |
-| **transformers** | Windows / Linux 本機離線辨識（CUDA 或 CPU，實驗，v2.24.0） | Qwen3-ASR 0.6B |
+| **transformers** | Windows / Linux 本機離線辨識（CUDA 或 CPU，實驗，v2.24.0）；三平台講者辨識（CUDA／Apple MPS／CPU，v2.26.0） | Qwen3-ASR 0.6B、Nemotron 3 Diarization |
 
 
 
@@ -662,8 +662,8 @@ cd C:\jt-live-whisper
 | `--list-devices` | 列出可用音訊裝置後離開 | |
 | `--input FILE [...]` | 離線處理音訊檔 | |
 | `--diarize` | 啟用講者辨識（需搭配 `--input`） | |
-| `--num-speakers N` | 指定講者人數（需搭配 `--diarize`）；不確定時不要填，實測指定人數不會比自動偵測準 | 自動偵測 |
-| `--diarize-engine ENGINE` | 講者辨識方法 `auto` / `nemotron` / `legacy`（Nemotron 需 transformers 5.18 以上才會啟用，目前一律用現行方法） | `auto` |
+| `--num-speakers N` | 講者人數（需搭配 `--diarize`）。Nemotron 下是**上限**、現行方法下是強制分群；不確定時不要填，要填寧可多不要少 | 自動偵測 |
+| `--diarize-engine ENGINE` | 講者辨識方法 `auto`（能用 Nemotron 就用）/ `nemotron` / `legacy`（resemblyzer） | `auto` |
 | `--summarize [FILE ...]` | 生成 AI 摘要（與 `--input` 合用時不需指定檔案） | |
 | `--summary-model MODEL` | 摘要用 LLM 模型 | `qwen3.8:27b` |
 | `--mic` | 同時轉錄麥克風語音（即時模式） | |
@@ -931,5 +931,8 @@ WebUI 瀏覽器介面（./start.sh --webui）：
 ## License
 
 本專案採用 [Apache License 2.0](LICENSE) 授權。
+
+講者辨識預設使用的 [NVIDIA Nemotron 3 Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization) 模型採 OpenMDW-1.1 授權，
+安裝時從 HuggingFace 下載（不需帳號），不隨本專案散布。
 
 Copyright 2026 Jason Cheng (Jason Tools)

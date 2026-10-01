@@ -284,7 +284,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
     </div>
     <div class="fg" id="rNumSpk" style="display:none;margin-top:10px">
       <label>講者人數</label>
-      <div style="display:flex;align-items:center;gap:8px"><input type="number" id="iNumSpk" min="0" max="20" value="0" style="width:80px"><span style="font-size:12px;color:var(--text-dim)">0 = 自動偵測（建議）；填了會強制分成那麼多群</span></div>
+      <div style="display:flex;align-items:center;gap:8px"><input type="number" id="iNumSpk" min="0" max="20" value="0" style="width:80px"><span style="font-size:12px;color:var(--text-dim)">0 = 自動偵測（建議）；填了是人數上限，寧可多不要少</span></div>
     </div>
     <div class="fg" id="rSumRoundsHint" style="display:none"></div>
     <div class="fg" id="rSumModel" style="display:none;margin-top:10px">
@@ -921,7 +921,7 @@ const _tips={
   iMicDev:'擷取本機麥克風或耳機的輸入',
   // 離線處理
   iDiarize:'啟用講者辨識，區分不同發言者（需 resemblyzer + spectralcluster）',
-  iNumSpk:'指定講者人數，0 為自動偵測（2~8 位）。填了會強制分成那麼多群；實測不會比自動偵測準，不確定時用 0',
+  iNumSpk:'講者人數，0 為自動偵測。預設的 Nemotron 把它當上限：偵測到較多人時合併發言最少的，不會硬拆；少填一人錯誤率明顯變高，不確定時用 0。Intel Mac 等改用現行方法時會強制分成那麼多群',
   iSummarize:'離線處理完成後產生會議摘要（重點摘要、決議、待辦、風險、議題，每一條附逐字稿時間點）與校正逐字稿（需 LLM 伺服器）',
   iGenSrt:'產生 SRT 字幕檔（可匯入影片編輯軟體或播放器）',
   iGenVtt:'產生 WebVTT 字幕檔（網頁播放器 <track> 標籤用）',

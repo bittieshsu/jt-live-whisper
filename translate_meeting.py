@@ -2067,7 +2067,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.25.4"
+APP_VERSION = "2.26.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -5453,10 +5453,11 @@ def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout
 
 def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
                     progress_callback=None, on_upload_done=None, _attempt=0, on_event=None,
-                    engine=None):
+                    engine=None, info=None):
     """POST 音訊 + segments 到伺服器 /v1/audio/diarize
     回傳 (speaker_labels, proc_time) 或失敗回傳 (None, 0)。
-    伺服器正在更新（503 updating、或回應被重啟切斷）時等它換完再送，最多 3 次。"""
+    伺服器正在更新（503 updating、或回應被重啟切斷）時等它換完再送，最多 3 次。
+    info（dict，選填）：成功時填入實際用的方法 engine（nemotron／legacy）與伺服器說明 note（v3 API 回報用）"""
     def _retry(why):
         if _attempt >= 2 or not _wait_remote_update(rw_cfg, progress_callback):
             print(f"  {C_HIGHLIGHT}[伺服器 diarize] GPU 伺服器更新中，等不到它恢復（{why}）{RESET}")
@@ -5464,7 +5465,7 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         return _remote_diarize(rw_cfg, wav_path, segments, num_speakers=num_speakers,
                                progress_callback=progress_callback,
                                on_upload_done=on_upload_done, _attempt=_attempt + 1,
-                               on_event=on_event, engine=engine)
+                               on_event=on_event, engine=engine, info=info)
     host = rw_cfg["host"]
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
     url = f"http://{host}:{port}/v1/audio/diarize"
@@ -5615,6 +5616,9 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
           f"{', ' + ('Nemotron' if used == 'nemotron' else '現行方法') if used else ''}){RESET}")
     if data.get("note"):
         print(f"  {C_HIGHLIGHT}[伺服器 diarize] {data['note']}{RESET}")
+    if info is not None:
+        # 舊版伺服器（v2.23 前）沒有 engine 欄位：它只有現行方法
+        info.update(engine=used or "legacy", note=data.get("note") or None)
     return speaker_labels, proc_time
 
 
@@ -12301,9 +12305,10 @@ def _nemotron_diarize(wav_path, segments, num_speakers=None):
     return _renumber_first_seen(labels), ""
 
 
-def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=None):
+def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=None, info=None):
     """講者辨識入口：能用 Nemotron 就用，否則（或它退回時）用現行 resemblyzer。
-    回傳 list of int（講者編號 0-based），失敗回傳 None"""
+    回傳 list of int（講者編號 0-based），失敗回傳 None。
+    info（dict，選填）：填入實際用的方法 engine（nemotron／legacy）與退回原因 note（v3 API 回報用）"""
     engine = engine or _diarize_engine
     choice, why = _recommended_diarizer(num_speakers, engine)
     if choice == "nemotron" and segments:
@@ -12312,11 +12317,16 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=N
         labels, why = _nemotron_diarize(wav_path, segments, num_speakers)
         if labels is not None:
             print(f"  {C_DIM}[講者辨識] Nemotron（{_NEMO_CACHE.get('dev')}）{len(set(labels))} 位講者{RESET}")
+            if info is not None:
+                info.update(engine="nemotron", note=None)
             return labels
     # 自動模式下「沒裝」不提示（那就是先前的行為）；指定了 Nemotron、或試過才退回的，要講清楚
     if why and (engine == "nemotron" or choice == "nemotron"
                 or (num_speakers and num_speakers > _NEMO_CHANNELS)):
         print(f"  {C_HIGHLIGHT}[講者辨識] 改用現行方法：{why}{RESET}")
+    if info is not None:
+        # 指定現行方法時不必說明；自動模式退回的才把原因帶出去
+        info.update(engine="legacy", note=(why if engine != "legacy" and why else None))
     return _diarize_segments_legacy(wav_path, segments, num_speakers=num_speakers, sbar=sbar)
 
 
@@ -15910,10 +15920,10 @@ def parse_args():
         help="摘要處理次數（1-3，多次處理後整合可提升品質，預設 1）")
     parser.add_argument(
         "--diarize", action="store_true",
-        help="講者辨識（需搭配 --input，用 resemblyzer + spectralcluster）")
+        help="講者辨識（需搭配 --input；預設 NVIDIA Nemotron，不能用時 resemblyzer + spectralcluster）")
     parser.add_argument(
         "--num-speakers", type=int, metavar="N",
-        help="指定講者人數（預設自動偵測 2~8，需搭配 --diarize）")
+        help="講者人數（需搭配 --diarize）：Nemotron 下是上限、現行方法下是強制分群；不確定就不要填，要填寧可多不要少")
     parser.add_argument(
         "--diarize-engine", choices=_DIARIZE_ENGINES, default="auto",
         help="講者辨識方法：auto（能用 Nemotron 就用，預設）、nemotron、legacy（resemblyzer）")

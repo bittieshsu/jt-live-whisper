@@ -251,6 +251,13 @@ function qwen_tf_ok {
     return ($LASTEXITCODE -eq 0)
 }
 
+# Nemotron 講者辨識（v2.26.0）：transformers 5.18 起內建 nemotron3_diarization（與 install.sh 的 _NEMO_TF_CHECK 同一個判斷）
+$NEMO_TF_CHECK = "import sys, torch; from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES as M; sys.exit(0 if 'nemotron3_diarization' in M else 1)"
+function nemo_tf_ok {
+    & $VENV_PYTHON -c $NEMO_TF_CHECK 2>$null
+    return ($LASTEXITCODE -eq 0)
+}
+
 function hf_download($repo, $desc, $localDir) {
     # HuggingFace 模型下載，SSL 失敗時自動停用憑證驗證重試
     $localDirArg = if ($localDir) { ", local_dir=r'$localDir'" } else { "" }
@@ -415,7 +422,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.25.4 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -1057,12 +1064,33 @@ if (qwen_tf_ok) {
     check_ok "transformers（Qwen3-ASR 本機辨識，實驗）（已安裝）"
 } else {
     info "安裝 transformers（Qwen3-ASR 本機辨識，實驗）..."
-    & $VENV_PIP install "transformers>=5.17" soynlp --quiet 2>$null
+    & $VENV_PIP install "transformers>=5.18" soynlp --quiet 2>$null
     if (qwen_tf_ok) {
         check_ok "transformers（Qwen3-ASR 本機辨識，實驗；模型第一次選用時下載，約 3.4 GB）"
     } else {
         check_notice "transformers 安裝失敗：Qwen3-ASR 只能透過 GPU 伺服器使用，其他功能不受影響"
     }
+}
+
+# ─── Nemotron 講者辨識（v2.26.0）──────────────────────────────
+# transformers 5.18 起內建 nemotron3_diarization（與 install.sh 的 _NEMO_TF_CHECK 同一個判斷，看能力不看版本號）。
+# 模型（約 0.71 GB）安裝時先下載。任何一步失敗都不影響其他功能：講者辨識照舊用現行方法（resemblyzer）
+section "Nemotron 講者辨識"
+if (nemo_tf_ok) {
+    check_ok "transformers（Nemotron 講者辨識）（已安裝）"
+} else {
+    info "安裝 transformers 5.18（Nemotron 講者辨識）..."
+    & $VENV_PIP install "transformers>=5.18" --quiet 2>$null
+    if (nemo_tf_ok) { check_ok "transformers（Nemotron 講者辨識）" }
+    else { check_notice "transformers 5.18 安裝失敗：講者辨識照舊用現行方法，其他功能不受影響" }
+}
+if (nemo_tf_ok) {
+    & $VENV_PYTHON -c "from huggingface_hub import snapshot_download as d; d('nvidia/Nemotron-3-Diarization', local_files_only=True)" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        check_ok "Nemotron 模型（已下載）"
+    } elseif ((hf_download "nvidia/Nemotron-3-Diarization" "Nemotron 模型（約 0.71 GB）" $null) -eq "ok") {
+        check_ok "Nemotron 模型下載完成"
+    }   # 失敗時 hf_download 已經提示；第一次做講者辨識時會再下載
 }
 
 if ($installFailed.Count -gt 0) {
@@ -2160,6 +2188,14 @@ if ($existingHost) {
             $needRepair = 1; $repairItems += " packages"
         }
 
+        # 5c. transformers 5.18（Nemotron 講者辨識，v2.26.0；與 install.sh 同一個判斷）。沒有時講者辨識照舊用現行方法
+        if (ssh_test $sshOpts $userHost "~/jt-whisper-server/venv/bin/python3 -c 'import transformers.models.nemotron3_diarization'") {
+            check_ok "transformers 就緒（Nemotron 講者辨識）"
+        } else {
+            check_missing "transformers 5.18（Nemotron 講者辨識；沒有時照舊用現行方法）"
+            $needRepair = 1; $repairItems += " packages"
+        }
+
         # 6. NVIDIA GPU + CUDA
         $gpuInfo = ssh_cmd $sshOpts $userHost "nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1"
         if ($gpuInfo) {
@@ -2473,11 +2509,11 @@ echo "`$missing"
             $ct2CachedWhl = ssh_cmd $sshOpts $userHost "ls ~/jt-whisper-server/.ct2-wheels/ctranslate2-*.whl 2>/dev/null | head -1"
             if ($ct2CachedWhl) {
                 # 有原始碼編譯 wheel
-                ssh_cmd $sshOpts $userHost "PIP=~/jt-whisper-server/venv/bin/pip && `$PIP install --disable-pip-version-check 'setuptools<81' wheel 2>&1 && `$PIP install --disable-pip-version-check --force-reinstall --no-deps '$ct2CachedWhl' 2>&1 && `$PIP install --disable-pip-version-check 'setuptools<81' faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 2>&1" | Out-Null
+                ssh_cmd $sshOpts $userHost "PIP=~/jt-whisper-server/venv/bin/pip && `$PIP install --disable-pip-version-check 'setuptools<81' wheel 2>&1 && `$PIP install --disable-pip-version-check --force-reinstall --no-deps '$ct2CachedWhl' 2>&1 && `$PIP install --disable-pip-version-check 'setuptools<81' faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 'transformers>=5.18' 2>&1" | Out-Null
             } else {
                 $fwExtra = ""
                 if ($torchIndex) { $fwExtra = "--force-reinstall" }
-                ssh_cmd $sshOpts $userHost "PIP=~/jt-whisper-server/venv/bin/pip && `$PIP install --disable-pip-version-check 'setuptools<81' wheel 2>&1 && `$PIP install --disable-pip-version-check $fwExtra 'setuptools<81' ctranslate2 faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 2>&1" | Out-Null
+                ssh_cmd $sshOpts $userHost "PIP=~/jt-whisper-server/venv/bin/pip && `$PIP install --disable-pip-version-check 'setuptools<81' wheel 2>&1 && `$PIP install --disable-pip-version-check $fwExtra 'setuptools<81' ctranslate2 faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 'transformers>=5.18' 2>&1" | Out-Null
             }
             if ($LASTEXITCODE -ne 0) {
                 check_fail "伺服器套件安裝失敗"
@@ -2714,7 +2750,7 @@ print('found' if found else '')
 $features = @(
     @{ OK = (venv_import_ok "faster_whisper"); Desc = "離線音訊處理 (--input)"; Engine = "faster-whisper" },
     @{ OK = $fwModelOk;                        Desc = "Whisper 模型 large-v3-turbo"; Engine = "faster-whisper 格式" },
-    @{ OK = (venv_import_ok "resemblyzer");    Desc = "AI 講者辨識 (--diarize)"; Engine = "resemblyzer" },
+    @{ OK = ((nemo_tf_ok) -or (venv_import_ok "resemblyzer")); Desc = "AI 講者辨識 (--diarize)"; Engine = $(if (nemo_tf_ok) { "Nemotron（resemblyzer 備援）" } else { "resemblyzer" }) },
     @{ OK = (venv_import_ok "argostranslate"); Desc = "Argos 離線翻譯";          Engine = "僅英翻中" },
     @{ OK = (Test-Path (Join-Path $env:LOCALAPPDATA "jt-live-whisper\models\nllb-600m\model.bin")); Desc = "NLLB 離線翻譯"; Engine = "中日韓英互譯" },
     @{ OK = (venv_import_ok "moonshine_voice");      Desc = "Moonshine 即時辨識";       Engine = "英文低延遲" },

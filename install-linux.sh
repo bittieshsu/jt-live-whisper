@@ -266,7 +266,7 @@ check_linux_venv() {
     if python3 -c "$_QWEN_TF_CHECK" >/dev/null 2>&1; then
         check_ok "transformers（Qwen3-ASR 本機辨識，實驗）（已安裝）"
     elif run_spinner "transformers（Qwen3-ASR 本機辨識，實驗）..." \
-            pip install --disable-pip-version-check "transformers>=5.17" soynlp \
+            pip install --disable-pip-version-check "transformers>=5.18" soynlp \
             && python3 -c "$_QWEN_TF_CHECK" >/dev/null 2>&1; then
         echo ""
         check_ok "transformers（Qwen3-ASR 本機辨識，實驗；模型第一次選用時下載，約 3.4 GB）"
@@ -740,6 +740,9 @@ print_linux_summary() {
     python3 -c "$_QWEN_TF_CHECK" >/dev/null 2>&1 \
         && check_ok "Qwen3-ASR 本機辨識（實驗）" \
         || echo -e "  ${C_DIM}[略過]${NC} Qwen3-ASR 本機辨識未安裝（實驗，不影響主要功能）"
+    python3 -c "$_NEMO_TF_CHECK" >/dev/null 2>&1 \
+        && check_ok "Nemotron 講者辨識" \
+        || echo -e "  ${C_DIM}[略過]${NC} Nemotron 講者辨識未安裝（講者辨識照舊用現行方法）"
     deactivate 2>/dev/null
 
     echo ""
@@ -822,6 +825,7 @@ check_disk_space || exit 1
 check_linux_packages || exit 1
 check_linux_audio
 check_linux_venv || exit 1
+check_nemotron_local
 fix_migrated_config
 [ "$LINUX_MODE" = "desktop" ] && check_moonshine
 [ "$LINUX_MODE" = "desktop" ] && check_argos_model

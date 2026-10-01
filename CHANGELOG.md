@@ -1,5 +1,27 @@
 # Changelog
 
+### v2.26.0 (2026-10-01)
+
+**講者辨識預設改用 NVIDIA Nemotron 3 Diarization**
+
+- transformers 5.18 正式版推出，v2.23.0 起就寫好的 Nemotron 講者辨識正式上線：命令列、WebUI、GPU 伺服器預設都用它
+- 實測（真實辨識段落）段落標錯講者：中文會議 20 場 18.52% → 3.07%、英文 16 場 12.31% → 4.65%；人數判對 2/20 → 17/20、12/16 → 15/16。
+  詳見 `BENCHMARKS.md` 第四節
+- 四個平台結果一致：NVIDIA CUDA、Apple Silicon（MPS）、Windows CPU、Linux CPU；37 分鐘會議 GPU 約 15 秒、Mac 約 50 秒、CPU 約 2 分 45 秒
+- **`--num-speakers` 的意思改了**：Nemotron 把它當上限（偵測到較多人時合併發言最少的，不會硬拆）。
+  實測指定正確人數與不指定幾乎一樣、多填一人完全相同、**少填一人錯誤率由 2.92% 升到 6.89%**——不確定就不要填，要填寧可多不要少
+- 最多 8 人：指定超過 8 人、或偵測到 8 人全滿時自動改用現行方法並說明；Intel Mac 不支援，照舊用現行方法
+- `--diarize-engine legacy` 可以固定用現行方法
+
+**安裝程式**
+- 本機：新增「Nemotron 講者辨識」步驟——補裝 transformers 5.18（看能力不看版本號）並預先下載模型（0.71 GB）；失敗不影響其他功能
+- GPU 伺服器：套件清單加上 transformers 5.18；檢查時沒有它就列入「修復伺服器環境」（同意才補裝）
+- 升級：Linux 的 `--upgrade` 會自動補裝；**macOS、Windows 升級後要再執行一次 `./install.sh`／`.\install.ps1`** 才會裝上（沒裝時講者辨識照舊用現行方法）
+
+**REST API（api_revision 2.5）**
+- 新增選填的 `hints.diarize_engine`（`legacy`／`auto`）；**不送就是 `legacy`，與 2.4 完全相同**（jt-doc-tools、jt-vc-portal 不改就不會變）
+- 結果新增 `diarization`（要求的與實際用的方法、退回原因；`result_schema_version` 2.2）
+
 ### v2.25.4 (2026-09-30)
 
 **安裝程式：可以建立桌面與應用程式選單捷徑（macOS／Windows／Linux）**

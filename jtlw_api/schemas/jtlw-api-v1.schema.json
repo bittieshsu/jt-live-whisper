@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://jt-live-whisper.local/schemas/jtlw-api-v1.schema.json",
  "title": "jtlw REST API v1",
- "description": "jtlw ↔ JTDT 介面的資料結構（對應〈JTLW ↔ JTDT 介面回覆〉v0.5，api_revision 2.4）。範圍：jtlw 只負責聲音 → 逐字稿（拉檔、正規化、語音辨識、語言偵測、語者分離、校正）；摘要、主題、章節、決議、待辦、風險、心智圖、實體、逐字稿翻譯等後續處理都在 JTDT。api_revision 2.4 起另有選用的會議摘要任務 summarize（給沒有自己摘要功能的呼叫端，例如 jtvc；與 JTDT 的會議摘要是同一套分析）與上傳來源 source.type=upload，兩者都要主動要求才有，不送就與 2.3 完全相同。各結構在 $defs 中，以 $ref 引用，例如 #/$defs/JobCreateRequest。",
+ "description": "jtlw ↔ JTDT 介面的資料結構（對應〈JTLW ↔ JTDT 介面回覆〉v0.5，api_revision 2.5）。範圍：jtlw 只負責聲音 → 逐字稿（拉檔、正規化、語音辨識、語言偵測、語者分離、校正）；摘要、主題、章節、決議、待辦、風險、心智圖、實體、逐字稿翻譯等後續處理都在 JTDT。api_revision 2.4 起另有選用的會議摘要任務 summarize（給沒有自己摘要功能的呼叫端，例如 jtvc；與 JTDT 的會議摘要是同一套分析）與上傳來源 source.type=upload，兩者都要主動要求才有，不送就與 2.3 完全相同。api_revision 2.5 起可用 hints.diarize_engine 選講者辨識方法（legacy＝現行方法、預設；auto＝能用 NVIDIA Nemotron 就用），實際用了哪一個回在 Result.diarization。各結構在 $defs 中，以 $ref 引用，例如 #/$defs/JobCreateRequest。",
  "$defs": {
   "JobId": {
    "type": "string",
@@ -393,7 +393,8 @@
         "null"
        ],
        "minimum": 1,
-       "maximum": 20
+       "maximum": 20,
+       "description": "講者人數。legacy：強制分成這麼多群；auto（Nemotron）：上限，偵測到的人數多於它時把發言最少的合併，少於它時不會硬拆。不確定就不要填；要填寧可多不要少（實測少填一人錯誤率明顯變高）"
       },
       "meeting": {
        "type": "object",
@@ -450,6 +451,14 @@
          "maxLength": 4000
         }
        }
+      },
+      "diarize_engine": {
+       "type": "string",
+       "enum": [
+        "legacy",
+        "auto"
+       ],
+       "description": "api_revision 2.5：講者辨識方法。legacy（預設，不送也是）＝現行方法，與 2.4 完全相同；auto＝能用 NVIDIA Nemotron 3 Diarization 就用（最多 8 人；指定 >8 人或偵測到 8 人全滿時自動退回現行方法）。實際用了哪一個看 Result.diarization"
       }
      }
     },
@@ -1060,6 +1069,47 @@
       "null"
      ],
      "description": "api_revision 2.4（result_schema_version 2.1）：要求 summarize 而且成功時為 /api/v1/jobs/{id}/summary，其餘為 null"
+    },
+    "diarization": {
+     "type": [
+      "object",
+      "null"
+     ],
+     "additionalProperties": false,
+     "required": [
+      "requested",
+      "engine",
+      "note"
+     ],
+     "description": "api_revision 2.5（result_schema_version 2.2）：講者辨識要求的與實際用的方法；沒有要求 diarize 時為 null",
+     "properties": {
+      "requested": {
+       "type": "string",
+       "enum": [
+        "legacy",
+        "auto"
+       ]
+      },
+      "engine": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "enum": [
+        "legacy",
+        "nemotron",
+        null
+       ],
+       "description": "實際用的方法；講者辨識失敗（diarize＝degraded）時為 null"
+      },
+      "note": {
+       "type": [
+        "string",
+        "null"
+       ],
+       "description": "auto 退回現行方法時的原因，例如超過 8 人"
+      }
+     }
     }
    }
   },

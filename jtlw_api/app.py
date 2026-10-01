@@ -972,6 +972,8 @@ async def read_result(job_id: str, authorization: str = Header(None)):
         # api_revision 2.4：要求 summarize 而且成功時才有值
         "summary_url": (f"/api/v1/jobs/{job_id}/summary"
                         if job["tasks"].get("summarize") == "succeeded" else None),
+        # api_revision 2.5：講者辨識要求的與實際用的方法（沒有要求 diarize 時為 null）
+        "diarization": job.get("_diarization") if "diarize" in job["tasks"] else None,
     }
 
 

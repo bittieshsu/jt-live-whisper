@@ -73,6 +73,7 @@
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
       <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
+      <a class="lv3" href="#講者辨識方法api_revision-25v2260-起">講者辨識方法（api_revision 2.5，v2.26.0 起）</a>
       <a class="lv3" href="#台語會議transcribetaiwanesev2252-起">台語會議（transcribe.taiwanese，v2.25.2 起）</a>
       <a class="lv3" href="#啟用-rest-api">啟用 REST API</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
@@ -124,7 +125,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.25.4 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -300,7 +301,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 <tr>
 <td>講者辨識</td>
 <td><strong>Nemotron 3 Diarization</strong> (NVIDIA)</td>
-<td>v2.23.0 起程式已支援，<strong>需 transformers 5.18 以上才會啟用</strong>（尚未推出）；啟用前一律使用上一列的方法，行為不變</td>
+<td><strong>v2.26.0 起預設使用</strong>（transformers 5.18 以上；安裝程式會自動安裝並下載模型 0.71 GB）。Intel Mac、超過 8 人時改用上一列的方法</td>
 </tr>
 <tr>
 <td>翻譯 (LLM)</td>
@@ -1519,7 +1520,7 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td><code>--num-speakers N</code></td>
-<td>指定講者人數（需搭配 --diarize，預設自動偵測 2~8）。現行方法會強制分成 N 群；Nemotron 啟用後改為<strong>上限</strong>（偵測到的人較多時合併發言最少的，不會硬拆）。實測指定人數不會比自動偵測準，不確定時不要填</td>
+<td>講者人數（需搭配 --diarize，預設自動偵測）。預設的 Nemotron 把它當<strong>上限</strong>（偵測到的人較多時合併發言最少的，不會硬拆）；現行方法會強制分成 N 群。不確定時不要填，要填寧可多不要少（少填一人錯誤率明顯變高）</td>
 <td></td>
 </tr>
 <tr>
@@ -2744,20 +2745,23 @@ cd C:\jt-live-whisper
 </tr>
 </thead>
 <tbody><tr>
-<td>現行方法（resemblyzer＋spectralcluster）</td>
-<td>目前一律使用</td>
-<td>下面「處理流程」描述的就是它</td>
+<td>NVIDIA Nemotron 3 Diarization</td>
+<td><strong>預設</strong>（v2.26.0 起；需 transformers 5.18 以上，安裝程式會自動安裝並下載模型）</td>
+<td>實測段落標錯講者：中文 20 場 18.52% → 3.07%、英文 16 場 12.31% → 4.65%；最多 8 位講者</td>
 </tr>
 <tr>
-<td>NVIDIA Nemotron 3 Diarization</td>
-<td>環境有 transformers 5.18 以上時自動使用（尚未推出，所以目前不會用到）</td>
-<td>實測段落標錯講者：中文 20 場 18.52% → 3.07%、英文 16 場 12.31% → 4.65%；最多 8 位講者</td>
+<td>現行方法（resemblyzer＋spectralcluster）</td>
+<td>Nemotron 不能用時：Intel Mac、指定超過 8 人、偵測到 8 人全滿、<code>--diarize-engine legacy</code></td>
+<td>下面「處理流程」描述的就是它</td>
 </tr>
 </tbody></table>
 <ul>
 <li><code>--diarize-engine auto</code>（預設）：能用 Nemotron 就用，否則用現行方法；<code>legacy</code> 固定用現行方法；<code>nemotron</code> 指定使用，不能用時會說明原因並改用現行方法</li>
-<li>Nemotron 啟用後：<code>--num-speakers N</code> 改為<strong>上限</strong>（偵測到的人較多時合併發言最少的，不會硬拆成 N 群）；
-指定超過 8 人、或偵測到 8 位全滿（可能超過 8 人）時，自動改用現行方法並顯示原因</li>
+<li>用 Nemotron 時：<code>--num-speakers N</code> 是<strong>上限</strong>（偵測到的人較多時合併發言最少的，不會硬拆成 N 群）；
+指定超過 8 人、或偵測到 8 位全滿（可能超過 8 人）時，自動改用現行方法並顯示原因。
+<strong>不確定就不要填；要填寧可多不要少</strong>（見常見問題「講者數不正確」的實測）</li>
+<li>速度：GPU 伺服器 37 分鐘會議約 15 秒；Apple Silicon（MPS）約 50 秒；CPU 約 13～16 倍即時。
+四個平台（Linux CPU、NVIDIA CUDA、Apple MPS、Windows CPU）的結果一致</li>
 <li>畫面會顯示實際用了哪個方法（例：<code>[伺服器 diarize] 5 位講者, 0.64s (cuda, Nemotron)</code>）</li>
 </ul>
 <p><strong>處理流程（現行方法）：</strong></p>
@@ -2775,7 +2779,7 @@ cd C:\jt-live-whisper
 <li>首次使用 resemblyzer 會自動下載聲紋模型（約 17MB）</li>
 <li><code>--num-speakers</code> 不搭配 <code>--diarize</code> 時會顯示警告並忽略</li>
 <li>如果分群失敗，所有段落會降級標記為 Speaker 1</li>
-<li>GPU 伺服器執行需先透過安裝腳本（<code>install.sh</code>）在伺服器安裝 resemblyzer + spectralcluster</li>
+<li>GPU 伺服器執行需先透過安裝腳本（<code>install.sh</code>）在伺服器安裝 resemblyzer + spectralcluster；Nemotron 另需 transformers 5.18，安裝腳本檢查時會列入「修復伺服器環境」，同意後補裝</li>
 </ul>
 <hr>
 <h3 id="伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</h3>
@@ -2992,6 +2996,31 @@ cd C:\jt-live-whisper
 <li>上傳的檔案處理成功就刪除；沒用來送件的 24 小時後刪除。會議摘要與逐字稿一樣，ACK 或刪除作業時一起刪除</li>
 <li><strong>辨識失敗而且錯誤是可以重試的（<code>retryable: true</code>，例如 GPU 伺服器暫時不能用）時，上傳的檔案會保留</strong>，<code>POST /api/v1/jobs/{id}/retry</code> 直接重做，不必重新上傳（v2.25.3 起）。保留到重試成功、ACK、刪除作業或 7 天後內容到期。不可重試的失敗（例如檔案解不開）檔案會立刻刪除，這時要重新上傳、送新的一件</li>
 <li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
+</ul>
+<h3 id="講者辨識方法api_revision-25v2260-起">講者辨識方法（api_revision 2.5，v2.26.0 起）</h3>
+<p>送件時 <code>hints.diarize_engine</code> 選講者辨識方法；<strong>不送就是 <code>legacy</code>（現行方法），與 2.4 完全相同</strong>，
+既有的串接（jt-doc-tools、jt-vc-portal）不改就不會變。</p>
+<table>
+<thead>
+<tr>
+<th>值</th>
+<th>意義</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>legacy</code>（預設）</td>
+<td>現行方法（resemblyzer＋spectralcluster）</td>
+</tr>
+<tr>
+<td><code>auto</code></td>
+<td>能用 NVIDIA Nemotron 3 Diarization 就用（中文 20 場段落標錯講者 18.52% → 3.07%）；指定超過 8 人、或偵測到 8 人全滿時自動改用現行方法</td>
+</tr>
+</tbody></table>
+<ul>
+<li>實際用了哪一個看結果（<code>GET /api/v1/jobs/{id}/result</code>）的 <code>diarization</code>：<code>{&quot;requested&quot;: &quot;auto&quot;, &quot;engine&quot;: &quot;nemotron&quot;, &quot;note&quot;: null}</code>；
+退回現行方法時 <code>engine</code> 是 <code>legacy</code>、<code>note</code> 說明原因；沒有要求 <code>diarize</code> 時整個欄位是 <code>null</code></li>
+<li><code>hints.num_speakers</code> 在 <code>auto</code>（Nemotron）下是<strong>上限</strong>，在 <code>legacy</code> 下是強制分群；不確定就不要填，要填寧可多不要少</li>
+<li>改用 <code>auto</code> 之後同一份錄音的講者代號與人數會和以前不同（更準），存過舊結果的系統要注意</li>
 </ul>
 <h3 id="台語會議transcribetaiwanesev2252-起">台語會議（<code>transcribe.taiwanese</code>，v2.25.2 起）</h3>
 <p>送件時 <code>profile_id</code> 填 <code>transcribe.taiwanese</code>，就會用台語模型（MediaTek Breeze-ASR-26）辨識；其他模式一律用一般模型。</p>
@@ -3397,7 +3426,41 @@ sudo systemctl restart jtlw-api
 <code>journalctl -u &lt;服務名&gt; | grep source.rejected</code>。</p>
 <p>詳細步驟見「五、REST API」的「允許的來源主機」。</p>
 <h3 id="q---diarize-辨識出的講者數不正確">Q: --diarize 辨識出的講者數不正確？</h3>
-<p>可以用 <code>--num-speakers N</code> 指定，但<strong>不要填「現場有幾個人」，要填「發言量足以辨認的人數」</strong>。</p>
+<p><strong>v2.26.0 起預設用 Nemotron</strong>，人數判斷比以前準很多（20 場中文會議判對 18 場），通常不必指定。
+<code>--num-speakers N</code> 在 Nemotron 下是<strong>上限</strong>：偵測到的人比 N 多才合併發言最少的，不會為了湊滿 N 個去拆開同一個人。
+2026-09-30 實測（真實辨識段落，GPU 伺服器）：</p>
+<table>
+<thead>
+<tr>
+<th>中文會議 20 場（AISHELL-4，5～7 人），Nemotron</th>
+<th align="right">段落標錯講者</th>
+<th align="right">人數判對</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>不指定（建議）</td>
+<td align="right">2.92%</td>
+<td align="right">18/20</td>
+</tr>
+<tr>
+<td>指定正確人數</td>
+<td align="right">2.91%</td>
+<td align="right">19/20</td>
+</tr>
+<tr>
+<td>指定多一人</td>
+<td align="right">2.92%（與不指定逐場相同）</td>
+<td align="right">18/20</td>
+</tr>
+<tr>
+<td><strong>指定少一人</strong></td>
+<td align="right"><strong>6.89%</strong>（20 場中 19 場變差）</td>
+<td align="right">0/20</td>
+</tr>
+</tbody></table>
+<p><strong>不確定就不要填；要填寧可多不要少</strong>——少填一人會把兩個人併成一個，錯誤率明顯變高。</p>
+<p>以下是<strong>現行方法</strong>（<code>--diarize-engine legacy</code>、Intel Mac、超過 8 人時）的情況：它會強制分成 N 群，
+所以<strong>不要填「現場有幾個人」，要填「發言量足以辨認的人數」</strong>。</p>
 <p>2026-09-22 用有標準答案的 7 人會議（37 分鐘）實測，指定不同人數時的「講者搞錯」比例：</p>
 <table>
 <thead>
@@ -3432,8 +3495,7 @@ sudo systemctl restart jtlw-api
 發言太短的人聲紋不足以成群，硬湊一群給他，代價是把主要講者拆散。</p>
 <p>實務上這個數字很難估準，所以：<strong>不確定就不要填</strong>，讓它自己判斷。</p>
 <blockquote>
-<p>上面是現行方法的數據。改用 Nemotron（環境有 transformers 5.18 以上時自動啟用）後，人數判對由 20 場中 2 場提高到 17 場，
-指定人數也改為「上限」：偵測到的人比指定多才合併，不會為了湊滿人數去拆開同一個人。</p>
+<p>上面是現行方法的數據。Nemotron（v2.26.0 起預設）在同一批 20 場的人數判對由 2 場提高到 17～18 場。</p>
 </blockquote>
 <h3 id="q-選單或-webui-裡看不到-qwen3-asr-06b">Q: 選單或 WebUI 裡看不到 qwen3-asr-0.6b？</h3>
 <p>它只在以下條件都符合時出現（v2.23.0 起的實驗選項）：</p>
@@ -3584,7 +3646,7 @@ sudo systemctl restart jtlw-api
 <ul>
 <li><strong>語音辨識品質</strong>取決於所選用的 ASR 模型（Whisper 模型大小）、音訊品質（背景噪音、麥克風距離、多人交談重疊等）以及語言種類。較大的模型通常有更好的辨識準確度，但需要更多運算資源。</li>
 <li><strong>翻譯品質</strong>取決於所選用的翻譯引擎與模型。LLM 翻譯（如 phi4、qwen2.5）品質最佳但需要 LLM 伺服器（本機或區域網路）；NLLB 離線翻譯品質中等；Argos 品質較基本。不同模型對專業術語、口語表達的處理能力各有差異。</li>
-<li><strong>講者辨識</strong>使用 resemblyzer + spectralcluster 進行聲紋分群，準確度受限於音訊品質、講者數量、講者聲紋相似度等因素。在多人交談、遠場收音、或講者聲紋相近的情境下，辨識結果可能不準確。<strong><code>--num-speakers</code> 不是萬用解</strong>——實測填入真正的與會人數反而可能更差（見常見問題），不確定時不要填。</li>
+<li><strong>講者辨識</strong>預設使用 NVIDIA Nemotron 3 Diarization（最多 8 人；Intel Mac、超過 8 人時改用 resemblyzer + spectralcluster 聲紋分群），準確度仍受音訊品質、講者數量、講者聲紋相似度等因素影響。在多人交談、遠場收音、或講者聲紋相近的情境下，辨識結果可能不準確。<strong><code>--num-speakers</code> 不是萬用解</strong>——不確定時不要填，要填寧可多不要少（見常見問題）。</li>
 <li><strong>處理速度</strong>取決於硬體算力（CPU/GPU）、模型大小、音訊長度。使用 GPU 伺服器可大幅加速辨識與翻譯；純 CPU 環境下處理速度會顯著較慢。</li>
 <li><strong>LLM 文字校正</strong>品質取決於校正模型的語言理解能力，對於嚴重的 ASR 幻覺（如背景噪音被辨識為無意義文字）會標記為雜音移除，但無法保證所有錯誤都能被正確修正。</li>
 </ul>

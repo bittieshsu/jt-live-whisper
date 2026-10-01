@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.25.4 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1286,6 +1286,55 @@ _QWEN_TF_CHECK='import sys, torch, soynlp
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES as M
 sys.exit(0 if "qwen3_asr" in M else 1)'
 
+# ─── Nemotron 講者辨識（v2.26.0）────────────────────
+# transformers 5.18 起內建 nemotron3_diarization。看能力不看版本號（與 install.ps1 的 $NEMO_TF_CHECK 同一個判斷）。
+# Intel Mac 不支援（PyTorch 2.3 起沒有 x86_64 macOS 版）。模型（nvidia/Nemotron-3-Diarization，約 0.71 GB）
+# 安裝時先下載，講者辨識時不必上網。任何一步失敗都不影響其他功能：講者辨識照舊用現行方法（resemblyzer）
+_NEMO_TF_CHECK='import sys, torch
+from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES as M
+sys.exit(0 if "nemotron3_diarization" in M else 1)'
+_NEMO_MODEL="nvidia/Nemotron-3-Diarization"
+
+check_nemotron_local() {
+    if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" != "arm64" ]; then
+        return 0
+    fi
+    local act=0
+    if [ -z "${VIRTUAL_ENV:-}" ]; then
+        source "$VENV_DIR/bin/activate" || return 0
+        act=1
+    fi
+    section "Nemotron 講者辨識"
+    local ok=0
+    if python3 -c "$_NEMO_TF_CHECK" >/dev/null 2>&1; then
+        check_ok "transformers（Nemotron 講者辨識）（已安裝）"
+        ok=1
+    elif run_spinner "安裝 transformers 5.18（Nemotron 講者辨識）..." \
+            pip install --disable-pip-version-check "transformers>=5.18" \
+            && python3 -c "$_NEMO_TF_CHECK" >/dev/null 2>&1; then
+        echo ""
+        check_ok "transformers（Nemotron 講者辨識）"
+        ok=1
+    else
+        echo ""
+        check_notice "transformers 5.18 安裝失敗：講者辨識照舊用現行方法，其他功能不受影響"
+    fi
+    if [ $ok -eq 1 ]; then
+        if python3 -c "from huggingface_hub import snapshot_download as d; d('$_NEMO_MODEL', local_files_only=True)" >/dev/null 2>&1; then
+            check_ok "Nemotron 模型（已下載）"
+        elif run_spinner "下載 Nemotron 模型（約 0.71 GB）..." \
+                python3 -c "from huggingface_hub import snapshot_download as d; d('$_NEMO_MODEL')"; then
+            echo ""
+            check_ok "Nemotron 模型下載完成"
+        else
+            echo ""
+            check_notice "Nemotron 模型下載失敗：第一次做講者辨識時會再下載（需要網路）"
+        fi
+    fi
+    if [ $act -eq 1 ]; then deactivate; fi
+    return 0
+}
+
 check_qwen_local_mac() {
     # 僅 ARM64 Mac（Intel Mac 決定不支援）
     if [ "$(uname -m)" != "arm64" ]; then
@@ -2020,6 +2069,15 @@ if os.path.isfile(p):
                     repair_items="${repair_items} packages"
                 fi
 
+                # 5c. transformers 5.18（Nemotron 講者辨識，v2.26.0）。伺服器沒有它時講者辨識照舊用現行方法
+                if ssh $chk_opts "$existing_user@$existing_host" "~/jt-whisper-server/venv/bin/python3 -c 'import transformers.models.nemotron3_diarization'" &>/dev/null 2>&1; then
+                    check_ok "transformers 就緒（Nemotron 講者辨識）"
+                else
+                    echo -e "  ${C_WARN}[缺少]${NC} transformers 5.18（Nemotron 講者辨識；沒有時照舊用現行方法）"
+                    need_repair=1
+                    repair_items="${repair_items} packages"
+                fi
+
                 # 6. NVIDIA GPU + CUDA
                 gpu_info=$(ssh $chk_opts "$existing_user@$existing_host" "nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1" 2>/dev/null)
                 if [ -n "$gpu_info" ]; then
@@ -2454,7 +2512,7 @@ else:
             \$PIP install --disable-pip-version-check 'setuptools<81' wheel 2>&1
             \$PIP install --disable-pip-version-check --force-reinstall --no-deps '$ct2_cached_whl' 2>&1
             \$PIP install --disable-pip-version-check \
-                'setuptools<81' faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 2>&1
+                'setuptools<81' faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 'transformers>=5.18' 2>&1
         "
     else
         local fw_extra=""
@@ -2465,7 +2523,7 @@ else:
             PIP=~/jt-whisper-server/venv/bin/pip
             \$PIP install --disable-pip-version-check 'setuptools<81' wheel 2>&1
             \$PIP install --disable-pip-version-check $fw_extra \
-                'setuptools<81' ctranslate2 faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 2>&1
+                'setuptools<81' ctranslate2 faster-whisper fastapi uvicorn python-multipart resemblyzer spectralcluster 'transformers>=5.18' 2>&1
         "
     fi
     if [ $? -ne 0 ]; then
@@ -2811,8 +2869,10 @@ print('found' if found else '')
         echo -e "  ${C_DIM}□ Whisper 模型 $_fw_model  faster-whisper 格式${NC}"
     fi
 
-    # resemblyzer
-    if python3 -c "import resemblyzer" &>/dev/null 2>&1; then
+    # 講者辨識：Nemotron（Apple Silicon、transformers 5.18）優先，沒有時用 resemblyzer
+    if [ "$(uname -m)" = "arm64" ] && python3 -c "$_NEMO_TF_CHECK" &>/dev/null 2>&1; then
+        echo -e "  ${C_OK}■${NC} AI 講者辨識 (--diarize)  ${C_DIM}Nemotron（resemblyzer 備援）${NC}"
+    elif python3 -c "import resemblyzer" &>/dev/null 2>&1; then
         echo -e "  ${C_OK}■${NC} AI 講者辨識 (--diarize)  ${C_DIM}resemblyzer${NC}"
     else
         echo -e "  ${C_DIM}□ AI 講者辨識 (--diarize)  resemblyzer${NC}"
@@ -3232,6 +3292,7 @@ check_nllb_model
 check_faster_whisper_model
 check_mlx_whisper
 check_qwen_local_mac
+check_nemotron_local
 setup_remote_whisper
 print_summary
 offer_desktop_shortcut
