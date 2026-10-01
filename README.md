@@ -1,4 +1,4 @@
-# jt-live-whisper v2.26.0
+# jt-live-whisper v2.26.1
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -52,7 +52,7 @@ Author: Jason Cheng (Jason Tools)
 | 語音辨識 (ASR) | **Breeze-ASR-26** (MediaTek Research) | **台語（台灣閩南語）專用**，華語模式也可選用（台灣華語夾雜台語時）；Whisper large-v2 微調，直接輸出漢字 |
 | 語音辨識 (ASR) | **Moonshine** (Useful Sensors) | **英文專用**，超低延遲串流辨識模型（不支援 Intel Mac） |
 | 語音辨識 (ASR) | **Qwen3-ASR 0.6B** (Alibaba Qwen) | **實驗選項（v2.23.0）**：離線處理錄音檔時選用，中文會議與中英夾雜明顯更準（中文真實會議 20 場字錯率 28.78% → 15.75%）；限中文／英文／韓文。GPU 伺服器或本機（v2.24.0 起：Apple Silicon、NVIDIA、CPU）執行 |
-| 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯，透過地端 Ollama 或其他 LLM 伺服器執行；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
+| 翻譯 (LLM) | 自架 LLM 伺服器，預設 **gemma4:26b**（伺服器沒有時改用 qwen2.5:14b） | 即時與離線翻譯，透過地端 Ollama 或其他 LLM 伺服器執行；建議 14B 以上，並**選用不會思考、或思考可關閉的模型**，程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢 |
 | 摘要 / 逐字稿校正 (LLM) | 自架 LLM 伺服器，預設 **qwen3.8:27b** | 會議摘要與逐字稿校正（兩者共用同一個模型）；建議 27B 以上，可與翻譯用不同模型 |
 | 翻譯 (離線) | **NLLB 600M** (Meta) | 離線翻譯模型，支援中日韓英互譯（`en2zh`/`zh2en`/`ja2zh`/`zh2ja`/`ko2zh`/`zh2ko`） |
 | 翻譯 (離線備援) | **Argos Translate** | 完全離線的輕量翻譯模型，僅支援英翻中 |
@@ -75,7 +75,7 @@ Author: Jason Cheng (Jason Tools)
 
 
 
-> **為什麼講者辨識不用更精準更快速的 pyannote.audio？** pyannote 的預訓練模型授權限制了可使用的用途與場景，且需要在 HuggingFace 註冊帳號、申請存取權限並設定 Token 才能下載模型。這不符合本工具「零帳號、零註冊、完全地端」的設計理念。resemblyzer + spectralcluster 完全開源、安裝即用、無需任何帳號或 Token。
+> **為什麼講者辨識不用 pyannote.audio？** pyannote 的開源模型雖然是 MIT／CC BY 4.0 授權，但設有存取限制：下載前必須登入 HuggingFace、填寫使用者資料同意使用條件，並在本機設定 Token。這不符合本工具「零帳號、零註冊、完全地端」的設計理念。v2.26.0 起講者辨識預設使用 **NVIDIA Nemotron 3 Diarization**（OpenMDW-1.1 授權、可商用，不需帳號或 Token，安裝時自動下載；實測見 [BENCHMARKS.md](BENCHMARKS.md)）；Intel Mac、超過 8 位講者、或沒有 transformers 5.18 時，自動改用完全開源的 resemblyzer + spectralcluster。
 
 &nbsp;
 
@@ -99,7 +99,7 @@ Author: Jason Cheng (Jason Tools)
 
 兩種模式可隨時切換，伺服器離線時自動降級為本機處理，不中斷使用。
 
-**GPU 伺服器的版本會自動檢查**：伺服器上的辨識服務是獨立的一支程式，不會跟著本機升級一起更新。本機每次連上時會比對版本，不一致就提示（但不會中斷作業），並告訴你怎麼更新。另有選填的自動更新機制，設定後由本機把新版推上去、伺服器驗證通過才替換——**預設關閉**，詳見 SOP。
+**GPU 伺服器的版本會自動檢查**：伺服器上的辨識服務是獨立的一支程式，不會跟著本機升級一起更新。本機每次連上時會比對版本，不一致就提示（但不會中斷作業），並告訴你怎麼更新。另有選填的自動更新機制，設定後由本機把新版推上去、伺服器驗證通過才替換；**預設關閉**，詳見 SOP。
 
 &nbsp;
 
@@ -201,19 +201,19 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 - **字幕轉發**：即時字幕自動轉發到通訊平台（Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / 通用 API），可同時啟用多個平台、自訂發送間隔與內容（含時間/原文/譯文）。通用 API 支援 Body 範本（`{{text}}` 變數）搭配自訂 Headers
 - **懸浮字幕**（感謝 OSSLab 熊大提供建議）：桌面半透明字幕覆蓋視窗（PyQt6），可疊加於任何應用程式上方。字體依視窗大小自動縮放、可拖曳移動與調整大小、滑鼠穿透模式、字幕切換淡入淡出動畫。單語/雙語自動切換高度
 
-**關鍵字即時通知** — 設定關鍵字後，辨識結果出現時全螢幕警示 + 音效提醒：
+**關鍵字即時通知**：設定關鍵字後，辨識結果出現時全螢幕警示 + 音效提醒：
 
 ![關鍵字通知效果](images/keyword-alert.png)
 
 ![關鍵字通知設定](images/keyword-alert-settings.png)
 
-**懸浮字幕** — 半透明覆蓋視窗，疊加於任何應用程式上方：
+**懸浮字幕**：半透明覆蓋視窗，疊加於任何應用程式上方：
 
 ![懸浮字幕效果](images/subtitle-overlay.png)
 
 ![懸浮字幕設定](images/subtitle-overlay-settings.png)
 
-**字幕轉發** — 即時字幕自動轉發到 Telegram 等通訊平台：
+**字幕轉發**：即時字幕自動轉發到 Telegram 等通訊平台：
 
 ![字幕轉發設定](images/forward-telegram-settings.png)
 
@@ -924,7 +924,7 @@ WebUI 瀏覽器介面（./start.sh --webui）：
 
 ## 專案網站
 
-🌐 **[jasoncheng7115.github.io/jt-live-whisper](https://jasoncheng7115.github.io/jt-live-whisper/)** — 功能介紹、畫面導覽、安裝與使用說明。
+🌐 **[jasoncheng7115.github.io/jt-live-whisper](https://jasoncheng7115.github.io/jt-live-whisper/)**：功能介紹、畫面導覽、安裝與使用說明。
 
 &nbsp;
 

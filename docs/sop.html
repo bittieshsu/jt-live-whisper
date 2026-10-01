@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>完整使用手冊 SOP — jt-live-whisper</title>
+<title>完整使用手冊 SOP | jt-live-whisper</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="description" content="jt-live-whisper 完整使用手冊（SOP）：系統架構、音訊設定、安裝、啟動與使用、互動式選單、命令列參數、講者辨識、摘要、常見問題 FAQ、檔案說明、硬體建議與移除。" />
 <link rel="stylesheet" href="style.css" />
@@ -73,7 +73,7 @@
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
       <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
-      <a class="lv3" href="#講者辨識方法api_revision-25v2260-起">講者辨識方法（api_revision 2.5，v2.26.0 起）</a>
+      <a class="lv3" href="#講者辨識方法api_revision-25v2260-起26-加原因代碼">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼）</a>
       <a class="lv3" href="#台語會議transcribetaiwanesev2252-起">台語會議（transcribe.taiwanese，v2.25.2 起）</a>
       <a class="lv3" href="#啟用-rest-api">啟用 REST API</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
@@ -125,7 +125,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.1 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -306,7 +306,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 <tr>
 <td>翻譯 (LLM)</td>
 <td>自架 LLM 伺服器，預設 <strong>gemma4:26b</strong>（伺服器沒有時改用 qwen2.5:14b）</td>
-<td>即時與離線翻譯（本機或區域網路 LLM 伺服器）；建議 14B 以上，並<strong>選用不會思考、或思考可關閉的模型</strong>——程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢</td>
+<td>即時與離線翻譯（本機或區域網路 LLM 伺服器）；建議 14B 以上，並<strong>選用不會思考、或思考可關閉的模型</strong>，程式會自動關閉思考模式（gemma4、qwen3 等皆可），但 gpt-oss 系列架構上必定推理、關不掉，用於即時翻譯會明顯變慢</td>
 </tr>
 <tr>
 <td>摘要 / 逐字稿校正 (LLM)</td>
@@ -441,7 +441,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
 <p><strong>為什麼只取聲音卻要螢幕錄製權限？</strong>
 macOS 把 ScreenCaptureKit 整組歸類在「螢幕錄製」權限之下，即使程式只取音訊、完全不擷取畫面。macOS 15 起這個項目在系統設定裡顯示為 <strong>「螢幕與系統音訊錄製」</strong>。</p>
 <p><strong>授權對象是「你的終端機程式」，不是 Python。</strong>
-macOS 記錄的是啟動本程式的那個 app —— 終端機（Terminal）、iTerm2、Ghostty、Warp、VS Code 等。程式會自動判讀並在提示訊息中<strong>直接指名該勾誰</strong>，不必自己猜。</p>
+macOS 記錄的是啟動本程式的那個 app：終端機（Terminal）、iTerm2、Ghostty、Warp、VS Code 等。程式會自動判讀並在提示訊息中<strong>直接指名該勾誰</strong>，不必自己猜。</p>
 <p><strong>權限對話框什麼時候會跳出來：</strong></p>
 <table>
 <thead>
@@ -1013,7 +1013,7 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 <ul>
 <li><strong>限制</strong>：只支援離線處理錄音檔、中文／英文／韓文<strong>單向</strong>模式（日文長檔實測較差、台語遠不如 Breeze-ASR-26，所以不開放）；
 即時字幕、雙向模式仍用 Whisper。選了但不適用時，程式會說明原因並自動改用推薦模型</li>
-<li><strong>在哪裡跑</strong>：跟著「辨識位置」走——選 GPU 伺服器就在伺服器上跑，選本機就在這台電腦上跑（本機 v2.24.0 起）。
+<li><strong>在哪裡跑</strong>：跟著「辨識位置」走：選 GPU 伺服器就在伺服器上跑，選本機就在這台電腦上跑（本機 v2.24.0 起）。
 該位置跑不了時選單不會出現；命令列指定時會說明原因並改用推薦模型</li>
 </ul>
 <table>
@@ -1052,8 +1052,8 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 <tr>
 <td>Intel Mac</td>
 <td>不支援</td>
-<td>—</td>
-<td>—</td>
+<td>不適用</td>
+<td>不適用</td>
 </tr>
 </tbody></table>
 <ul>
@@ -1096,13 +1096,13 @@ curl -s http://localhost:8978/health           # 1~3 分鐘後 &quot;qwen&quot;:
 </ul>
 <h3 id="gpu-伺服器的版本檢查與更新v2211-起">GPU 伺服器的版本檢查與更新（v2.21.1 起）</h3>
 <p>GPU 伺服器上跑的 <code>remote_whisper_server.py</code> 是一支獨立的服務，<strong>不會跟著本機一起升級</strong>。本機 <code>./install.sh --upgrade</code> 更新的是本機程式；伺服器上的服務還是舊的。</p>
-<p>這在 v2.21.1 之前沒有任何提示，曾經造成伺服器停留在舊版好幾天沒人發現——而且<strong>有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器</strong>，等於一直拿到舊版的結果。</p>
+<p>這在 v2.21.1 之前沒有任何提示，曾經造成伺服器停留在舊版好幾天沒人發現，而且<strong>有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器</strong>，等於一直拿到舊版的結果。</p>
 <p><strong>現在每次連上伺服器都會比對版本：</strong></p>
 <pre><code>  [版本不一致] GPU 伺服器 v2.20.9，本機 v2.21.1
   辨識與講者辨識仍會使用伺服器上的舊版；伺服器未開放遠端更新
   手動更新：scp remote_whisper_server.py 192.168.1.40:~/jt-whisper-server/server.py 後重啟服務
 </code></pre>
-<p><strong>版本不一致不會中斷作業</strong>——伺服器舊一點通常仍可使用，只是你會知道結果來自哪個版本。若伺服器連 <code>version</code> 都沒回報（v2.21.1 以前的版本），會顯示「未知版本」。</p>
+<p><strong>版本不一致不會中斷作業</strong>：伺服器舊一點通常仍可使用，只是你會知道結果來自哪個版本。若伺服器連 <code>version</code> 都沒回報（v2.21.1 以前的版本），會顯示「未知版本」。</p>
 <h4 id="自動更新選填預設關閉">自動更新（選填，預設關閉）</h4>
 <p>設定之後，本機發現伺服器版本較舊時會自動把新版推上去，由伺服器自行驗證並重啟，過程中顯示狀態列：</p>
 <pre><code>  ⠹ 更新 GPU 伺服器 [192.168.1.40] │ 上傳新版（38 KB）...
@@ -1110,7 +1110,7 @@ curl -s http://localhost:8978/health           # 1~3 分鐘後 &quot;qwen&quot;:
   [完成] 已更新到 v2.21.1
 </code></pre>
 <p><strong>這個功能預設是關閉的，必須兩邊都設定才會啟用：</strong></p>
-<p><strong>1. GPU 伺服器端</strong> — 設定密鑰後重啟服務。有 systemd 服務時（v2.21.7 起），寫進 <code>~/jt-whisper-server/server.env</code>：</p>
+<p><strong>1. GPU 伺服器端</strong>：設定密鑰後重啟服務。有 systemd 服務時（v2.21.7 起），寫進 <code>~/jt-whisper-server/server.env</code>：</p>
 <pre><code class="language-bash">echo &quot;JT_WHISPER_UPDATE_TOKEN=自訂一組夠長的隨機字串&quot; &gt; ~/jt-whisper-server/server.env
 chmod 600 ~/jt-whisper-server/server.env
 systemctl restart jt-whisper-server@8978
@@ -1120,7 +1120,7 @@ systemctl restart jt-whisper-server@8978
   nohup setsid venv/bin/python3 server.py --port 8978 &gt; /tmp/jt-whisper-server.log 2&gt;&amp;1 &lt; /dev/null &amp;
 </code></pre>
 <p>沒有設定這個環境變數時，更新端點<strong>完全不存在</strong>，任何請求都會被拒絕。</p>
-<p><strong>2. 本機</strong> — 在 <code>config.json</code> 的 <code>remote_whisper</code> 區塊填入<strong>同一組</strong>密鑰：</p>
+<p><strong>2. 本機</strong>：在 <code>config.json</code> 的 <code>remote_whisper</code> 區塊填入<strong>同一組</strong>密鑰：</p>
 <pre><code class="language-json">&quot;remote_whisper&quot;: {
   &quot;host&quot;: &quot;192.168.1.40&quot;,
   &quot;whisper_port&quot;: 8978,
@@ -1128,7 +1128,7 @@ systemctl restart jt-whisper-server@8978
 }
 </code></pre>
 <blockquote>
-<p>⚠️ <strong>這個功能本質上是「讓遠端主機執行你送過去的程式」。</strong> 區域網路不等於安全網路，所以預設關閉，而且只有在你自己兩邊都設定同一組密鑰時才會生效。不確定是否需要時，<strong>維持關閉、手動更新即可</strong>——版本提示照樣會出現。</p>
+<p>⚠️ <strong>這個功能本質上是「讓遠端主機執行你送過去的程式」。</strong> 區域網路不等於安全網路，所以預設關閉，而且只有在你自己兩邊都設定同一組密鑰時才會生效。不確定是否需要時，<strong>維持關閉、手動更新即可</strong>，版本提示照樣會出現。</p>
 </blockquote>
 <p>更新前伺服器會依序做完這些檢查，任何一項不過就保留舊版、服務不受影響：</p>
 <table>
@@ -1212,13 +1212,13 @@ systemctl restart jt-whisper-server@8978
 </tr>
 </tbody></table>
 <blockquote>
-<p><strong>換版的順序是「先關門、再等清空、最後換檔」。</strong> v2.21.7 以前是「確認沒作業 → 1 秒後重啟」，這 1 秒內送進來的作業會在跑到一半時被換掉——而用戶端還把被切斷的結果當成「0 段、處理完成」。兩個問題 v2.21.8 都修掉了：伺服器不再有空窗，用戶端收到不完整的結果會等伺服器回來重送，等不到才改用本機。</p>
+<p><strong>換版的順序是「先關門、再等清空、最後換檔」。</strong> v2.21.7 以前是「確認沒作業 → 1 秒後重啟」，這 1 秒內送進來的作業會在跑到一半時被換掉，而用戶端還把被切斷的結果當成「0 段、處理完成」。兩個問題 v2.21.8 都修掉了：伺服器不再有空窗，用戶端收到不完整的結果會等伺服器回來重送，等不到才改用本機。</p>
 </blockquote>
 <blockquote>
 <p><strong>這些檢查分兩類，不要混為一談。</strong> 只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它<strong>擋得住壞掉的更新、擋不住惡意的更新</strong>。<strong>密鑰是唯一的安全邊界，請當成密碼保管。</strong></p>
 </blockquote>
 <blockquote>
-<p><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP 不是 HTTPS。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證，等於取得那台機器的任意程式碼執行權。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害——那就是同一支程式），無法偽造新的 payload。</p>
+<p><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP 不是 HTTPS。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證，等於取得那台機器的任意程式碼執行權。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害，那就是同一支程式），無法偽造新的 payload。</p>
 </blockquote>
 <blockquote>
 <p><strong>為什麼不接受降版</strong>：多個用戶端共用同一台 GPU 伺服器是常見情況。若只比對「版本不同」，舊的用戶端會把伺服器降回舊版、新的用戶端又推回去，<strong>兩邊無限來回，而每次重啟都會中斷別人正在跑的辨識</strong>。所以伺服器只接受比自己新的版本，用戶端在發現伺服器較新時也會主動退讓。</p>
@@ -1764,7 +1764,7 @@ cd C:\jt-live-whisper
 <p><strong>韓文（v2.22.0 起）</strong>：辨識直接使用 Whisper 本身的韓文能力，不需要另外下載模型；翻譯支援 LLM 與 NLLB（Argos 不支援）。韓文沒有簡繁轉換的問題。</p>
 <ul>
 <li><strong>幻覺過濾清單是實測蒐集的</strong>：把靜音、雜訊、和弦、旋律、掌聲、鍵盤聲以韓文模式送進 base / small / large-v3-turbo / large-v3，整理出重複出現的無關輸出（「다음 영상에서 만나요（下支影片見）」「시청해주셔서 감사합니다（感謝收看）」「한글자막 by…（字幕歸屬）」「MBC 뉴스…」與各種重複字串）。實測 178 段無人講話的輸出擋下 164 段，49 句真實會議句子誤擋 0 句</li>
-<li><strong>已知取捨</strong>：整句只有「감사합니다」（謝謝）時會被當成幻覺濾掉——它是無人講話時最常見的幻覺之一，但真的有人只說這句時也會被濾掉（英文的「thank you」也是同樣做法）。句中出現不受影響</li>
+<li><strong>已知取捨</strong>：整句只有「감사합니다」（謝謝）時會被當成幻覺濾掉：它是無人講話時最常見的幻覺之一，但真的有人只說這句時也會被濾掉（英文的「thank you」也是同樣做法）。句中出現不受影響</li>
 <li><strong>擋不住的</strong>：模型偶爾在無人講話時吐出一般詞句（例如「닭고기」），跟真的講話分不開，不做過濾</li>
 <li>實測辨識品質（合成語音＋會議室雜訊，large-v3-turbo）：字元錯誤率約 10%，其中一大部分是數字寫法差異（韓文數字詞 vs 阿拉伯數字），不是聽錯</li>
 </ul>
@@ -2656,7 +2656,7 @@ cd C:\jt-live-whisper
 <td>3.09 GB</td>
 </tr>
 </tbody></table>
-<p>用 <code>-m</code> 指定其他模型時會顯示提示並忽略——台語只有這個模型可用。</p>
+<p>用 <code>-m</code> 指定其他模型時會顯示提示並忽略：台語只有這個模型可用。</p>
 <h4 id="華語模式選用-breeze-asr-26">華語模式選用 Breeze-ASR-26</h4>
 <p>本模型訓練時也包含台語與華語混用的語料。台灣的會議常是「華語為主、偶爾夾台語或英文」，可以在華語輸入模式改用它，與 large-v3 比較哪個適合自己的錄音：</p>
 <pre><code class="language-bash">./start.sh --input 會議.mp3 --mode zh -m breeze-asr-26      # 中文逐字稿
@@ -2664,7 +2664,7 @@ cd C:\jt-live-whisper
 </code></pre>
 <ul>
 <li>適用模式：<code>zh</code>（中文轉錄）、<code>zh2en</code>（中翻英）、<code>zh2ja</code>（中翻日）；互動式選單與 WebUI 的模型清單在這些模式會多出 <code>breeze-asr-26</code></li>
-<li>選用後自動套用本模型專屬的辨識參數、自行切段與即時步進下限，並固定在本機辨識——與台語模式相同，不會誤用一般模型的參數組而大幅劣化</li>
+<li>選用後自動套用本模型專屬的辨識參數、自行切段與即時步進下限，並固定在本機辨識，與台語模式相同，不會誤用一般模型的參數組而大幅劣化</li>
 <li>其他模式（英文、日文、雙向）不支援，指定時會改用該模式的推薦模型並提示</li>
 <li>速度與已知限制同台語模式（見下方）</li>
 </ul>
@@ -2699,7 +2699,7 @@ cd C:\jt-live-whisper
 實測數字與例句見 <code>BENCHMARKS.md</code>。</p>
 <h4 id="已知限制">已知限制</h4>
 <ul>
-<li><strong>辨識結果是華語漢字</strong>，不是台語正字。例如台語的「烏白試」會輸出「亂試」、「我沒咧驚」會輸出「我沒在怕」——語意正確，但用字是華語寫法</li>
+<li><strong>辨識結果是華語漢字</strong>，不是台語正字。例如台語的「烏白試」會輸出「亂試」、「我沒咧驚」會輸出「我沒在怕」：語意正確，但用字是華語寫法</li>
 <li><strong>時間戳精細度較低</strong>：本模型訓練時不產生時間戳，程式改用語音活動偵測把音訊切成最長 28 秒的視窗，時間戳取自切段邊界。因此 SRT / VTT 字幕的每一段會比一般模式長，適合定位與對照，不適合逐句字幕</li>
 <li>極短的單詞片段（1～2 秒）容易出現重複幻覺，連續語音的表現明顯較好</li>
 </ul>
@@ -2837,7 +2837,7 @@ cd C:\jt-live-whisper
 </code></pre>
 <p>支援單一 IP 與 CIDR，也可用環境變數 <code>JTLW_WEBUI_ALLOWED_IPS</code>（逗號分隔）。
 <strong>空的或沒設＝不限制</strong>（既有部署升級後行為不變）。
-<strong>本機一律放行</strong>——設錯清單不會把自己鎖在門外，因為改設定的那一頁
+<strong>本機一律放行</strong>：設錯清單不會把自己鎖在門外，因為改設定的那一頁
 本身就只有本機能開。改完要重啟服務。</p>
 <h4 id="加密連線tls">加密連線（TLS）</h4>
 <p><strong>預設關閉</strong>，升級上來的部署網址不會從 <code>http</code> 變成 <code>https</code>。要開：</p>
@@ -2859,7 +2859,7 @@ cd C:\jt-live-whisper
 <pre><code class="language-json">&quot;webui&quot;: { &quot;trusted_proxies&quot;: [&quot;127.0.0.1&quot;, &quot;10.0.0.5&quot;] }
 </code></pre>
 <p>只有來自清單內的連線才會去看 <code>X-Forwarded-For</code>，而且取的是<strong>最右邊那個
-非信任的跳點</strong>——最左邊是客戶端自己填的，可以偽造。</p>
+非信任的跳點</strong>：最左邊是客戶端自己填的，可以偽造。</p>
 <blockquote>
 <p>⚠ <strong><code>webui.allowed_ips</code> 與 <code>api.allowed_hosts</code> 是兩件不同的事</strong>，名字很像但意思相反：</p>
 <table>
@@ -2887,7 +2887,7 @@ cd C:\jt-live-whisper
 <h2 id="五rest-api給其他系統串接">五、REST API（給其他系統串接）</h2>
 <p>要讓別的系統送音檔進來、取回逐字稿、講者標記與會議摘要時，啟用 REST API（<code>jtlw_api/</code>）。
 <strong>v2.25.1 起它隨 jt-live-whisper 一起發佈、<code>--upgrade</code> 會一起更新</strong>；伺服器版（<code>install.sh --server</code>）會裝好它需要的套件，
-但<strong>不會自動啟動</strong>——要不要對外開這個服務由你決定，照本節「啟用 REST API」設定。</p>
+但<strong>不會自動啟動</strong>：要不要對外開這個服務由你決定，照本節「啟用 REST API」設定。</p>
 <h3 id="已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</h3>
 <p><strong>jt-doc-tools</strong>（<a href="https://jasoncheng7115.github.io/jt-doc-tools/">https://jasoncheng7115.github.io/jt-doc-tools/</a>）已經接上 jt-live-whisper。完整流程：</p>
 <table>
@@ -2925,7 +2925,7 @@ cd C:\jt-live-whisper
 </tr>
 </tbody></table>
 <p>第 5 點是整個整合的重點，也是為什麼 API 要分三層：<strong>摘要可以被驗證</strong>。
-使用者看到一條「決議：下週前完成 A」時，點下去就能聽到當時是誰說的——
+使用者看到一條「決議：下週前完成 A」時，點下去就能聽到當時是誰說的，
 而不是只能相信 LLM 沒有捏造。</p>
 <p>實測（28.3 分鐘的真實會議、GPU 伺服器）：辨識 37 秒、講者分離 2 秒、
 校正 67 秒，<strong>總共 1 分 52 秒</strong>，約為即時的 15 倍速。
@@ -2997,7 +2997,7 @@ cd C:\jt-live-whisper
 <li><strong>辨識失敗而且錯誤是可以重試的（<code>retryable: true</code>，例如 GPU 伺服器暫時不能用）時，上傳的檔案會保留</strong>，<code>POST /api/v1/jobs/{id}/retry</code> 直接重做，不必重新上傳（v2.25.3 起）。保留到重試成功、ACK、刪除作業或 7 天後內容到期。不可重試的失敗（例如檔案解不開）檔案會立刻刪除，這時要重新上傳、送新的一件</li>
 <li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
 </ul>
-<h3 id="講者辨識方法api_revision-25v2260-起">講者辨識方法（api_revision 2.5，v2.26.0 起）</h3>
+<h3 id="講者辨識方法api_revision-25v2260-起26-加原因代碼">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼）</h3>
 <p>送件時 <code>hints.diarize_engine</code> 選講者辨識方法；<strong>不送就是 <code>legacy</code>（現行方法），與 2.4 完全相同</strong>，
 既有的串接（jt-doc-tools、jt-vc-portal）不改就不會變。</p>
 <table>
@@ -3017,17 +3017,47 @@ cd C:\jt-live-whisper
 </tr>
 </tbody></table>
 <ul>
-<li>實際用了哪一個看結果（<code>GET /api/v1/jobs/{id}/result</code>）的 <code>diarization</code>：<code>{&quot;requested&quot;: &quot;auto&quot;, &quot;engine&quot;: &quot;nemotron&quot;, &quot;note&quot;: null}</code>；
-退回現行方法時 <code>engine</code> 是 <code>legacy</code>、<code>note</code> 說明原因；沒有要求 <code>diarize</code> 時整個欄位是 <code>null</code></li>
-<li><code>hints.num_speakers</code> 在 <code>auto</code>（Nemotron）下是<strong>上限</strong>，在 <code>legacy</code> 下是強制分群；不確定就不要填，要填寧可多不要少</li>
-<li>改用 <code>auto</code> 之後同一份錄音的講者代號與人數會和以前不同（更準），存過舊結果的系統要注意</li>
+<li><p>實際用了哪一個看結果（<code>GET /api/v1/jobs/{id}/result</code>）的 <code>diarization</code>：<code>{&quot;requested&quot;: &quot;auto&quot;, &quot;engine&quot;: &quot;nemotron&quot;, &quot;note&quot;: null, &quot;reason&quot;: null}</code>；
+退回現行方法時 <code>engine</code> 是 <code>legacy</code>、<code>note</code> 用中文說明原因；沒有要求 <code>diarize</code> 時整個欄位是 <code>null</code></p>
+</li>
+<li><p><strong>api_revision 2.6（v2.26.1）起另有 <code>reason</code> 代碼</strong>，給呼叫端翻成自己介面的語言（<code>note</code> 照舊）：</p>
+<table>
+<thead>
+<tr>
+<th><code>reason</code></th>
+<th>什麼時候</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>too_many_speakers</code></td>
+<td><code>num_speakers</code> 大於 8</td>
+</tr>
+<tr>
+<td><code>speakers_saturated</code></td>
+<td>沒指定人數，偵測到 8 位全部用滿（可能超過 8 人）</td>
+</tr>
+<tr>
+<td><code>nemotron_unavailable</code></td>
+<td>執行講者辨識的那台沒有 Nemotron（transformers 不到 5.18、Intel Mac 等）</td>
+</tr>
+<tr>
+<td><code>nemotron_failed</code></td>
+<td>Nemotron 執行時出錯</td>
+</tr>
+</tbody></table>
+<p>沒有退回、<code>requested</code> 是 <code>legacy</code>、或講者辨識失敗時是 <code>null</code>。日後可能新增代碼，不認得的當成一般退回處理並顯示 <code>note</code></p>
+</li>
+<li><p><code>hints.num_speakers</code> 在 <code>auto</code>（Nemotron）下是<strong>上限</strong>，在 <code>legacy</code> 下是強制分群；不確定就不要填，要填寧可多不要少</p>
+</li>
+<li><p>改用 <code>auto</code> 之後同一份錄音的講者代號與人數會和以前不同（更準），存過舊結果的系統要注意</p>
+</li>
 </ul>
 <h3 id="台語會議transcribetaiwanesev2252-起">台語會議（<code>transcribe.taiwanese</code>，v2.25.2 起）</h3>
 <p>送件時 <code>profile_id</code> 填 <code>transcribe.taiwanese</code>，就會用台語模型（MediaTek Breeze-ASR-26）辨識；其他模式一律用一般模型。</p>
 <ul>
 <li><code>language</code> 填 <code>nan-Hant</code>（<code>zh-Hant</code> 結果相同）；一般模式不會自動改用台語模型，語言自動判斷也認不出台語</li>
 <li><strong>台語模型跑在 GPU 伺服器上</strong>（需 v2.25.2 以上），API 主機本身不跑：只有 CPU 的主機跑一小時的台語會議要約 4 小時。
-GPU 伺服器不能用時這一件直接失敗（<code>asr_failed</code>），<strong>不會退回一般模型</strong>——一般模型會把台語辨識成諧音的華語</li>
+GPU 伺服器不能用時這一件直接失敗（<code>asr_failed</code>），<strong>不會退回一般模型</strong>：一般模型會把台語辨識成諧音的華語</li>
 <li>可做：辨識、校正、會議摘要（摘要算實驗，還沒用真實台語會議驗證品質）；<strong>不能分發言者</strong>，送 <code>diarize</code> 回 422 <code>task_not_supported</code></li>
 <li>時間是每段最長 28 秒；英文大多會被翻成中文</li>
 <li>有台語就用台語模式；華語為主、只偶爾一兩句台語的，用一般模式（時間精細、可分發言者、英文照原文）。
@@ -3068,7 +3098,7 @@ venv/bin/python -m jtlw_api --info               # 金鑰、憑證指紋、允�
 curl -k https://127.0.0.1:8790/api/v1/health     # 回 {&quot;status&quot;:&quot;ok&quot;}
 </code></pre>
 <ul>
-<li><strong>服務名稱用 <code>jtlw-api</code>、<code>WorkingDirectory</code> 寫安裝資料夾</strong>：安裝程式靠這兩點認得它——
+<li><strong>服務名稱用 <code>jtlw-api</code>、<code>WorkingDirectory</code> 寫安裝資料夾</strong>：安裝程式靠這兩點認得它：
 <code>--doctor</code> 會檢查它、<code>--uninstall</code> 會一併移除（否則刪掉虛擬環境後它會一直重啟失敗）</li>
 <li><strong><code>--upgrade</code> 不會重啟 API 服務</strong>：更新完會提示 <code>sudo systemctl restart jtlw-api</code>，
 挑沒有作業的時候執行（重啟約 1 秒，進行中的作業會自動接續，不會失敗）</li>
@@ -3093,7 +3123,7 @@ curl -k https://127.0.0.1:8790/api/v1/health     # 回 {&quot;status&quot;:&quot
 不同系統之間看不到彼此的作業與上傳的檔案。</p>
 <ul>
 <li>設定位置：<code>config.json</code> 的 <code>api.api_keys</code> 陣列</li>
-<li><strong>只存 sha256 雜湊，不存明文</strong> —— 伺服器被看到也還原不出金鑰，
+<li><strong>只存 sha256 雜湊，不存明文</strong>：伺服器被看到也還原不出金鑰，
 相對地<strong>金鑰遺失無法救回</strong>，只能重新產生</li>
 <li>格式 <code>jtlw_&lt;名稱&gt;_&lt;隨機字串&gt;</code></li>
 <li><strong>新增或撤銷之後都要重啟 API 服務才生效</strong>（以 systemd 服務 <code>jtlw-api</code> 部署時是 <code>sudo systemctl restart jtlw-api</code>，約 1 秒；
@@ -3171,7 +3201,7 @@ sudo systemctl restart jtlw-api
 <p><code>config.json</code> 的 <code>api.allowed_hosts</code>：</p>
 <pre><code class="language-json">&quot;api&quot;: { &quot;allowed_hosts&quot;: [&quot;音檔主機.example.com&quot;, &quot;10.0.0.20&quot;] }
 </code></pre>
-<p><strong>它擋的不是「誰來呼叫」，而是「音檔網址的主機」。</strong> 這是最容易誤解的一點——
+<p><strong>它擋的不是「誰來呼叫」，而是「音檔網址的主機」。</strong> 這是最容易誤解的一點：
 對方的伺服器 IP 在清單內、金鑰也正確，只要 <code>source.url</code> 指向清單外的主機
 就會被擋。送件會得到：</p>
 <pre><code class="language-json">{&quot;error&quot;: {&quot;code&quot;: &quot;source_not_allowed&quot;, &quot;category&quot;: &quot;source&quot;, &quot;retryable&quot;: false,
@@ -3183,7 +3213,7 @@ sudo systemctl restart jtlw-api
 <pre><code class="language-bash">journalctl -u &lt;服務名&gt; | grep source.rejected
 # {&quot;event&quot;: &quot;source.rejected&quot;, &quot;host&quot;: &quot;...&quot;, &quot;allowed&quot;: [...]}
 </code></pre>
-<p><code>--info</code> 也會印出目前的清單。<strong>沒設定的話送件一律被拒</strong>（不是「不限制」——
+<p><code>--info</code> 也會印出目前的清單。<strong>沒設定的話送件一律被拒</strong>（不是「不限制」，
 這是刻意的，避免變成任意抓取網址的跳板 / SSRF）。</p>
 <h4 id="實際遇到時的處理步驟">實際遇到時的處理步驟</h4>
 <ol>
@@ -3207,7 +3237,7 @@ sudo systemctl restart jtlw-api
 </li>
 </ol>
 <blockquote>
-<p><strong>只加真正需要的主機。</strong> 這個清單是防 SSRF 的唯一一道關卡——
+<p><strong>只加真正需要的主機。</strong> 這個清單是防 SSRF 的唯一一道關卡：
 清單上的任何主機都等於允許這台機器去抓取那裡的網址。
 不要為了省事填萬用字元或把整個網段加進去。</p>
 </blockquote>
@@ -3364,7 +3394,7 @@ sudo systemctl restart jtlw-api
 <h2 id="七常見問題">七、常見問題</h2>
 <h3 id="q-找不到音訊裝置">Q: 找不到音訊裝置？</h3>
 <ul>
-<li><strong>macOS（ScreenCaptureKit）：</strong> 確認已授權「螢幕錄製」（macOS 15 為「螢幕與系統音訊錄製」）給你的終端機程式，且授權後已完全結束該程式（Cmd+Q）再重新開啟。可執行 <code>./start.sh --sck-permission</code> 重新授權。另請確認系統音量未設為靜音——靜音時只會收到無聲訊號。</li>
+<li><strong>macOS（ScreenCaptureKit）：</strong> 確認已授權「螢幕錄製」（macOS 15 為「螢幕與系統音訊錄製」）給你的終端機程式，且授權後已完全結束該程式（Cmd+Q）再重新開啟。可執行 <code>./start.sh --sck-permission</code> 重新授權。另請確認系統音量未設為靜音，靜音時只會收到無聲訊號。</li>
 <li><strong>macOS（BlackHole）：</strong> 確認 BlackHole 2ch 已安裝且電腦已重新啟動。執行 <code>./install.sh</code> 檢查。</li>
 <li><strong>Windows：</strong> 確認 WASAPI Loopback 裝置可用，或已啟用 Stereo Mix。執行 <code>.\start.ps1 --list-devices</code> 檢查可用裝置。</li>
 <li><strong>Linux：</strong> 執行 <code>./install.sh --doctor</code>。常見原因：沒有安裝 <code>pulseaudio-utils</code>（<code>sudo apt install pulseaudio-utils</code>）、透過 SSH 連線而連不到桌面的音訊伺服器、或系統沒有任何輸出裝置。</li>
@@ -3418,7 +3448,7 @@ sudo systemctl restart jtlw-api
 <p>這個問題與本程式無關，是 macOS 藍牙音訊的已知問題。</p>
 </blockquote>
 <h3 id="q-串接的系統送件失敗訊息是-source_not_allowed">Q: 串接的系統送件失敗，訊息是 <code>source_not_allowed</code>？</h3>
-<p>不是金鑰的問題，也不是對方的伺服器 IP 沒放行——
+<p>不是金鑰的問題，也不是對方的伺服器 IP 沒放行：
 <strong>擋的是「音檔網址的主機」</strong>（<code>source.url</code> 裡的那個），不是呼叫端。
 對方的伺服器在允許清單內、金鑰也正確，只要音檔網址指向清單外的主機就會被擋。</p>
 <p>回應的 <code>details.host</code> 就是要加進 <code>api.allowed_hosts</code> 的那個主機；
@@ -3458,7 +3488,7 @@ sudo systemctl restart jtlw-api
 <td align="right">0/20</td>
 </tr>
 </tbody></table>
-<p><strong>不確定就不要填；要填寧可多不要少</strong>——少填一人會把兩個人併成一個，錯誤率明顯變高。</p>
+<p><strong>不確定就不要填；要填寧可多不要少</strong>：少填一人會把兩個人併成一個，錯誤率明顯變高。</p>
 <p>以下是<strong>現行方法</strong>（<code>--diarize-engine legacy</code>、Intel Mac、超過 8 人時）的情況：它會強制分成 N 群，
 所以<strong>不要填「現場有幾個人」，要填「發言量足以辨認的人數」</strong>。</p>
 <p>2026-09-22 用有標準答案的 7 人會議（37 分鐘）實測，指定不同人數時的「講者搞錯」比例：</p>
@@ -3491,7 +3521,7 @@ sudo systemctl restart jtlw-api
 <td align="right">7/7</td>
 </tr>
 </tbody></table>
-<p><strong>填真正的人數反而最差。</strong> 那場會議裡有兩位只講了 28 秒與 56 秒——
+<p><strong>填真正的人數反而最差。</strong> 那場會議裡有兩位只講了 28 秒與 56 秒：
 發言太短的人聲紋不足以成群，硬湊一群給他，代價是把主要講者拆散。</p>
 <p>實務上這個數字很難估準，所以：<strong>不確定就不要填</strong>，讓它自己判斷。</p>
 <blockquote>
@@ -3513,7 +3543,7 @@ sudo systemctl restart jtlw-api
 </ol>
 <p>命令列指定 <code>-m qwen3-asr-0.6b</code> 時會直接印出不能用的原因，例如
 「Qwen3-ASR 無法使用：本機無法執行（未安裝 mlx-audio；重新執行 ./install.sh 會安裝），已改用 large-v3-turbo」。</p>
-<p>確認伺服器狀態：<code>curl http://&lt;GPU 伺服器&gt;:8978/health</code>，看 <code>qwen</code> 欄位——
+<p>確認伺服器狀態：<code>curl http://&lt;GPU 伺服器&gt;:8978/health</code>，看 <code>qwen</code> 欄位：
 <code>null</code> 表示沒有安裝；<code>&quot;ready&quot;: false</code> 時 <code>error</code> 欄位會寫原因（載入中、埠號被佔用、一小時內反覆結束而停用等），
 詳細記錄在伺服器的 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code>。</p>
 <h3 id="q-qwen3-asr-為什麼不支援日文台語即時字幕">Q: Qwen3-ASR 為什麼不支援日文、台語、即時字幕？</h3>
@@ -3535,18 +3565,15 @@ sudo systemctl restart jtlw-api
 所以選單會標出來、伺服器失敗退回本機時也不會自動用它；只有 CPU 時處理中最高約 7.5 GB，記憶體不到 12 GB 的電腦不開放。
 模型第一次選用時下載（Mac 約 2.3 GB、其他約 3.4 GB）。</p>
 <h3 id="q-為什麼講者辨識不用-pyannoteaudio">Q: 為什麼講者辨識不用 pyannote.audio？</h3>
-<p>pyannote.audio 是目前最知名的講者辨識框架，準確度確實較高，但有以下限制：</p>
+<p>pyannote.audio 是目前最知名的講者辨識框架，但使用上有以下門檻：</p>
 <ul>
-<li><strong>授權限制</strong>：pyannote 的預訓練模型採用特殊授權條款，限制了可使用的用途與場景，部分模型不允許商業使用</li>
-<li><strong>需要 HuggingFace 帳號與 Token</strong>：使用前必須在 HuggingFace 網站註冊帳號、申請存取權限、產生 API Token，並在本機設定 Token 才能下載模型，增加了安裝門檻</li>
-<li><strong>不符合全地端理念</strong>：需要在第三方平台註冊帳號並同意授權條款，與本工具「零帳號、零註冊、完全地端」的設計理念不符</li>
+<li><strong>需要 HuggingFace 帳號與 Token</strong>：它的開源模型雖然是 MIT／CC BY 4.0 授權，但設有存取限制，下載前必須登入 HuggingFace、填寫使用者資料同意使用條件、產生 Token 並在本機設定，增加了安裝門檻</li>
+<li><strong>不符合全地端理念</strong>：需要在第三方平台註冊帳號，與本工具「零帳號、零註冊、完全地端」的設計理念不符</li>
 </ul>
-<p>本工具使用的 resemblyzer + spectralcluster 組合：</p>
+<p>本工具的講者辨識：</p>
 <ul>
-<li>完全開源，無授權限制</li>
-<li>不需要任何帳號或 Token，安裝即可使用</li>
-<li>模型自動下載，無需手動申請存取權限</li>
-<li>在大多數 2-3 人的對話場景下表現良好</li>
+<li><strong>NVIDIA Nemotron 3 Diarization（v2.26.0 起預設）</strong>：OpenMDW-1.1 授權、可商用；不需要任何帳號或 Token，安裝時自動下載（約 0.71 GB）。實測中文 20 場會議的段落講者搞錯由 18.52% 降到 2.92%（見 <code>BENCHMARKS.md</code>）；最多 8 位講者</li>
+<li><strong>resemblyzer + spectralcluster（備援）</strong>：完全開源，Intel Mac、超過 8 位講者、或沒有 transformers 5.18 時自動改用</li>
 </ul>
 <h3 id="q-為什麼不支援-chatgptgeminiclaude-等雲端大語言模型">Q: 為什麼不支援 ChatGPT、Gemini、Claude 等雲端大語言模型？</h3>
 <p>本工具的設計理念就是 100% 全地端執行，所有 AI 模型（語音辨識、翻譯、摘要）皆在自有設備上執行，資料不經過任何雲端服務。如果要使用雲端模型，直接使用現有的雲端服務即可（例如 Google NotebookLM、ChatGPT 等），不需要透過本工具。</p>
@@ -3646,7 +3673,7 @@ sudo systemctl restart jtlw-api
 <ul>
 <li><strong>語音辨識品質</strong>取決於所選用的 ASR 模型（Whisper 模型大小）、音訊品質（背景噪音、麥克風距離、多人交談重疊等）以及語言種類。較大的模型通常有更好的辨識準確度，但需要更多運算資源。</li>
 <li><strong>翻譯品質</strong>取決於所選用的翻譯引擎與模型。LLM 翻譯（如 phi4、qwen2.5）品質最佳但需要 LLM 伺服器（本機或區域網路）；NLLB 離線翻譯品質中等；Argos 品質較基本。不同模型對專業術語、口語表達的處理能力各有差異。</li>
-<li><strong>講者辨識</strong>預設使用 NVIDIA Nemotron 3 Diarization（最多 8 人；Intel Mac、超過 8 人時改用 resemblyzer + spectralcluster 聲紋分群），準確度仍受音訊品質、講者數量、講者聲紋相似度等因素影響。在多人交談、遠場收音、或講者聲紋相近的情境下，辨識結果可能不準確。<strong><code>--num-speakers</code> 不是萬用解</strong>——不確定時不要填，要填寧可多不要少（見常見問題）。</li>
+<li><strong>講者辨識</strong>預設使用 NVIDIA Nemotron 3 Diarization（最多 8 人；Intel Mac、超過 8 人時改用 resemblyzer + spectralcluster 聲紋分群），準確度仍受音訊品質、講者數量、講者聲紋相似度等因素影響。在多人交談、遠場收音、或講者聲紋相近的情境下，辨識結果可能不準確。<strong><code>--num-speakers</code> 不是萬用解</strong>：不確定時不要填，要填寧可多不要少（見常見問題）。</li>
 <li><strong>處理速度</strong>取決於硬體算力（CPU/GPU）、模型大小、音訊長度。使用 GPU 伺服器可大幅加速辨識與翻譯；純 CPU 環境下處理速度會顯著較慢。</li>
 <li><strong>LLM 文字校正</strong>品質取決於校正模型的語言理解能力，對於嚴重的 ASR 幻覺（如背景噪音被辨識為無意義文字）會標記為雜音移除，但無法保證所有錯誤都能被正確修正。</li>
 </ul>

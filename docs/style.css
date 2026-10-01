@@ -215,6 +215,10 @@ td strong{color:var(--ink)}
 .feat-block{margin:0 0 26px}
 .feat-block h3{font-size:20px;margin:0 0 8px}
 .feat-block p{margin:0 0 14px;color:var(--body)}
+/* 表格後面直接接文字時不要貼著表格（.feat-block p 的上邊距是 0）；有自己寫 margin 的照舊 */
+div.tbl-wrap + p,div.tbl-wrap + ul,div.tbl-wrap + ol{margin-top:16px}
+/* 功能段落以大圖結尾時，圖的陰影很重，下一段標題要多留一點 */
+.feat-block:has(+ .feat-block) > .shot-hero:last-child{margin-bottom:48px}
 
 /* ===== SOP / 文件頁：側欄目錄 + Markdown 內文 ===== */
 .doc-layout{display:flex;gap:38px;align-items:flex-start;padding:34px 0 60px}

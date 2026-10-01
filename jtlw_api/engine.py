@@ -521,7 +521,7 @@ class Engine:
         info = {}
         if self.settings.fake_engine:
             labels = [0 if i % 3 else 1 for i in range(len(raw))]
-            info = {"engine": "nemotron" if requested == "auto" else "legacy", "note": None}
+            info = {"engine": "nemotron" if requested == "auto" else "legacy", "note": None, "reason": None}
         else:
             segs = [{"start": r["start_ms"] / 1000, "end": r["end_ms"] / 1000, "text": r["text"]}
                     for r in raw]
@@ -540,7 +540,9 @@ class Engine:
                 labels = None
         # 回報實際用了哪個方法（Result.diarization）：auto 在 >8 人、偵測到 8 人全滿、或伺服器沒有 Nemotron 時會退回現行方法
         job["_diarization"] = {"requested": requested, "engine": info.get("engine") if labels is not None else None,
-                               "note": info.get("note") if labels is not None else None}
+                               "note": info.get("note") if labels is not None else None,
+                               # api_revision 2.6：退回現行方法的代碼（JTDT 要翻成英文／日文）；note 照舊給人看
+                               "reason": info.get("reason") if labels is not None else None}
         degraded = labels is None
         if degraded:
             labels = [0] * len(raw)

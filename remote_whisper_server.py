@@ -165,7 +165,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.26.0"
+SERVER_VERSION = "2.26.1"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -756,6 +756,25 @@ def _recommended_diarizer(num_speakers=None, engine="auto"):
     if not _HAS_NEMO:
         return "legacy", "伺服器的 transformers 不支援 Nemotron"
     return "nemotron", ""
+
+
+# v2.26.1（api_revision 2.6，JTDT 要求）：auto 退回現行方法時給機器看的代碼，呼叫端翻成自己的語言；note 照舊給人看。
+# **與 translate_meeting.py 的同名函式相同**（tools/test_diarizer.py 比對）
+_DIAR_REASONS = ("too_many_speakers", "speakers_saturated", "nemotron_unavailable", "nemotron_failed")
+
+
+def _diar_reason(why):
+    """退回現行方法的原因（_recommended_diarizer／_nemotron_diarize 的說明文字）→ 代碼；沒有原因或不是 Nemotron 的問題回 None"""
+    why = why or ""
+    if not why or "resemblyzer" in why or why == "指定使用現行方法":
+        return None
+    if why.startswith("指定 ") and "超過 Nemotron 上限" in why:
+        return "too_many_speakers"
+    if "全部用滿" in why:
+        return "speakers_saturated"
+    if why.startswith("Nemotron 執行失敗"):
+        return "nemotron_failed"
+    return "nemotron_unavailable"
 
 
 def _nemo_span(probs_len, seg):
@@ -2009,6 +2028,7 @@ async def diarize(
                 "device": _torch_device,
                 "engine": used,
                 "note": note,
+                "reason": _diar_reason(note) if used == "legacy" else None,   # v2.26.1
             }
             yield _line({"type": "result", **res}) if ndjson else json.dumps(res).encode()
         finally:

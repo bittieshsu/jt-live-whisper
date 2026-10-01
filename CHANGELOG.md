@@ -1,5 +1,20 @@
 # Changelog
 
+### v2.26.1 (2026-10-01)
+
+**REST API（api_revision 2.6）：講者辨識退回現行方法時附原因代碼**
+- `Result.diarization` 新增 `reason`：`too_many_speakers`（指定超過 8 人）、`speakers_saturated`（偵測到 8 人全滿）、
+  `nemotron_unavailable`（那台沒有 Nemotron）、`nemotron_failed`（執行出錯）；沒有退回時是 `null`。
+  呼叫端可以翻成自己介面的語言，`note`（中文說明）照舊（jt-doc-tools 要求）。`result_schema_version` 2.3
+- GPU 伺服器的講者辨識回應也帶 `reason`；用戶端遇到舊版伺服器（只有說明文字）會自己推出代碼
+
+**文件與網站**
+- 「為什麼不用 pyannote.audio」改寫：講者辨識預設已是 NVIDIA Nemotron 3 Diarization（OpenMDW-1.1、可商用、不需帳號）；
+  並更正 pyannote 的說法（開源模型是 MIT／CC BY 4.0，門檻是要登入 HuggingFace 同意條件並設定 Token）
+- 網站：表格與下方文字、大圖與下一段標題之間加大間距；「設定音訊裝置」三個平台各佔一列；
+  `--num-speakers` 的說明改成 Nemotron 的用法（不確定就不填，要填寧可多不要少）
+- README、SOP、BENCHMARKS 與網站拿掉全形破折號
+
 ### v2.26.0 (2026-10-01)
 
 **講者辨識預設改用 NVIDIA Nemotron 3 Diarization**

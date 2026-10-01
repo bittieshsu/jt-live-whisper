@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>安裝與使用 — jt-live-whisper</title>
+<title>安裝與使用 | jt-live-whisper</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <meta name="description" content="jt-live-whisper 安裝與使用說明：系統需求、磁碟空間、macOS / Windows / Linux 音訊裝置設定、快速開始、使用方式、互動式選單、命令列參數、目錄結構、技術架構與硬體建議。" />
 <link rel="stylesheet" href="style.css" />
@@ -48,7 +48,7 @@
   <div class="wrap">
     <span class="eyebrow"><span class="zh">安裝與使用</span><span class="en">Install &amp; usage</span></span>
     <h1 style="margin-top:6px"><span class="zh">從安裝到上手，一頁到位</span><span class="en">From install to first run</span></h1>
-    <p class="lead"><span class="zh">系統需求、音訊裝置設定、互動式選單、命令列參數與硬體建議——把整份操作手冊濃縮在這裡。需要逐步細節，請看<a href="sop.html">完整使用手冊</a>。</span><span class="en">Requirements, audio setup, the interactive menu, CLI flags and hardware tips — the whole manual, condensed. For step-by-step detail, see the <a href="sop.html">full manual</a>.</span></p>
+    <p class="lead"><span class="zh">系統需求、音訊裝置設定、互動式選單、命令列參數與硬體建議，把整份操作手冊濃縮在這裡。需要逐步細節，請看<a href="sop.html">完整使用手冊</a>。</span><span class="en">Requirements, audio setup, the interactive menu, CLI flags and hardware tips: the whole manual, condensed. For step-by-step detail, see the <a href="sop.html">full manual</a>.</span></p>
     <div class="cta" style="margin-top:24px">
       <a class="btn btn-primary" href="sop.html"><span class="zh">完整使用手冊</span><span class="en">Full manual</span></a>
       <a class="btn btn-ghost" href="https://github.com/jasoncheng7115/jt-live-whisper/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a>
@@ -63,7 +63,7 @@
       <div class="card"><h3><span class="badge">A</span>macOS</h3><p><span class="zh">macOS（Apple Silicon / Intel）· Python 3.12+ · <a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a>（需事先安裝）· <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener">BlackHole 2ch</a>（虛擬音訊驅動，<b>選配</b>；macOS 13 以上預設用內建 ScreenCaptureKit，免安裝驅動）</span><span class="en">macOS (Apple Silicon / Intel) · Python 3.12+ · <a href="https://brew.sh/" target="_blank" rel="noopener">Homebrew</a> (pre-installed) · <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener">BlackHole 2ch</a> (<b>optional</b>; macOS 13+ uses the built-in ScreenCaptureKit, no driver needed)</span></p></div>
       <div class="card"><h3><span class="badge">B</span>Windows</h3><p><span class="zh">Windows 10 以上 · Python 3.12+（從 <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a> 安裝，勾選「Add to PATH」）· PowerShell 5.1+（Windows 10 內建）</span><span class="en">Windows 10+ · Python 3.12+ (from <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a>, check "Add to PATH") · PowerShell 5.1+ (built in)</span></p></div>
       <div class="card"><h3><span class="badge">C</span>Linux</h3><p><span class="zh">Ubuntu 22.04 / Debian 12 以上（其他發行版需自行安裝系統套件）· Python 3.10+（含 python3-venv）· 桌面版使用 PipeWire 或 PulseAudio，<b>免裝虛擬音效卡</b>；無桌面主機可安裝伺服器版（WebUI 以 systemd 常駐）</span><span class="en">Ubuntu 22.04 / Debian 12+ (other distros: install system packages manually) · Python 3.10+ (with python3-venv) · Desktop uses PipeWire or PulseAudio, <b>no virtual sound card</b>; headless hosts can use the server edition (WebUI as a systemd service)</span></p></div>
-      <div class="card"><h3><span class="badge">D</span><span class="zh">共通</span><span class="en">Common</span></h3><p><span class="zh">地端 LLM 伺服器（翻譯 / 摘要用，推薦 <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a>）。<b>沒有 LLM 伺服器也能用</b>：可切換為 NLLB / Argos 離線翻譯，但摘要功能需要 LLM。</span><span class="en">A local LLM server (for translation/summary; <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a> recommended). <b>Works without one</b> via NLLB / Argos offline translation — but summaries need an LLM.</span></p></div>
+      <div class="card"><h3><span class="badge">D</span><span class="zh">共通</span><span class="en">Common</span></h3><p><span class="zh">地端 LLM 伺服器（翻譯 / 摘要用，推薦 <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a>）。<b>沒有 LLM 伺服器也能用</b>：可切換為 NLLB / Argos 離線翻譯，但摘要功能需要 LLM。</span><span class="en">A local LLM server (for translation/summary; <a href="https://ollama.com/" target="_blank" rel="noopener">Ollama</a> recommended). <b>Works without one</b> via NLLB / Argos offline translation, but summaries need an LLM.</span></p></div>
     </div>
 
     <h3 style="margin:34px 0 12px"><span class="zh">磁碟空間需求</span><span class="en">Disk space</span></h3>
@@ -111,7 +111,7 @@ curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main
 <pre>mkdir -p ~/Apps/jt-live-whisper &amp;&amp; cd ~/Apps/jt-live-whisper
 curl -fsSL https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/install.sh -o install.sh
 <span class="g">bash</span> install.sh --server</pre>
-    <p class="note"><span class="zh"><strong>伺服器版：</strong>第一次安裝會自動產生<b>管理密碼</b>（上傳、開始／停止作業）與<b>唯讀密碼</b>（看畫面、讀逐字稿），各只顯示一次，請當下記下。請用一般帳號安裝，服務會以該帳號執行。</span><span class="en"><strong>Server install:</strong> the first install generates an <b>admin password</b> (upload, start/stop jobs) and a <b>read-only password</b> (view, read transcripts), each shown once — note them down. Install as a regular user; the service runs as that user.</span></p>
+    <p class="note"><span class="zh"><strong>伺服器版：</strong>第一次安裝會自動產生<b>管理密碼</b>（上傳、開始／停止作業）與<b>唯讀密碼</b>（看畫面、讀逐字稿），各只顯示一次，請當下記下。請用一般帳號安裝，服務會以該帳號執行。</span><span class="en"><strong>Server install:</strong> the first install generates an <b>admin password</b> (upload, start/stop jobs) and a <b>read-only password</b> (view, read transcripts), each shown once; note them down. Install as a regular user; the service runs as that user.</span></p>
     <p class="note"><span class="zh">兩種安裝都可用 <code>./install.sh --doctor</code> 檢查音訊、套件、GPU 與伺服器連線；<code>--upgrade</code> 升級、<code>--uninstall</code> 移除。</span><span class="en">Both support <code>./install.sh --doctor</code> (audio, packages, GPU, server connectivity), <code>--upgrade</code> and <code>--uninstall</code>.</span></p>
     <div class="cmd-label">Windows (PowerShell)</div>
 <pre>mkdir C:\jt-live-whisper -Force | Out-Null; cd C:\jt-live-whisper
@@ -120,29 +120,29 @@ irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/instal
     <p class="note"><span class="zh">安裝腳本會自動下載並設定所有地端 AI 模型和相依套件。最後會詢問是否設定 GPU 語音辨識伺服器（選填）。首次安裝約 10–20 分鐘（視網路速度，macOS 需額外編譯 whisper.cpp；Linux 不需要）。</span><span class="en">The installer downloads and configures all local AI models and dependencies, then offers optional GPU-server setup. First run ~10–20 min (macOS also compiles whisper.cpp; Linux does not need it).</span></p>
 
     <h3 style="margin:28px 0 10px"><span class="zh">2. 設定音訊裝置</span><span class="en">2. Set up audio</span></h3>
-    <div class="grid g2">
-      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>macOS — ScreenCaptureKit <span style="font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap"><span class="zh">v2.17.0 起支援</span><span class="en">since v2.17.0</span></span></h3>
-        <p style="font-size:14px"><span class="zh"><b>jt-live-whisper v2.17.0 起</b>，macOS 13 以上<b>不需要安裝任何驅動</b>：使用系統內建的 ScreenCaptureKit 擷取系統音訊，不必建立多重輸出裝置、不必重開機，Zoom / Teams 的喇叭與麥克風設定也完全不用改，喇叭或耳機照常出聲。</span><span class="en"><b>Since jt-live-whisper v2.17.0</b>, on macOS 13+ <b>no audio driver is needed</b>: system audio is captured with the built-in ScreenCaptureKit — no Multi-Output Device, no reboot, and no changes to your Zoom/Teams audio settings.</span></p>
+    <div class="grid">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>macOS · ScreenCaptureKit <span style="font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap"><span class="zh">v2.17.0 起支援</span><span class="en">since v2.17.0</span></span></h3>
+        <p style="font-size:14px"><span class="zh"><b>jt-live-whisper v2.17.0 起</b>，macOS 13 以上<b>不需要安裝任何驅動</b>：使用系統內建的 ScreenCaptureKit 擷取系統音訊，不必建立多重輸出裝置、不必重開機，Zoom / Teams 的喇叭與麥克風設定也完全不用改，喇叭或耳機照常出聲。</span><span class="en"><b>Since jt-live-whisper v2.17.0</b>, on macOS 13+ <b>no audio driver is needed</b>: system audio is captured with the built-in ScreenCaptureKit: no Multi-Output Device, no reboot, and no changes to your Zoom/Teams audio settings.</span></p>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.75;color:var(--body)">
           <li><span class="zh"><b>只需授權一次「螢幕錄製」</b>（macOS 15 顯示為「螢幕與系統音訊錄製」）。macOS 把 ScreenCaptureKit 歸在此權限下，即使程式只取音訊、不擷取畫面。</span><span class="en"><b>Grant "Screen Recording" once</b> ("Screen &amp; System Audio Recording" on macOS 15). macOS files ScreenCaptureKit under this permission even though only audio is captured.</span></li>
           <li><span class="zh"><b>授權對象是你的終端機程式</b>（Terminal / iTerm2 / Ghostty / VS Code…），不是 Python。程式會自動判讀並指名該勾選哪一個，首次執行時直接詢問是否開啟授權對話框。</span><span class="en"><b>The permission belongs to your terminal app</b> (Terminal / iTerm2 / Ghostty / VS Code…), not Python. The app detects and names it for you, and offers to open the dialog on first run.</span></li>
           <li><span class="zh"><b>授權後需用 Cmd+Q 完全結束該終端機程式再重新開啟</b>，權限才會生效。隨時可用 <code>./start.sh --sck-permission</code> 重新授權，WebUI 設定頁也有授權按鈕。</span><span class="en"><b>Quit the terminal app completely (Cmd+Q) and reopen it</b> for the permission to take effect. Re-authorize anytime with <code>./start.sh --sck-permission</code>, or from the WebUI settings page.</span></li>
         </ul>
-        <p class="note" style="margin-top:12px;font-size:13px"><span class="zh">系統設為靜音時只會收到無聲訊號（用耳機聽沒問題，但不要靜音）。macOS 12 以下或不想授權時，仍可改用 BlackHole：安裝驅動 → 重開機 → 建立多重輸出裝置（勾選喇叭 + BlackHole 2ch、主裝置選 BlackHole）→ 系統設定選此裝置；也可用 <code>--audio-source blackhole</code> 強制指定。</span><span class="en">Muting system output yields silence (headphones are fine — just don’t mute). On macOS 12 or if you prefer not to grant the permission, BlackHole still works: install → reboot → create a Multi-Output Device (speakers + BlackHole 2ch, BlackHole as primary) → select it in System Settings; or force it with <code>--audio-source blackhole</code>.</span></p>
+        <p class="note" style="margin-top:12px;font-size:13px"><span class="zh">系統設為靜音時只會收到無聲訊號（用耳機聽沒問題，但不要靜音）。macOS 12 以下或不想授權時，仍可改用 BlackHole：安裝驅動 → 重開機 → 建立多重輸出裝置（勾選喇叭 + BlackHole 2ch、主裝置選 BlackHole）→ 系統設定選此裝置；也可用 <code>--audio-source blackhole</code> 強制指定。</span><span class="en">Muting system output yields silence (headphones are fine; just don’t mute). On macOS 12 or if you prefer not to grant the permission, BlackHole still works: install → reboot → create a Multi-Output Device (speakers + BlackHole 2ch, BlackHole as primary) → select it in System Settings; or force it with <code>--audio-source blackhole</code>.</span></p>
       </div>
-      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg></span>Windows — WASAPI</h3>
-        <p style="font-size:14px"><span class="zh">Windows <b>不需要</b>安裝額外虛擬音訊驅動。程式透過 WASAPI Loopback 直接擷取系統播放的音訊，大多數情況不需手動設定。</span><span class="en">Windows needs <b>no</b> extra audio driver — the app captures system playback via WASAPI Loopback, usually with zero setup.</span></p>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg></span>Windows · WASAPI</h3>
+        <p style="font-size:14px"><span class="zh">Windows <b>不需要</b>安裝額外虛擬音訊驅動。程式透過 WASAPI Loopback 直接擷取系統播放的音訊，大多數情況不需手動設定。</span><span class="en">Windows needs <b>no</b> extra audio driver: the app captures system playback via WASAPI Loopback, usually with zero setup.</span></p>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.75;color:var(--body)">
           <li><span class="zh">若自動偵測失敗，可啟用「立體聲混音」：右鍵音量圖示 → 音效設定 → 錄製 → 右鍵「顯示已停用的裝置」→ 啟用「立體聲混音」。</span><span class="en">If auto-detect fails, enable "Stereo Mix": right-click the volume icon → Sound settings → Recording → show disabled devices → enable Stereo Mix.</span></li>
-          <li><span class="zh">驗證：執行 <code>.\start.ps1 --list-devices</code> 確認列表中有 loopback 裝置。</span><span class="en">Verify with <code>.\start.ps1 --list-devices</code> — a loopback device should appear.</span></li>
+          <li><span class="zh">驗證：執行 <code>.\start.ps1 --list-devices</code> 確認列表中有 loopback 裝置。</span><span class="en">Verify with <code>.\start.ps1 --list-devices</code>; a loopback device should appear.</span></li>
         </ul>
       </div>
-      <div class="card" style="grid-column:1/-1"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg></span>Linux — PipeWire / PulseAudio</h3>
-        <p style="font-size:14px"><span class="zh">Linux <b>不需要</b>安裝虛擬音效卡，也不必改變輸出裝置。程式直接從「預設喇叭」的 monitor 來源錄音，喇叭或耳機照常出聲，會議軟體的設定不用改。</span><span class="en">Linux needs <b>no</b> virtual sound card and no output changes — the app records from the default speaker’s monitor source while your speakers or headphones keep playing.</span></p>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><path d="M8 10h.01M12 10h.01M16 10h.01"/></svg></span>Linux · PipeWire / PulseAudio</h3>
+        <p style="font-size:14px"><span class="zh">Linux <b>不需要</b>安裝虛擬音效卡，也不必改變輸出裝置。程式直接從「預設喇叭」的 monitor 來源錄音，喇叭或耳機照常出聲，會議軟體的設定不用改。</span><span class="en">Linux needs <b>no</b> virtual sound card and no output changes: the app records from the default speaker’s monitor source while your speakers or headphones keep playing.</span></p>
         <ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.75;color:var(--body)">
           <li><span class="zh">擷取的是<b>目前的預設輸出裝置</b>，換耳機或喇叭時自動跟著換；要指定其他來源可設 <code>JTLW_MONITOR_SOURCE</code> 或 config.json 的 <code>linux_monitor_source</code>。</span><span class="en">It follows the <b>current default output</b>; to pick another source set <code>JTLW_MONITOR_SOURCE</code> or <code>linux_monitor_source</code> in config.json.</span></li>
           <li><span class="zh">即時模式需在<b>桌面工作階段內</b>執行；SSH 連線時連不到音訊伺服器，只能做離線處理。</span><span class="en">Live mode must run <b>inside the desktop session</b>; over SSH the audio server is unreachable, so only offline processing works.</span></li>
-          <li><span class="zh">驗證：執行 <code>./start.sh --list-devices</code>，應看到 <code>[-500] 系統音訊（…）</code>；或執行 <code>./install.sh --doctor</code>。</span><span class="en">Verify with <code>./start.sh --list-devices</code> — <code>[-500] 系統音訊 (…)</code> should appear — or run <code>./install.sh --doctor</code>.</span></li>
+          <li><span class="zh">驗證：執行 <code>./start.sh --list-devices</code>，應看到 <code>[-500] 系統音訊（…）</code>；或執行 <code>./install.sh --doctor</code>。</span><span class="en">Verify with <code>./start.sh --list-devices</code>; <code>[-500] 系統音訊 (…)</code> should appear, or run <code>./install.sh --doctor</code>.</span></li>
         </ul>
       </div>
     </div>
@@ -155,7 +155,7 @@ brew install ollama
 curl -fsSL https://ollama.com/install.sh | sh
 <span class="c"># 下載推薦的翻譯模型（各平台皆同）</span>
 ollama pull gemma4:26b   <span class="c"># 約 17GB；記憶體不足可改 qwen2.5:14b</span></pre>
-    <p class="note"><span class="zh"><strong>推薦硬體：</strong>若有 <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/" target="_blank" rel="noopener">NVIDIA DGX Spark</a>（128GB），把 Ollama 裝在上面 CP 值很高，透過 <code>--llm-host</code> 指向即可。<strong>不裝 LLM 也能翻譯</strong>：可切換 NLLB（中日英互譯）或 Argos（僅英翻中）離線引擎，但摘要仍需 LLM。</span><span class="en"><strong>Recommended:</strong> a <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/" target="_blank" rel="noopener">DGX Spark</a> (128 GB) is great value for Ollama; point to it via <code>--llm-host</code>. <strong>No LLM?</strong> Use NLLB / Argos offline — summaries still need an LLM.</span></p>
+    <p class="note"><span class="zh"><strong>推薦硬體：</strong>若有 <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/" target="_blank" rel="noopener">NVIDIA DGX Spark</a>（128GB），把 Ollama 裝在上面 CP 值很高，透過 <code>--llm-host</code> 指向即可。<strong>不裝 LLM 也能翻譯</strong>：可切換 NLLB（中日英互譯）或 Argos（僅英翻中）離線引擎，但摘要仍需 LLM。</span><span class="en"><strong>Recommended:</strong> a <a href="https://www.nvidia.com/zh-tw/products/workstations/dgx-spark/" target="_blank" rel="noopener">DGX Spark</a> (128 GB) is great value for Ollama; point to it via <code>--llm-host</code>. <strong>No LLM?</strong> Use NLLB / Argos offline; summaries still need an LLM.</span></p>
 
     <h3 style="margin:28px 0 10px"><span class="zh">4. 啟動</span><span class="en">4. Launch</span></h3>
 <pre><span class="c"># macOS / Linux</span>
@@ -171,7 +171,7 @@ cd C:\jt-live-whisper
 <section id="usage">
   <div class="wrap">
     <div class="sec-head"><h2><span class="zh">使用方式</span><span class="en">Usage</span></h2>
-      <p><span class="zh">以下以 macOS / Linux 指令為主，Windows 請把 <code>./start.sh</code> 換成 <code>.\start.ps1</code>，其餘參數相同。</span><span class="en">Examples use macOS / Linux; on Windows replace <code>./start.sh</code> with <code>.\start.ps1</code> — flags are identical.</span></p></div>
+      <p><span class="zh">以下以 macOS / Linux 指令為主，Windows 請把 <code>./start.sh</code> 換成 <code>.\start.ps1</code>，其餘參數相同。</span><span class="en">Examples use macOS / Linux; on Windows replace <code>./start.sh</code> with <code>.\start.ps1</code>; flags are identical.</span></p></div>
 
     <div class="cmd-label"><span class="zh">WebUI 瀏覽器介面（推薦）</span><span class="en">Web UI (recommended)</span></div>
 <pre>./start.sh --webui            <span class="c"># macOS / Linux</span>
@@ -201,7 +201,7 @@ cd C:\jt-live-whisper
 ./start.sh --input meeting.mp3 --diarize --num-speakers 3 --summarize
 <span class="c"># 中文會議用 Qwen3-ASR（實驗；有 GPU 伺服器用伺服器，加 --local-asr 在本機跑）</span>
 ./start.sh --input meeting.mp3 --mode zh -m qwen3-asr-0.6b --diarize</pre>
-    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh"><b>不確定就不要填 <code>--num-speakers</code></b>。實測 7 人會議填「7」反而最差（講者搞錯 30.15%），不填是 22.90%——發言太短的人聲紋不足以成群，硬湊一群給他會把主要講者拆散。</span><span class="en"><b>When unsure, omit <code>--num-speakers</code>.</b> On a real 7-speaker meeting, passing "7" was the worst result (30.15% speaker confusion) versus 22.90% when omitted — people who barely speak can't form a reliable voiceprint, and forcing a cluster for them fragments the main speakers.</span></p>
+    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh"><b>不確定就不要填 <code>--num-speakers</code>；要填寧可多不要少。</b>預設的 Nemotron 把它當上限：中文 20 場會議實測，填正確人數與不填幾乎相同（段落講者搞錯 2.91% 對 2.92%），少填一人明顯變差（6.89%）。現行方法（<code>--diarize-engine legacy</code>、Intel Mac、超過 8 人時）則會強制分成那麼多群，填法見手冊。</span><span class="en"><b>When unsure, omit <code>--num-speakers</code>; if you set it, err high rather than low.</b> The default Nemotron treats it as an upper bound: on 20 Chinese meetings the correct count scored the same as omitting it (2.91% vs 2.92% speaker errors), while one too few was clearly worse (6.89%). The legacy method (<code>--diarize-engine legacy</code>, Intel Macs, more than 8 speakers) forces exactly that many clusters; see the manual.</span></p>
 
     <div class="cmd-label"><span class="zh">批次摘要</span><span class="en">Batch summary</span></div>
 <pre>./start.sh --summarize logs/英翻中_逐字稿_20260101_120000.txt</pre>
@@ -221,7 +221,7 @@ journalctl -u jt-live-whisper-webui -f
 ./install.sh --doctor
 <span class="c"># 升級（從 GitHub 拉最新版，會自動重啟服務）</span>
 ./install.sh --upgrade</pre>
-    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh">安裝完成時會<b>產生一組遠端管理密碼並顯示一次</b>，請當下記下來——設定檔裡只存 sha256 雜湊，遺失只能重設。</span><span class="en">The installer <b>prints a generated admin password once</b> — write it down. Only its SHA-256 hash is stored; if lost it must be reset.</span></p>
+    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh">安裝完成時會<b>產生一組遠端管理密碼並顯示一次</b>，請當下記下來；設定檔裡只存 sha256 雜湊，遺失只能重設。</span><span class="en">The installer <b>prints a generated admin password once</b>; write it down. Only its SHA-256 hash is stored; if lost it must be reset.</span></p>
 
     <div class="cmd-label" style="margin-top:22px"><span class="zh">伺服器模式的安全設定</span><span class="en">Hardening server mode</span></div>
     <div class="tbl-wrap">
@@ -230,12 +230,12 @@ journalctl -u jt-live-whisper-webui -f
         <tbody>
           <tr><td><code>webui.allowed_ips</code></td><td><span class="zh">只允許清單內的來源連進來，支援 CIDR（如 <code>["192.168.0.0/24"]</code>）。<b>空的＝不限制</b>，本機一律放行。</span><span class="en">Only listed sources may connect; CIDR supported. <b>Empty = unrestricted</b>; localhost always allowed.</span></td></tr>
           <tr><td><code>webui.tls</code></td><td><span class="zh">加密連線，憑證預設自簽，可用 <code>tls_cert</code> / <code>tls_key</code> 換成正式憑證。<b>預設關閉</b>，升級不會把既有網址從 http 變成 https。</span><span class="en">Encrypts the connection with a self-signed cert by default; swap in your own via <code>tls_cert</code> / <code>tls_key</code>. <b>Off by default</b> so upgrades never change your URL.</span></td></tr>
-          <tr><td><code>webui.trusted_proxies</code></td><td><span class="zh">放在 nginx / Caddy 後面時必填。<b>不設定就完全不信任 <code>X-Forwarded-For</code></b>——否則代理後面的每個請求都會被當成本機。</span><span class="en">Required behind nginx / Caddy. <b>Without it <code>X-Forwarded-For</code> is ignored entirely</b>, otherwise every proxied request would look local.</span></td></tr>
+          <tr><td><code>webui.trusted_proxies</code></td><td><span class="zh">放在 nginx / Caddy 後面時必填。<b>不設定就完全不信任 <code>X-Forwarded-For</code></b>，否則代理後面的每個請求都會被當成本機。</span><span class="en">Required behind nginx / Caddy. <b>Without it <code>X-Forwarded-For</code> is ignored entirely</b>, otherwise every proxied request would look local.</span></td></tr>
           <tr><td><code>webui_passwords</code></td><td><span class="zh">遠端唯讀 / 管理密碼，只存 sha256 雜湊。安全設定、關鍵字、懸浮字幕、字幕轉發四頁<b>一律只有本機能改</b>。</span><span class="en">Remote read / admin passwords, stored as SHA-256 only. The four settings pages are <b>local-only, always</b>.</span></td></tr>
         </tbody>
       </table>
     </div>
-    <p style="font-size:13.5px;color:var(--muted);margin:8px 0 0"><span class="zh">要從別台電腦改那四頁設定，用 SSH 通道即可，不必把管理介面暴露在網路上：<code>ssh -L 19781:127.0.0.1:19781 帳號@伺服器</code>，然後瀏覽器開 <code>http://127.0.0.1:19781</code>。</span><span class="en">To reach the local-only pages from another machine, tunnel instead of exposing the UI: <code>ssh -L 19781:127.0.0.1:19781 user@server</code>, then open <code>http://127.0.0.1:19781</code>.</span></p>
+    <p style="font-size:13.5px;color:var(--muted);margin:14px 0 0"><span class="zh">要從別台電腦改那四頁設定，用 SSH 通道即可，不必把管理介面暴露在網路上：<code>ssh -L 19781:127.0.0.1:19781 帳號@伺服器</code>，然後瀏覽器開 <code>http://127.0.0.1:19781</code>。</span><span class="en">To reach the local-only pages from another machine, tunnel instead of exposing the UI: <code>ssh -L 19781:127.0.0.1:19781 user@server</code>, then open <code>http://127.0.0.1:19781</code>.</span></p>
   </div>
 </section>
 
@@ -295,7 +295,7 @@ journalctl -u jt-live-whisper-webui -f
         <tr><td><code>--webui</code></td><td><span class="zh">啟動 WebUI 瀏覽器介面</span><span class="en">Launch the Web UI</span></td><td></td></tr>
         <tr><td><code>--mode MODE</code></td><td><span class="zh">功能模式（en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record）</span><span class="en">Mode (en2zh / zh2en / ja2zh / zh2ja / ko2zh / zh2ko / en_zh / ja_zh / ko_zh / en / zh / ja / ko / nan / nan2en / record)</span></td><td><code>en2zh</code></td></tr>
         <tr><td><code>--asr ASR</code></td><td><span class="zh">辨識引擎（whisper / moonshine / faster-whisper）</span><span class="en">ASR engine</span></td><td><code>whisper</code></td></tr>
-        <tr><td><code>-m, --model</code></td><td><span class="zh">辨識模型（base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b）；qwen3-asr-0.6b 為實驗選項，限離線、中英韓單向，在 GPU 伺服器或本機（<code>--local-asr</code>）執行，不符合時說明原因並改用推薦模型</span><span class="en">Recognition model (base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b); qwen3-asr-0.6b is experimental: offline only, Chinese/English/Korean one-way, on the GPU server or locally (<code>--local-asr</code>) — otherwise the reason is shown and the recommended model is used</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
+        <tr><td><code>-m, --model</code></td><td><span class="zh">辨識模型（base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b）；qwen3-asr-0.6b 為實驗選項，限離線、中英韓單向，在 GPU 伺服器或本機（<code>--local-asr</code>）執行，不符合時說明原因並改用推薦模型</span><span class="en">Recognition model (base.en … large-v3-turbo / large-v3 / breeze-asr-26 / qwen3-asr-0.6b); qwen3-asr-0.6b is experimental: offline only, Chinese/English/Korean one-way, on the GPU server or locally (<code>--local-asr</code>); otherwise the reason is shown and the recommended model is used</span></td><td><span class="zh">依裝置推薦</span><span class="en">auto</span></td></tr>
         <tr><td><code>--moonshine-model</code></td><td><span class="zh">Moonshine 模型（medium / small / tiny）</span><span class="en">Moonshine model</span></td><td><code>medium</code></td></tr>
         <tr><td><code>-s, --scene</code></td><td><span class="zh">使用場景（meeting / training / presentation / subtitle）</span><span class="en">Scene</span></td><td><code>training</code></td></tr>
         <tr><td><code>-e, --engine</code></td><td><span class="zh">翻譯引擎（llm / nllb / argos）</span><span class="en">Translation engine</span></td><td><code>llm</code></td></tr>
@@ -306,7 +306,7 @@ journalctl -u jt-live-whisper-webui -f
         <tr><td><code>--list-devices</code></td><td><span class="zh">列出可用音訊裝置後離開</span><span class="en">List audio devices and exit</span></td><td></td></tr>
         <tr><td><code>--input FILE […]</code></td><td><span class="zh">離線處理音訊檔</span><span class="en">Offline-process audio files</span></td><td></td></tr>
         <tr><td><code>--diarize</code></td><td><span class="zh">啟用講者辨識（需 --input）</span><span class="en">Enable diarization (needs --input)</span></td><td></td></tr>
-        <tr><td><code>--num-speakers N</code></td><td><span class="zh">指定講者人數（需 --diarize）；不確定時不要填，實測指定不會比自動偵測準</span><span class="en">Speaker count (needs --diarize); leave it empty if unsure — measured no better than auto</span></td><td><span class="zh">自動</span><span class="en">auto</span></td></tr>
+        <tr><td><code>--num-speakers N</code></td><td><span class="zh">指定講者人數（需 --diarize）；不確定時不要填，實測指定不會比自動偵測準</span><span class="en">Speaker count (needs --diarize); leave it empty if unsure; measured no better than auto</span></td><td><span class="zh">自動</span><span class="en">auto</span></td></tr>
         <tr><td><code>--diarize-engine</code></td><td><span class="zh">講者辨識方法 auto（能用 Nemotron 就用，預設）／ nemotron ／ legacy（resemblyzer）</span><span class="en">Diarization method auto / nemotron / legacy (Nemotron activates with transformers 5.18+, not yet released; the current method is used until then)</span></td><td><code>auto</code></td></tr>
         <tr><td><code>--summarize [FILE …]</code></td><td><span class="zh">生成 AI 摘要</span><span class="en">Generate AI summary</span></td><td></td></tr>
         <tr><td><code>--summary-model</code></td><td><span class="zh">摘要用 LLM 模型</span><span class="en">Summary LLM model</span></td><td><code>qwen3.8:27b</code></td></tr>
@@ -369,12 +369,12 @@ webui.py (FastAPI + WebSocket)
     <div style="margin-top:34px">
       <div class="feat-block">
         <h3><span class="zh">GPU 伺服器的版本檢查與更新</span><span class="en">GPU server version check &amp; update</span></h3>
-        <p><span class="zh">GPU 伺服器上跑的 <code>remote_whisper_server.py</code> 是一支獨立的服務，<strong>不會跟著本機升級一起更新</strong>。本機執行 <code>./install.sh --upgrade</code> 更新的是本機程式，伺服器上的服務還是舊的——而有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器。</span><span class="en">The <code>remote_whisper_server.py</code> running on your GPU box is a separate service that <strong>does not upgrade with the client</strong>. <code>./install.sh --upgrade</code> updates the local program only — and when a GPU server is configured, recognition and diarization go there by default.</span></p>
+        <p><span class="zh">GPU 伺服器上跑的 <code>remote_whisper_server.py</code> 是一支獨立的服務，<strong>不會跟著本機升級一起更新</strong>。本機執行 <code>./install.sh --upgrade</code> 更新的是本機程式，伺服器上的服務還是舊的，而有設定 GPU 伺服器時，辨識與講者辨識預設就走伺服器。</span><span class="en">The <code>remote_whisper_server.py</code> running on your GPU box is a separate service that <strong>does not upgrade with the client</strong>. <code>./install.sh --upgrade</code> updates the local program only, and when a GPU server is configured, recognition and diarization go there by default.</span></p>
         <p><span class="zh">v2.21.1 起，本機每次連上伺服器都會比對版本，不一致時提示並說明如何更新：</span><span class="en">Since v2.21.1 the client compares versions on every connect and tells you how to update:</span></p>
 <pre>  [版本不一致] GPU 伺服器 v2.20.9，本機 v2.21.1
   辨識與講者辨識仍會使用伺服器上的舊版；伺服器未開放遠端更新
   手動更新：scp remote_whisper_server.py <span class="g">主機</span>:~/jt-whisper-server/server.py 後重啟服務</pre>
-        <p><span class="zh"><strong>版本不一致不會中斷作業</strong>——伺服器舊一點通常仍可使用，只是你會知道結果來自哪個版本。</span><span class="en"><strong>A mismatch never aborts the job</strong> — an older server usually still works; you just know which version produced the result.</span></p>
+        <p><span class="zh"><strong>版本不一致不會中斷作業</strong>：伺服器舊一點通常仍可使用，只是你會知道結果來自哪個版本。</span><span class="en"><strong>A mismatch never aborts the job</strong>: an older server usually still works; you just know which version produced the result.</span></p>
       </div>
 
       <div class="feat-block">
@@ -396,7 +396,7 @@ webui.py (FastAPI + WebSocket)
 }</pre>
           </div>
         </div>
-        <p style="margin-top:14px"><span class="zh">⚠️ <strong>這個功能本質上是「讓遠端主機執行你送過去的程式」。</strong> 區域網路不等於安全網路，所以預設關閉。不確定是否需要時，維持關閉、手動更新即可——版本提示照樣會出現。</span><span class="en">⚠️ <strong>This lets a remote host execute code you send it.</strong> A LAN is not a trusted network, so it ships disabled. If in doubt, leave it off and update manually — you still get the version warning.</span></p>
+        <p style="margin-top:14px"><span class="zh">⚠️ <strong>這個功能本質上是「讓遠端主機執行你送過去的程式」。</strong> 區域網路不等於安全網路，所以預設關閉。不確定是否需要時，維持關閉、手動更新即可，版本提示照樣會出現。</span><span class="en">⚠️ <strong>This lets a remote host execute code you send it.</strong> A LAN is not a trusted network, so it ships disabled. If in doubt, leave it off and update manually; you still get the version warning.</span></p>
         <div class="tbl-wrap">
           <table>
             <thead><tr><th><span class="zh">更新前的檢查</span><span class="en">Pre-update check</span></th><th><span class="zh">不通過時</span><span class="en">On failure</span></th></tr></thead>
@@ -413,8 +413,8 @@ webui.py (FastAPI + WebSocket)
           </table>
         </div>
         <p><span class="zh">任何一項不過就保留舊版、服務不受影響；舊版會備份成 <code>server.py.bak-&lt;時間&gt;</code>，只保留最近 5 份。</span><span class="en">Any failure keeps the old version and leaves the service untouched; the old file is backed up as <code>server.py.bak-&lt;time&gt;</code>, last 5 kept.</span></p>
-        <p><span class="zh"><strong>這些檢查分兩類。</strong>只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它擋得住<strong>壞掉的</strong>更新、擋不住<strong>惡意的</strong>更新——<strong>密鑰是唯一的安全邊界。</strong></span><span class="en"><strong>Two different kinds of check.</strong> Only the <strong>signature</strong> governs <em>who</em> may update; the rest govern <em>whether the update breaks the service</em>. <code>--selftest</code> runs the uploaded code, so it stops <strong>broken</strong> updates, not <strong>malicious</strong> ones — <strong>the key is the only security boundary.</strong></span></p>
-        <p><span class="zh"><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害），無法偽造新的 payload。<br><strong>為什麼不接受降版</strong>：多個用戶端共用同一台伺服器時，若只比對「版本不同」，新舊用戶端會無限來回互相覆蓋，每次重啟都中斷別人的辨識。<br><strong>為什麼要先啟動一次</strong>：服務沒有 systemd 之類的看門狗，換上去起不來就直接消失、不會自動復原。</span><span class="en"><strong>Why sign instead of sending the key</strong>: this is plain HTTP — sending the key hands a reusable credential to anyone sniffing the LAN. With HMAC a sniffer can only replay the same payload (harmless), never forge a new one.<br><strong>Why downgrades are refused</strong>: with several clients sharing one server, matching on "different version" alone makes old and new clients overwrite each other forever, each restart killing someone's job.<br><strong>Why it must boot once first</strong>: there is no systemd-style watchdog — a build that won't start simply disappears.</span></p>
+        <p><span class="zh"><strong>這些檢查分兩類。</strong>只有<strong>簽章</strong>在管「誰可以更新」；其餘都在管「更新的東西會不會把服務弄死」。<code>--selftest</code> 本身就會執行上傳的程式碼，所以它擋得住<strong>壞掉的</strong>更新、擋不住<strong>惡意的</strong>更新：<strong>密鑰是唯一的安全邊界。</strong></span><span class="en"><strong>Two different kinds of check.</strong> Only the <strong>signature</strong> governs <em>who</em> may update; the rest govern <em>whether the update breaks the service</em>. <code>--selftest</code> runs the uploaded code, so it stops <strong>broken</strong> updates, not <strong>malicious</strong> ones: <strong>the key is the only security boundary.</strong></span></p>
+        <p><span class="zh"><strong>為什麼用簽章而不是直接送密鑰</strong>：這條連線是 HTTP。直接送密鑰的話，任何能側錄區網封包的人都拿得到一組可重複使用的憑證。改用 HMAC 之後，側錄者只能重放「同一份內容」（無害），無法偽造新的 payload。<br><strong>為什麼不接受降版</strong>：多個用戶端共用同一台伺服器時，若只比對「版本不同」，新舊用戶端會無限來回互相覆蓋，每次重啟都中斷別人的辨識。<br><strong>為什麼要先啟動一次</strong>：服務沒有 systemd 之類的看門狗，換上去起不來就直接消失、不會自動復原。</span><span class="en"><strong>Why sign instead of sending the key</strong>: this is plain HTTP: sending the key hands a reusable credential to anyone sniffing the LAN. With HMAC a sniffer can only replay the same payload (harmless), never forge a new one.<br><strong>Why downgrades are refused</strong>: with several clients sharing one server, matching on "different version" alone makes old and new clients overwrite each other forever, each restart killing someone's job.<br><strong>Why it must boot once first</strong>: there is no systemd-style watchdog, so a build that won't start simply disappears.</span></p>
       </div>
 
       <div class="feat-block" id="qwen">
@@ -422,9 +422,9 @@ webui.py (FastAPI + WebSocket)
         <p><span class="zh">離線處理錄音檔時可選用的另一個辨識模型。與現行 large-v3-turbo 同條件實測：中文真實會議 20 場字錯率 <strong>28.78% → 15.75%</strong>；中英夾雜時少數語言找回比例提高 2~3 倍（中文為主的會議，英文詞 34.7% → 74.9%）；低音量 20.67% → 14.33%；韓文長檔 13.35% → 3.54%。日文長檔較差（6.97% → 8.38%）。</span><span class="en">An alternative recognition model for offline files. Measured against large-v3-turbo under identical conditions: 20 real Chinese meetings CER <strong>28.78% → 15.75%</strong>; 2–3× better recall of the minority language in Chinese–English code-switching (English words 34.7% → 74.9%); low volume 20.67% → 14.33%; Korean long-form 13.35% → 3.54%. Japanese long-form is worse (6.97% → 8.38%).</span></p>
         <p style="margin-top:12px"><span class="zh"><strong>以下條件都符合才能用</strong>（不符合時選單與 WebUI 選不到；命令列指定會說明原因並改用推薦模型）：</span><span class="en"><strong>Available only when all of these hold</strong> (otherwise menus and the WebUI won't offer it; on the CLI the reason is shown and the recommended model is used):</span></p>
         <ul>
-          <li><span class="zh">處理錄音檔（<code>--input</code> 或 WebUI 選檔案）——即時字幕不提供，WebUI 標「僅限錄音檔」</span><span class="en">Processing a file (<code>--input</code> or a file in the WebUI) — not for live captions; WebUI shows "file only"</span></li>
-          <li><span class="zh">所選的辨識位置跑得了：GPU 伺服器已安裝並載入完成（啟動後約 1~3 分鐘），或本機（v2.24.0 起）有 mlx-audio（Apple Silicon）／transformers 5.17 以上（Windows、Linux）——安裝程式會裝，Intel Mac 不支援</span><span class="en">The chosen location can run it: the GPU server has it installed and loaded (1–3 min after start), or locally (v2.24.0+) mlx-audio (Apple Silicon) / transformers 5.17+ (Windows, Linux) is present — the installer adds them; Intel Mac is not supported</span></li>
-          <li><span class="zh">中文、英文、韓文的單向模式——日文、台語、雙向不提供（台語請用 Breeze-ASR-26）</span><span class="en">Chinese / English / Korean one-way modes — not Japanese, Taiwanese Hokkien or two-way (use Breeze-ASR-26 for Hokkien)</span></li>
+          <li><span class="zh">處理錄音檔（<code>--input</code> 或 WebUI 選檔案）；即時字幕不提供，WebUI 標「僅限錄音檔」</span><span class="en">Processing a file (<code>--input</code> or a file in the WebUI); not for live captions; WebUI shows "file only"</span></li>
+          <li><span class="zh">所選的辨識位置跑得了：GPU 伺服器已安裝並載入完成（啟動後約 1~3 分鐘），或本機（v2.24.0 起）有 mlx-audio（Apple Silicon）／transformers 5.17 以上（Windows、Linux）；安裝程式會裝，Intel Mac 不支援</span><span class="en">The chosen location can run it: the GPU server has it installed and loaded (1–3 min after start), or locally (v2.24.0+) mlx-audio (Apple Silicon) / transformers 5.17+ (Windows, Linux) is present; the installer adds them; Intel Mac is not supported</span></li>
+          <li><span class="zh">中文、英文、韓文的單向模式；日文、台語、雙向不提供（台語請用 Breeze-ASR-26）</span><span class="en">Chinese / English / Korean one-way modes; not Japanese, Taiwanese Hokkien or two-way (use Breeze-ASR-26 for Hokkien)</span></li>
         </ul>
         <div class="tbl-wrap" style="margin-top:14px"><table>
           <thead><tr><th><span class="zh">執行位置</span><span class="en">Where</span></th><th><span class="zh">速度（實測）</span><span class="en">Speed (measured)</span></th><th><span class="zh">記憶體</span><span class="en">Memory</span></th></tr></thead>
@@ -461,7 +461,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
 <section id="hardware">
   <div class="wrap">
     <div class="sec-head"><h2><span class="zh">硬體建議</span><span class="en">Hardware guide</span></h2>
-      <p><span class="zh">所有 AI 推論皆在地端執行，硬體規格直接影響辨識速度與體驗。</span><span class="en">All inference is local — hardware directly affects speed and experience.</span></p></div>
+      <p><span class="zh">所有 AI 推論皆在地端執行，硬體規格直接影響辨識速度與體驗。</span><span class="en">All inference is local: hardware directly affects speed and experience.</span></p></div>
 
     <div class="cmd-label">macOS</div>
     <div class="tbl-wrap"><table>
@@ -484,7 +484,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
         <tr><td>RTX 3060 (12 GB)</td><td><span class="zh">流暢</span><span class="en">Smooth</span></td><td>~40–50 <span class="zh">秒</span><span class="en">s</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note" style="margin-top:14px"><span class="zh"><strong>Windows + NVIDIA GPU 是最簡單的高效能方案</strong>：不需額外硬體或伺服器，安裝後直接用 large-v3-turbo，即時與離線都有 CUDA 加速。最低建議 6 GB VRAM。</span><span class="en"><strong>Windows + NVIDIA GPU is the simplest high-performance setup</strong> — no extra hardware, CUDA for both live and offline. 6 GB VRAM minimum.</span></p>
+    <p class="note" style="margin-top:14px"><span class="zh"><strong>Windows + NVIDIA GPU 是最簡單的高效能方案</strong>：不需額外硬體或伺服器，安裝後直接用 large-v3-turbo，即時與離線都有 CUDA 加速。最低建議 6 GB VRAM。</span><span class="en"><strong>Windows + NVIDIA GPU is the simplest high-performance setup</strong>: no extra hardware, CUDA for both live and offline. 6 GB VRAM minimum.</span></p>
 
     <div class="cmd-label" style="margin-top:18px">Linux</div>
     <div class="tbl-wrap"><table>
@@ -505,7 +505,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
         <tr><td>NVIDIA DGX Spark</td><td>128 GB</td><td>~10 <span class="zh">秒</span><span class="en">s</span></td><td><span class="zh">同時跑 Ollama LLM + Whisper，一機搞定</span><span class="en">Ollama LLM + Whisper on one box</span></td></tr>
       </tbody>
     </table></div>
-    <p class="note" style="margin-top:10px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「Qwen3-ASR」）。本機跑則見該節的執行位置表。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7–9 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR" above). For local use see the table in that section.</span></p>
+    <p class="note" style="margin-top:14px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「Qwen3-ASR」）。本機跑則見該節的執行位置表。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7–9 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR" above). For local use see the table in that section.</span></p>
 
     <div class="cmd-label" style="margin-top:18px"><span class="zh">LLM 伺服器（選配，翻譯 / 摘要）</span><span class="en">LLM server (optional)</span></div>
     <div class="tbl-wrap"><table>

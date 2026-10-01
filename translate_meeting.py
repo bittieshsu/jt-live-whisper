@@ -2067,7 +2067,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.0"
+APP_VERSION = "2.26.1"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -5618,7 +5618,9 @@ def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
         print(f"  {C_HIGHLIGHT}[伺服器 diarize] {data['note']}{RESET}")
     if info is not None:
         # 舊版伺服器（v2.23 前）沒有 engine 欄位：它只有現行方法
-        info.update(engine=used or "legacy", note=data.get("note") or None)
+        note = data.get("note") or None
+        reason = data.get("reason") if data.get("reason") in _DIAR_REASONS else _diar_reason(note)
+        info.update(engine=used or "legacy", note=note, reason=reason if (used or "legacy") == "legacy" else None)
     return speaker_labels, proc_time
 
 
@@ -12210,6 +12212,25 @@ def _recommended_diarizer(num_speakers=None, engine="auto"):
     return "nemotron", ""
 
 
+# v2.26.1（api_revision 2.6，JTDT 要求）：auto 退回現行方法時給機器看的代碼，呼叫端翻成自己的語言；note 照舊給人看。
+# **與 remote_whisper_server.py 的同名函式相同**（tools/test_diarizer.py 比對）。舊版伺服器只回 note，用戶端也靠這支推回代碼
+_DIAR_REASONS = ("too_many_speakers", "speakers_saturated", "nemotron_unavailable", "nemotron_failed")
+
+
+def _diar_reason(why):
+    """退回現行方法的原因（_recommended_diarizer／_nemotron_diarize 的說明文字）→ 代碼；沒有原因或不是 Nemotron 的問題回 None"""
+    why = why or ""
+    if not why or "resemblyzer" in why or why == "指定使用現行方法":
+        return None
+    if why.startswith("指定 ") and "超過 Nemotron 上限" in why:
+        return "too_many_speakers"
+    if "全部用滿" in why:
+        return "speakers_saturated"
+    if why.startswith("Nemotron 執行失敗"):
+        return "nemotron_failed"
+    return "nemotron_unavailable"
+
+
 def _nemo_span(probs_len, seg):
     """段落對應的格數範圍 [a, b)，至少一格、不超出音檔"""
     a = int(seg["start"] / _NEMO_FRAME)
@@ -12335,7 +12356,7 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=N
         if labels is not None:
             print(f"  {C_DIM}[講者辨識] Nemotron（{_NEMO_CACHE.get('dev')}）{len(set(labels))} 位講者{RESET}")
             if info is not None:
-                info.update(engine="nemotron", note=None)
+                info.update(engine="nemotron", note=None, reason=None)
             return labels
     # 自動模式下「沒裝」不提示（那就是先前的行為）；指定了 Nemotron、或試過才退回的，要講清楚
     if why and (engine == "nemotron" or choice == "nemotron"
@@ -12343,7 +12364,8 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=N
         print(f"  {C_HIGHLIGHT}[講者辨識] 改用現行方法：{why}{RESET}")
     if info is not None:
         # 指定現行方法時不必說明；自動模式退回的才把原因帶出去
-        info.update(engine="legacy", note=(why if engine != "legacy" and why else None))
+        note = why if engine != "legacy" and why else None
+        info.update(engine="legacy", note=note, reason=_diar_reason(note))
     return _diarize_segments_legacy(wav_path, segments, num_speakers=num_speakers, sbar=sbar)
 
 
