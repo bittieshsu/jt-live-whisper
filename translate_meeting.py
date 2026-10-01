@@ -12305,6 +12305,23 @@ def _nemotron_diarize(wav_path, segments, num_speakers=None):
     return _renumber_first_seen(labels), ""
 
 
+def _diar_engine_label(*infos):
+    """輸出檔與畫面上的「實際用了哪個講者辨識方法」（info 由 _remote_diarize／_diarize_segments 填入；雙軌時兩路各一個）"""
+    used = {i.get("engine") for i in infos if i and i.get("engine")}
+    if used == {"nemotron"}:
+        return "NVIDIA Nemotron 3 Diarization"
+    if "nemotron" in used:
+        return "NVIDIA Nemotron 3 Diarization／resemblyzer + spectralcluster（依音軌）"
+    return "resemblyzer + spectralcluster"
+
+
+def _diar_requested_label():
+    """處理前的設定摘要：還不知道實際用哪個，顯示要求的方法（--diarize-engine）"""
+    if _diarize_engine == "legacy":
+        return "resemblyzer + spectralcluster（--diarize-engine legacy）"
+    return "NVIDIA Nemotron（不能用時 resemblyzer + spectralcluster）"
+
+
 def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=None, info=None):
     """講者辨識入口：能用 Nemotron 就用，否則（或它退回時）用現行 resemblyzer。
     回傳 list of int（講者編號 0-based），失敗回傳 None。
@@ -12601,6 +12618,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
     """處理音訊檔：ffmpeg 轉檔 → faster-whisper 辨識 → 翻譯 → 存檔，回傳 (log_path, html_path, session_dir)"""
     from datetime import datetime
     import shutil
+    _diar_info, _diar_info_mic = {}, {}      # 講者辨識實際用的方法（_diar_engine_label）
 
     # 1. 驗證檔案存在
     if not os.path.isfile(input_path):
@@ -12887,15 +12905,16 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
                     num_speakers=num_speakers,
                     progress_callback=_diarize_progress,
                     on_upload_done=_diarize_upload_done,
+                    info=_diar_info,
                 )
                 if speaker_labels is None:
                     # 伺服器失敗，降級本機
                     sbar.set_task("伺服器失敗，改用本機講者辨識", reset_timer=False)
                     speaker_labels = _diarize_segments(wav_path, valid_segments,
-                                                       num_speakers=num_speakers, sbar=sbar)
+                                                       num_speakers=num_speakers, sbar=sbar, info=_diar_info)
             else:
                 speaker_labels = _diarize_segments(wav_path, valid_segments,
-                                                   num_speakers=num_speakers, sbar=sbar)
+                                                   num_speakers=num_speakers, sbar=sbar, info=_diar_info)
             t_diarize_elapsed = time.monotonic() - t_stage
             sbar.set_task(f"講者辨識完成（{t_diarize_elapsed:.1f}s）", reset_timer=False)
             _webui_send({"type": "progress", "stage": "講者辨識完成",
@@ -13055,7 +13074,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
                 _meta["translate_location"] = _loc
         if diarize:
             _meta["diarize"] = True
-            _meta["diarize_engine"] = "resemblyzer + spectralcluster"
+            _meta["diarize_engine"] = _diar_engine_label(_diar_info)
             if remote_whisper_cfg is not None:
                 _meta["diarize_location"] = "GPU 伺服器"
             else:
@@ -13115,7 +13134,11 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
             print(f"  {C_WHITE}{_srt}{RESET}")
         if diarize and not num_speakers and speaker_labels is not None:
             n_spk = len(set(speaker_labels))
-            print(f"  {C_DIM}講者辨識偵測到 {n_spk} 位，若不正確可用 --num-speakers N 指定重跑{RESET}")
+            if _diar_info.get("engine") == "nemotron":
+                # Nemotron 的 --num-speakers 是上限：偏多時能修，偏少時指定也不會變多
+                print(f"  {C_DIM}講者辨識偵測到 {n_spk} 位（Nemotron）；人數偏多時可用 --num-speakers N 設上限重跑{RESET}")
+            else:
+                print(f"  {C_DIM}講者辨識偵測到 {n_spk} 位，若不正確可用 --num-speakers N 指定重跑{RESET}")
         print(f"{C_DIM}{'═' * 60}{RESET}")
 
         sbar.stop()
@@ -13149,6 +13172,7 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
     """處理雙向錄音檔：兩路 ASR → 合併 → 翻譯 → 存檔，回傳 (log_path, html_path, session_dir)"""
     from datetime import datetime
     import shutil
+    _diar_info, _diar_info_mic = {}, {}      # 講者辨識實際用的方法（_diar_engine_label）
 
     # 驗證檔案存在
     for _p in (lb_path, mic_path):
@@ -13361,15 +13385,16 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
                     num_speakers=num_speakers,
                     progress_callback=_d_prog_lb,
                     on_upload_done=_d_upload_lb,
+                    info=_diar_info,
                 )
                 if lb_speaker_labels is None:
                     d_sbar.set_task("伺服器失敗，改用本機講者辨識：系統音訊", reset_timer=False)
                     lb_speaker_labels = _diarize_segments(lb_wav, lb_segs,
-                                                          num_speakers=num_speakers, sbar=d_sbar)
+                                                          num_speakers=num_speakers, sbar=d_sbar, info=_diar_info)
             else:
                 d_sbar.set_task("講者辨識：系統音訊", reset_timer=False)
                 lb_speaker_labels = _diarize_segments(lb_wav, lb_segs,
-                                                      num_speakers=num_speakers, sbar=d_sbar)
+                                                      num_speakers=num_speakers, sbar=d_sbar, info=_diar_info)
         if mic_segs:
             if remote_whisper_cfg is not None:
                 d_sbar.set_task("伺服器講者辨識：麥克風（上傳中）", reset_timer=False)
@@ -13383,15 +13408,16 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
                     num_speakers=num_speakers,
                     progress_callback=_d_prog_mic,
                     on_upload_done=_d_upload_mic,
+                    info=_diar_info_mic,
                 )
                 if mic_speaker_labels is None:
                     d_sbar.set_task("伺服器失敗，改用本機講者辨識：麥克風", reset_timer=False)
                     mic_speaker_labels = _diarize_segments(mic_wav, mic_segs,
-                                                           num_speakers=num_speakers, sbar=d_sbar)
+                                                           num_speakers=num_speakers, sbar=d_sbar, info=_diar_info_mic)
             else:
                 d_sbar.set_task("講者辨識：麥克風", reset_timer=False)
                 mic_speaker_labels = _diarize_segments(mic_wav, mic_segs,
-                                                       num_speakers=num_speakers, sbar=d_sbar)
+                                                       num_speakers=num_speakers, sbar=d_sbar, info=_diar_info_mic)
         t_diarize_elapsed = time.monotonic() - t_diarize_start
         d_sbar.set_task(f"講者辨識完成（{t_diarize_elapsed:.1f}s）", reset_timer=False)
         d_sbar.freeze()
@@ -13576,7 +13602,7 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
 
         if diarize:
             _meta["diarize"] = True
-            _meta["diarize_engine"] = "resemblyzer + spectralcluster"
+            _meta["diarize_engine"] = _diar_engine_label(_diar_info, _diar_info_mic)
             if remote_whisper_cfg is not None:
                 _meta["diarize_location"] = "GPU 伺服器"
             else:
@@ -16492,7 +16518,7 @@ def main():
                 _srv_disp = f"{ollama_model} @ {host}:{port}"
                 print(f"  {C_WHITE}翻譯模型    {_srv_disp}{RESET}")
         if diarize:
-            sp_info = "resemblyzer + spectralcluster"
+            sp_info = _diar_requested_label()
             if remote_whisper_cfg:
                 sp_info += f"，GPU 伺服器（{remote_whisper_cfg.get('host', '?')}）"
             else:
@@ -16635,7 +16661,7 @@ def main():
                     "asr_model": fw_model,
                     "asr_location": f"GPU 伺服器 ({remote_whisper_cfg.get('host', '?')})" if remote_whisper_cfg else "本機",
                     "diarize": diarize,
-                    "diarize_engine": "resemblyzer + spectralcluster" if diarize else None,
+                    "diarize_engine": _diar_requested_label() if diarize else None,
                     "diarize_location": f"GPU 伺服器 ({remote_whisper_cfg.get('host', '?')})" if diarize and remote_whisper_cfg else ("本機" if diarize else None),
                     "num_speakers": num_speakers if num_speakers else "自動偵測",
                     "translate_model": ollama_model if need_translate and ollama_available else None,
