@@ -829,7 +829,7 @@ function _showLiveIn(live){
   document.body.classList.add('has-live');
   requestAnimationFrame(()=>requestAnimationFrame(()=>live.classList.add('shown')));
   const isBidi=['en_zh','ja_zh','ko_zh'].includes(curCfg.mode);$('pLive').classList.toggle('bidi',isBidi);
-  msgsEl.innerHTML='';cnt=0;_discShown=false;_outputFiles=[];_outputDirs=[];_recFiles={};$('sCount').textContent='0 句';
+  msgsEl.innerHTML='';cnt=0;_discShown=false;_discEl=null;_outputFiles=[];_outputDirs=[];_recFiles={};$('sCount').textContent='0 句';
   // 新場次一定不是暫停（上一場停在暫停中時，以前畫面會留著「繼續」而程式其實在錄，v2.26.3）
   _paused=false;$('pauseBtn').innerHTML='暫停 <kbd>P</kbd>';$('pauseBtn').style.background='var(--orange)';
   $('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('hSource').textContent=curCfg.isFile?'離線處理':'即時模式';$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
@@ -895,12 +895,23 @@ async function openOutputFolder(){
   if(!_outputDirs.length)return;
   try{const r=await fetch('/api/open-folder',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({path:_outputDirs[0]})});const d=await r.json();if(d&&d.ok===false&&d.error)showToast(d.error,'err')}catch(e){}
 }
-function showDisconnected(msg){
+// 結束卡片只有一張（v2.26.4）：以前「停止」與「程式結束」各出一張，純錄音也寫「辨識已停止」。
+// 停止的事件先到就先出卡片，程式結束的事件（帶結束碼）到了再更新它；檔案清單晚到也會補上
+let _discEl=null,_discTitle='';
+function _stopTitle(){return curCfg.mode==='record'?'錄音已停止':'辨識已停止'}
+function showDisconnected(msg,replace){
+  if(_discEl&&!replace)return;
   stopTimer();dot.classList.remove('on');
   // 清空底部狀態列（停止 spinner）
   $('bInfo').textContent='';
-  const d=document.createElement('div');d.className='disc-msg';
-  let h='<div class="disc-title">'+esc(msg)+'</div>';
+  _discShown=true;_discTitle=msg;
+  if(!_discEl){_discEl=document.createElement('div');_discEl.className='disc-msg';msgsEl.appendChild(_discEl)}
+  _renderDisc();if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight});
+  const b=$('stopBtn');b.disabled=false;b.textContent='停止'}
+const _audioExt=['mp3','wav','ogg','flac','m4a'];
+function _renderDisc(){
+  const d=_discEl;if(!d)return;
+  let h='<div class="disc-title">'+esc(_discTitle)+'</div>';
   if(_outputFiles.length){
     h+='<div class="disc-files">';
     // 排序：摘要在前，逐字稿在後；同類內 html > txt > srt > vtt
@@ -916,7 +927,7 @@ function showDisconnected(msg){
       const href='/'+f.path.replace(/\\/g,'/')+(_authToken?'?token='+encodeURIComponent(_authToken):'');
       const isSummary=f.name.includes('摘要');
       const isSub=ext==='srt'||ext==='vtt';
-      const tag=isSummary?'摘要':(isSub?'字幕':'逐字');
+      const tag=isSummary?'摘要':(isSub?'字幕':(_audioExt.includes(ext)?'錄音':'逐字'));
       const tagCls=isSummary?'disc-tag-sum':'disc-tag-trans';
       // 格式標籤
       let label=ext.toUpperCase();
@@ -928,8 +939,10 @@ function showDisconnected(msg){
         +'</a>';
     });
     h+='</div>';
-  }else if(curCfg.record){
-    h+='<div style="margin-top:6px;font-size:12px;color:var(--text-dim)">錄音檔已儲存於 recordings/ 目錄</div>';
+  }else if(curCfg.record||curCfg.mode==='record'){
+    // 沒收到檔案清單（例如被強制結束）：至少講錄音檔是哪一個
+    const rf=Object.keys(_recFiles);
+    h+='<div style="margin-top:6px;font-size:12px;color:var(--text-dim)">'+(rf.length?'錄音檔：'+rf.map(esc).join('、'):'錄音檔已儲存於 recordings/ 目錄')+'</div>';
   }
   if(_outputDirs.length){
     h+='<div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">';
@@ -939,8 +952,7 @@ function showDisconnected(msg){
   }else{
     h+='<button onclick="tryBackToSetup()" style="margin-top:14px;padding:7px 24px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-size:13px">回到設定</button>';
   }
-  d.innerHTML=h;msgsEl.appendChild(d);if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight});
-  const b=$('stopBtn');b.disabled=false;b.textContent='停止'}
+  d.innerHTML=h}
 /* Messages */
 let _msgQueue=[],_msgTimer=null;
 function _flushMsgs(){_msgTimer=null;while(_msgQueue.length){_renderMsg(_msgQueue.shift())}}
@@ -964,7 +976,7 @@ function _renderMsg(ev){dot.classList.add('on');if(cnt===0)$('bInfo').textConten
   if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight})}
 /* WS */
 function conn(){const p=location.protocol==='https:'?'wss:':'ws:';const _wsUrl=p+'//'+location.host+'/ws'+(_authToken?'?token='+encodeURIComponent(_authToken):'');ws=new WebSocket(_wsUrl);ws.onopen=()=>{if(rTimer){clearInterval(rTimer);rTimer=null}};
-  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){if(curCfg.isFile){showSetup()}else{showDisconnected('辨識已停止')}}else if(ev.type==='disconnected'){if(_isSwitching)return;dot.classList.remove('on');showDisconnected(ev.message||'主程式已結束')}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[]}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'')}}catch(x){}};
+  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;dot.classList.remove('on');showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
   ws.onclose=()=>{dot.classList.remove('on');if($('pLive').classList.contains('on')&&!_discShown){_discShown=true;showDisconnected('與伺服器的連線已中斷')}if(!rTimer)rTimer=setInterval(()=>{if(!ws||ws.readyState===WebSocket.CLOSED)conn()},3000)};ws.onerror=()=>ws.close()}
 // Tooltips
 const _tips={

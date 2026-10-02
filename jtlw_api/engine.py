@@ -538,7 +538,7 @@ class Engine:
                                                   engine=requested, info=info)
             except Exception:
                 labels = None
-        # 回報實際用了哪個方法（Result.diarization）：auto 在 >8 人、偵測到 8 人全滿、或伺服器沒有 Nemotron 時會退回現行方法
+        # 回報實際用了哪個方法（Result.diarization）：auto 在 >8 人、8 人全滿而且現行方法分出超過 8 人（v2.26.4）、或伺服器沒有 Nemotron 時會退回現行方法
         job["_diarization"] = {"requested": requested, "engine": info.get("engine") if labels is not None else None,
                                "note": info.get("note") if labels is not None else None,
                                # api_revision 2.6：退回現行方法的代碼（JTDT 要翻成英文／日文）；note 照舊給人看

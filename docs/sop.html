@@ -125,7 +125,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.3 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.4 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1329,6 +1329,7 @@ cd C:\jt-live-whisper
 <li>執行中點底部的裝置標籤可以切換裝置：其實是停掉再以新裝置重開，中間會斷幾秒，錄音檔與逐字稿從切換點分成兩份</li>
 <li>純錄音可選「錄音來源」（雙方／只錄系統音訊／只錄麥克風），只顯示要用的裝置；用不到的關鍵字通知、懸浮字幕、字幕轉發會隱藏（v2.26.3）</li>
 <li>錄音中顯示錄音檔大小與磁碟剩餘空間；「暫停」在三個平台都有作用（v2.26.3 起，先前 Windows 按了沒反應、純錄音按了也照錄）</li>
+<li>按「停止」後，有錄音的會先轉成 MP3 再結束：按鈕顯示「存檔中...」、底部顯示轉檔進度，一小時的錄音約要幾十秒，<strong>這段時間不要關閉終端機視窗</strong>。完成後畫面列出錄音檔（v2.26.4 起；先前 4 秒就強制結束，畫面寫「程式異常結束（錯誤碼 -15）」，資料夾裡留下同名的 WAV 與 MP3，兩個都是完整的同一段錄音）</li>
 <li>防呆驗證（未選檔案、LLM 未設定、重複啟動等）</li>
 <li>淺色/深色主題切換</li>
 <li>字幕轉發：即時字幕自動轉發到通訊平台（見下方說明）</li>
@@ -1538,7 +1539,7 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td><code>--diarize-engine ENGINE</code></td>
-<td>講者辨識方法（<code>auto</code> / <code>nemotron</code> / <code>legacy</code>）。<code>auto</code> 能用 Nemotron 就用，否則用現行方法；指定超過 8 人、或偵測到 8 人全滿時自動改用現行方法</td>
+<td>講者辨識方法（<code>auto</code> / <code>nemotron</code> / <code>legacy</code>）。<code>auto</code> 能用 Nemotron 就用，否則用現行方法；指定超過 8 人時改用現行方法；偵測到 8 人全滿時再用現行方法分一次，分出超過 8 人才採用它</td>
 <td><code>auto</code></td>
 </tr>
 <tr>
@@ -1805,6 +1806,7 @@ cd C:\jt-live-whisper
 <li><strong>暫停</strong>（WebUI 的「暫停」）：暫停期間不寫入檔案，繼續後接著錄；計時與錄音長度都不含暫停的時間</li>
 <li><strong>錄音檔大小</strong>：WebUI 每秒更新底部「錄音中 xx MB」，純錄音的畫面中間另外顯示檔名、大小與磁碟剩餘空間</li>
 <li><strong>磁碟快滿時自動停止</strong>：剩餘空間低於「磁碟總容量的 2%（至少 1 GB、最多 10 GB）＋目前錄音檔的 30%」時自動停止錄音並收好檔案（30% 是結束時轉 MP3 要用的空間），已錄的部分不會遺失；剩不到兩倍時 WebUI 先提醒。開始時空間就不夠，純錄音不會開始；其他模式勾了「同時錄音」的照常辨識、只是不錄</li>
+<li><strong>停止後會先存檔</strong>：錄音結束時要把 WAV 轉成 MP3（一小時約幾十秒），轉完才結束；WebUI 的按鈕顯示「存檔中...」。轉檔失敗或來不及時保留 WAV，錄音不會遺失（v2.26.4）</li>
 <li>多聲道的錄音裝置（多聲道 USB 錄音介面、聚集裝置）轉 MP3 時降成立體聲；先前會轉檔失敗、留下空的 MP3</li>
 </ul>
 <p>選擇「中文轉錄」或「中翻英字幕」時，.en 結尾的模型會自動隱藏。「英文轉錄」和「英翻中字幕」可使用所有模型，預設 large-v3-turbo。日文與韓文相關模式（日翻中、中翻日、日文轉錄、韓翻中、中翻韓、韓文轉錄）同樣隱藏 .en 模型，顯示 small、large-v3-turbo、medium、large-v3 四個多語言模型。中日韓文模式的預設模型依硬體自動選擇：有 GPU（Apple Silicon / NVIDIA CUDA）時預設 large-v3-turbo，無 GPU 時預設 small（確保即時性）。</p>
@@ -2798,14 +2800,15 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td>現行方法（resemblyzer＋spectralcluster）</td>
-<td>Nemotron 不能用時：Intel Mac、指定超過 8 人、偵測到 8 人全滿、<code>--diarize-engine legacy</code></td>
+<td>Nemotron 不能用時：Intel Mac、指定超過 8 人、8 人全滿而且現行方法分出超過 8 人、<code>--diarize-engine legacy</code></td>
 <td>下面「處理流程」描述的就是它</td>
 </tr>
 </tbody></table>
 <ul>
 <li><code>--diarize-engine auto</code>（預設）：能用 Nemotron 就用，否則用現行方法；<code>legacy</code> 固定用現行方法；<code>nemotron</code> 指定使用，不能用時會說明原因並改用現行方法</li>
 <li>用 Nemotron 時：<code>--num-speakers N</code> 是<strong>上限</strong>（偵測到的人較多時合併發言最少的，不會硬拆成 N 群）；
-指定超過 8 人、或偵測到 8 位全滿（可能超過 8 人）時，自動改用現行方法並顯示原因。
+指定超過 8 人時自動改用現行方法並顯示原因。偵測到 8 位全滿時，再用現行方法分一次，<strong>分出超過 8 人才改用它</strong>，否則照用 Nemotron 的結果
+（v2.26.4 起；以前全滿就一律改用，但全滿不一定是超過 8 人，最後幾位可能只講了幾句；混音錄音時現行方法還可能只分出 2 人）。
 <strong>不確定就不要填；要填寧可多不要少</strong>（見常見問題「講者數不正確」的實測）</li>
 <li>速度：GPU 伺服器 37 分鐘會議約 15 秒；Apple Silicon（MPS）約 50 秒；CPU 約 13～16 倍即時。
 四個平台（Linux CPU、NVIDIA CUDA、Apple MPS、Windows CPU）的結果一致</li>
@@ -3060,7 +3063,7 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td><code>auto</code></td>
-<td>能用 NVIDIA Nemotron 3 Diarization 就用（中文 20 場段落標錯講者 18.52% → 3.07%）；指定超過 8 人、或偵測到 8 人全滿時自動改用現行方法</td>
+<td>能用 NVIDIA Nemotron 3 Diarization 就用（中文 20 場段落標錯講者 18.52% → 3.07%）；指定超過 8 人時改用現行方法；8 人全滿時現行方法分出超過 8 人才改用它</td>
 </tr>
 </tbody></table>
 <ul>
@@ -3081,7 +3084,7 @@ cd C:\jt-live-whisper
 </tr>
 <tr>
 <td><code>speakers_saturated</code></td>
-<td>沒指定人數，偵測到 8 位全部用滿（可能超過 8 人）</td>
+<td>沒指定人數，偵測到 8 位全部用滿，而且現行方法分出超過 8 人（v2.26.4 起；以前全滿就一律退回）</td>
 </tr>
 <tr>
 <td><code>nemotron_unavailable</code></td>

@@ -423,6 +423,7 @@ def _force_exit(code=0):
     signal handler 在呼叫前已完成音訊裝置清理。"""
     # 結束懸浮字幕子程序（os._exit 不會觸發 atexit）
     global _overlay_proc_ref
+    _webui_flush()                      # os._exit 也不會跑 atexit 的送完事件
     if _overlay_proc_ref is not None:
         try:
             _overlay_proc_ref.terminate()
@@ -2087,7 +2088,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.3"
+APP_VERSION = "2.26.4"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2481,11 +2482,25 @@ def _webui_send(event: dict):
         _keyword_monitor.check(event)
 
 
+def _webui_flush(timeout=3.0):
+    """等送事件的執行緒把佇列送完（最多 timeout 秒）。結束前呼叫：最後一個事件通常是檔案清單，
+    以前程式結束得比送出快時 WebUI 就看不到錄音檔在哪（v2.26.4）"""
+    q = _webui_queue
+    if q is None:
+        return
+    end = time.monotonic() + timeout
+    while not q.empty() and time.monotonic() < end:
+        time.sleep(0.05)
+    time.sleep(0.2)                     # 取出佇列之後還要 sendall
+
+
 def _start_webui_sender():
     """啟動 WebUI TCP sender daemon thread"""
     global _webui_queue
     import queue as _q
     _webui_queue = _q.Queue(maxsize=500)
+    import atexit as _atexit
+    _atexit.register(_webui_flush)
 
     def _sender():
         import socket as _sock
@@ -10266,10 +10281,17 @@ class _AudioRecorder:
 
             spin_idx = 0
             start_t = time.monotonic()
-            timeout_s = 300
-            _webui_send({"type": "progress", "stage": "存檔中", "detail": f"錄音轉檔 WAV → {fmt_upper}"})
+            # 長錄音要的時間跟長度成正比（1 小時的會議在慢的 CPU 上可能超過 5 分鐘）；逾時只是不轉、WAV 照樣保留
+            timeout_s = max(300, duration_s / 2)
+            last_beat = 0.0
             while not ffmpeg_done.is_set():
                 pct = progress_pct[0]
+                # 每秒告訴 WebUI「還在存檔」：它看到這個就不會在按下停止 4 秒後強制結束我們（v2.26.4）。
+                # 以前 1 小時的錄音轉到一半就被 SIGTERM，畫面寫「程式異常結束（錯誤碼 -15）」
+                if time.monotonic() - last_beat >= 1.0:
+                    last_beat = time.monotonic()
+                    _webui_send({"type": "progress", "stage": "存檔中", "finishing": True,
+                                 "detail": f"錄音轉檔 WAV → {fmt_upper} {pct}%"})
                 ch = spinner_chars[spin_idx % len(spinner_chars)]
                 line_text = f"\r{C_DIM}{ch} 正在轉檔 WAV → {fmt_upper}  {pct}%{info_str}{RESET}"
                 sys.stdout.write(line_text)
@@ -11083,6 +11105,8 @@ def run_record_only(rec_device, topic=None, lb_device=None, mic_device=None, cha
         pass
     finally:
         stop_event.set()
+        _end_t = time.monotonic()           # 錄音到這裡為止；以前在轉檔之後才量，時長把轉檔時間也算進去
+        _webui_send({"type": "progress", "stage": "存檔中", "finishing": True, "detail": "停止錄音"})
         if _mic_stream:
             try:
                 _mic_stream.stop()
@@ -11093,8 +11117,8 @@ def run_record_only(rec_device, topic=None, lb_device=None, mic_device=None, cha
         stream.close()
         if _mixer:
             _mixer.flush_remaining()
+        _webui_send({"type": "progress", "stage": "存檔中", "finishing": True, "detail": "寫入錄音檔"})
         path = recorder.close()
-        _end_t = time.monotonic()
         elapsed = _end_t - start_time - _paused_total - ((_end_t - _paused_since) if _paused_since else 0.0)
         _webui_send_realtime_results(None, [path])
         secs = int(elapsed)
@@ -12615,17 +12639,27 @@ def _nemo_probs(wav_path):
 
 
 def _nemotron_diarize(wav_path, segments, num_speakers=None):
-    """回傳 (labels, 原因)。labels 為 None 表示要退回現行方法，原因說明為什麼"""
+    """回傳 (labels, 原因)。labels 為 None 表示要退回現行方法，原因說明為什麼。
+    8 位全部用滿時 labels 是 Nemotron 的結果、原因不是空的：呼叫端用現行方法再分一次，
+    **分出超過 8 位才改用現行方法**（_saturated_prefers_legacy，v2.26.4）"""
     try:
         probs = _nemo_probs(wav_path)
     except Exception as e:
         return None, f"Nemotron 執行失敗（{type(e).__name__}: {e}）"
     labels = _nemo_segment_labels(probs, segments)
     if not num_speakers and _nemo_saturated(segments, labels):
-        return None, f"{_NEMO_CHANNELS} 位講者全部用滿，可能超過 Nemotron 上限"
+        return _renumber_first_seen(labels), f"{_NEMO_CHANNELS} 位講者全部用滿，可能超過 Nemotron 上限"
     if num_speakers:
         labels = _nemo_limit_speakers(probs, segments, labels, num_speakers)
     return _renumber_first_seen(labels), ""
+
+
+def _saturated_prefers_legacy(legacy_labels):
+    """Nemotron 8 位全滿時，現行方法的結果要分出超過 8 位才採用（v2.26.4）。
+    以前全滿就一律退回，但全滿不一定代表超過 8 人（最後幾位可能只講了幾句）；而混音錄音
+    （麥克風＋系統音訊）時現行方法可能照音軌只分成 2 人。退回的理由是「可能超過 8 人」，
+    現行方法沒分出更多人時這個理由就不成立"""
+    return legacy_labels is not None and len(set(legacy_labels)) > _NEMO_CHANNELS
 
 
 def _diar_engine_label(*infos):
@@ -12655,6 +12689,16 @@ def _diarize_segments(wav_path, segments, num_speakers=None, sbar=None, engine=N
         if sbar:
             sbar.set_task("講者辨識（Nemotron）")
         labels, why = _nemotron_diarize(wav_path, segments, num_speakers)
+        if labels is not None and why:          # 8 位全滿：現行方法再分一次，分出更多人才用它
+            legacy = _diarize_segments_legacy(wav_path, segments, num_speakers=num_speakers, sbar=sbar)
+            if _saturated_prefers_legacy(legacy):
+                print(f"  {C_HIGHLIGHT}[講者辨識] 改用現行方法：{why}（現行方法分出 {len(set(legacy))} 位）{RESET}")
+                if info is not None:
+                    info.update(engine="legacy", note=why, reason=_diar_reason(why))
+                return legacy
+            n_leg = len(set(legacy)) if legacy is not None else 0
+            print(f"  {C_DIM}[講者辨識] Nemotron 8 位全滿，現行方法只分出 {n_leg} 位，採用 Nemotron{RESET}")
+            why = ""
         if labels is not None:
             print(f"  {C_DIM}[講者辨識] Nemotron（{_NEMO_CACHE.get('dev')}）{len(set(labels))} 位講者{RESET}")
             if info is not None:

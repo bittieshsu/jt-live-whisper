@@ -165,7 +165,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.26.3"
+SERVER_VERSION = "2.26.4"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -840,16 +840,23 @@ def _nemo_probs(wav_path):
 
 
 def _nemotron_diarize(wav_path, segments, num_speakers=None):
+    """回傳 (labels, 原因)，與用戶端同一份規則：8 位全滿時 labels 是 Nemotron 的結果、原因不是空的，
+    由 _diarize 用現行方法再分一次，分出超過 8 位才改用（_saturated_prefers_legacy，v2.26.4）"""
     try:
         probs = _nemo_probs(wav_path)
     except Exception as e:
         return None, f"Nemotron 執行失敗（{type(e).__name__}: {e}）"
     labels = _nemo_segment_labels(probs, segments)
     if not num_speakers and _nemo_saturated(segments, labels):
-        return None, f"{_NEMO_CHANNELS} 位講者全部用滿，可能超過 Nemotron 上限"
+        return _renumber_first_seen(labels), f"{_NEMO_CHANNELS} 位講者全部用滿，可能超過 Nemotron 上限"
     if num_speakers:
         labels = _nemo_limit_speakers(probs, segments, labels, num_speakers)
     return _renumber_first_seen(labels), ""
+
+
+def _saturated_prefers_legacy(legacy_labels):
+    """Nemotron 8 位全滿時，現行方法的結果要分出超過 8 位才採用（與用戶端相同，tools/test_diarizer.py 比對）"""
+    return legacy_labels is not None and len(set(legacy_labels)) > _NEMO_CHANNELS
 
 
 def _diarize(wav_path, segments, num_speakers=None, engine="auto"):
@@ -857,6 +864,13 @@ def _diarize(wav_path, segments, num_speakers=None, engine="auto"):
     choice, why = _recommended_diarizer(num_speakers, engine)
     if choice == "nemotron":
         labels, why = _nemotron_diarize(wav_path, segments, num_speakers)
+        if labels is not None and why:          # 8 位全滿：現行方法再分一次，分出更多人才用它
+            legacy = _diarize_legacy(wav_path, segments, num_speakers=num_speakers) if _HAS_DIARIZE else None
+            if _saturated_prefers_legacy(legacy):
+                print(f"[diarize] 改用現行方法：{why}（現行方法分出 {len(set(legacy))} 位）")
+                return legacy, "legacy", why
+            print(f"[diarize] Nemotron 8 位全滿，現行方法只分出 {len(set(legacy)) if legacy else 0} 位，採用 Nemotron")
+            why = ""
         if labels is not None:
             print(f"[diarize] Nemotron（{_torch_device}）{len(set(labels))} 位講者")
             return labels, "nemotron", ""

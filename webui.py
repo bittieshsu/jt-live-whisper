@@ -306,8 +306,8 @@ async def lifespan(app):
     except Exception:
         pass
     yield
-    # shutdown: kill subprocess
-    _stop_proc()
+    # shutdown: kill subprocess（純錄音要等存檔完成，放執行緒裡等）
+    await asyncio.to_thread(_stop_proc)
 
 
 app = FastAPI(title="jt-live-whisper WebUI", lifespan=lifespan)
@@ -392,6 +392,8 @@ def _tcp_receiver():
                 while "\n" in buf:
                     line, buf = buf.split("\n", 1)
                     line = line.strip()
+                    if '"finishing"' in line:
+                        _note_finishing()
                     if line and _event_queue:
                         try:
                             _event_queue.put_nowait(line)
@@ -429,21 +431,67 @@ def _set_pause_flag(paused):
         pass
 
 
+# 子程序收尾時（錄音轉 MP3 等）每秒送 "finishing" 心跳。按下停止後先給 4 秒，之後只要 10 秒內還有心跳
+# 就繼續等，不升級成 SIGTERM（v2.26.4）。以前一律 4 秒就 SIGTERM：1 小時的錄音轉檔轉到一半被砍，
+# 畫面寫「程式異常結束（錯誤碼 -15）」也看不到檔案在哪。卡住（沒有心跳）的照舊強制結束
+_STOP_GRACE = 4.0
+_FINISH_IDLE = 10.0
+_FINISH_MAX = 4 * 3600.0
+_finishing_at = 0.0
+
+
+def _note_finishing():
+    global _finishing_at
+    _finishing_at = time.monotonic()
+
+
+def _stop_should_escalate(since_stop, since_beat):
+    """按下停止 since_stop 秒、上次心跳 since_beat 秒前（沒有心跳是 None）：要不要改用 SIGTERM"""
+    if since_stop < _STOP_GRACE:
+        return False
+    if since_stop >= _FINISH_MAX:
+        return True
+    return since_beat is None or since_beat >= _FINISH_IDLE
+
+
+def _wait_graceful(p, stop_t):
+    """送出停止信號之後等子程序自己結束；回傳 True＝結束了，False＝該強制結束"""
+    told = False
+    while True:
+        try:
+            p.wait(timeout=0.5)
+            return True
+        except subprocess.TimeoutExpired:
+            pass
+        now = time.monotonic()
+        beat = _finishing_at
+        since_beat = (now - beat) if beat >= stop_t - _FINISH_IDLE else None
+        if _stop_should_escalate(now - stop_t, since_beat):
+            return False
+        if since_beat is not None and not told:
+            told = True
+            print("  正在儲存（錄音轉檔中），完成後才結束；不要關閉這個視窗", flush=True)
+
+
 def _stop_proc():
     """停止子程序，三段升級：graceful → SIGTERM → SIGKILL。
     Windows 上若子程序在 native crash（如 0xC0000409）卡死，
-    SIGINT/CTRL_BREAK 不一定收得到，必須走 SIGKILL 才殺得掉。"""
+    SIGINT/CTRL_BREAK 不一定收得到，必須走 SIGKILL 才殺得掉。
+    子程序還在存檔（有 finishing 心跳）時不升級，見 _stop_should_escalate"""
     global _proc
     with _proc_lock:
         if _proc and _proc.poll() is None:
             pid = _proc.pid
+            _proc._user_stop = True
             # Step 1：graceful（平台相關）
             try:
+                stop_t = time.monotonic()
                 if sys.platform == "win32":
                     os.kill(pid, signal.CTRL_BREAK_EVENT)
                 else:
                     os.kill(pid, signal.SIGINT)
-                _proc.wait(timeout=4)
+                if not _wait_graceful(_proc, stop_t):
+                    raise subprocess.TimeoutExpired(_proc.args, _STOP_GRACE)
             except subprocess.TimeoutExpired:
                 # Step 2：SIGTERM
                 try:
@@ -498,6 +546,8 @@ def _start_proc(args: list):
     global _proc
     _stop_proc()
     _set_pause_flag(False)          # 每次開始都不是暫停（上一次停在暫停中也一樣）
+    global _finishing_at
+    _finishing_at = 0.0
     with _proc_lock:
         cmd = [sys.executable, str(TRANSLATE_SCRIPT), "--webui"] + args
         # stdin 持續送 'y\n' 自動確認所有互動提問（確認開始、錄音等）
@@ -535,18 +585,19 @@ def _start_proc(args: list):
             except Exception:
                 rc = -1
             elapsed = time.monotonic() - start_t
-            if rc != 0 and elapsed < 5:
+            user_stop = getattr(p, "_user_stop", False)
+            if rc != 0 and elapsed < 5 and not user_stop:
                 msg = f"啟動失敗（錯誤碼 {rc}），請檢查終端機訊息"
             elif rc != 0:
                 msg = f"程式異常結束（錯誤碼 {rc}）"
             else:
-                msg = "處理已完成"
+                msg = "已停止" if user_stop else "處理已完成"
             print(f"\n  主程式已結束（exit code {rc}），WebUI 等待下一次操作（瀏覽器中按「回到設定」重新開始）")
             print(f"  按 Ctrl+C 可結束 WebUI 伺服器")
             if _event_queue:
                 try:
                     _event_queue.put_nowait(json.dumps({"type": "disconnected",
-                        "message": msg}))
+                        "message": msg, "rc": rc, "user_stop": user_stop}))
                 except Exception:
                     pass
         threading.Thread(target=_monitor, daemon=True).start()
@@ -808,7 +859,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.3",
+        "last": last, "version": "2.26.4",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1359,7 +1410,7 @@ async def api_start(request: Request, body: dict = {}):
     if err:
         return JSONResponse({"status": "error", "error": err}, status_code=403)
     args = _build_args(body)
-    pid = _start_proc(args)
+    pid = await asyncio.to_thread(_start_proc, args)
     # 儲存前次使用的設定到 config.json
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
@@ -1416,13 +1467,13 @@ async def api_switch_device(request: Request, body: dict = {}):
         start_body["device"] = device_id
     # 廣播切換中事件
     await broadcast(json.dumps({"type": "switching", "message": "正在切換音訊裝置..."}))
-    # 停止目前程序
-    _stop_proc()
+    # 停止目前程序（純錄音要等舊的那段轉檔存好，放執行緒裡等，不卡住事件迴圈）
+    await asyncio.to_thread(_stop_proc)
     await asyncio.sleep(0.5)
     # 用新設定重新啟動
     try:
         args = _build_args(start_body)
-        pid = _start_proc(args)
+        pid = await asyncio.to_thread(_start_proc, args)
         return {"ok": True, "pid": pid, "device_id": device_id}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
@@ -1445,8 +1496,8 @@ async def api_status(request: Request):
     err = _check_auth(request, "read")
     if err:
         return JSONResponse({"ok": False, "error": err}, status_code=403)
-    with _proc_lock:
-        running = _proc is not None and _proc.poll() is None
+    p = _proc                       # 不拿 _proc_lock：停止中（等存檔）會持有它好幾分鐘，這裡在事件迴圈裡
+    running = p is not None and p.poll() is None
     return {"running": running}
 
 
