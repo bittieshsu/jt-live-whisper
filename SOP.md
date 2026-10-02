@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.26.4 (by Jason Cheng)
+即時英翻中字幕系統 v2.26.5 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -2011,7 +2011,7 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
 - **辨識失敗而且錯誤是可以重試的（`retryable: true`，例如 GPU 伺服器暫時不能用）時，上傳的檔案會保留**，`POST /api/v1/jobs/{id}/retry` 直接重做，不必重新上傳（v2.25.3 起）。保留到重試成功、ACK、刪除作業或 7 天後內容到期。不可重試的失敗（例如檔案解不開）檔案會立刻刪除，這時要重新上傳、送新的一件
 - 日文、韓文的會議目前不能摘要（送件當下回 422 `language_not_supported`），逐字稿不受影響
 
-### 講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼）
+### 講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼；2.7 加全滿標記）
 
 送件時 `hints.diarize_engine` 選講者辨識方法；**不送就是 `legacy`（現行方法），與 2.4 完全相同**，
 既有的串接（jt-doc-tools、jt-vc-portal）不改就不會變。
@@ -2021,7 +2021,7 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
 | `legacy`（預設） | 現行方法（resemblyzer＋spectralcluster） |
 | `auto` | 能用 NVIDIA Nemotron 3 Diarization 就用（中文 20 場段落標錯講者 18.52% → 3.07%）；指定超過 8 人時改用現行方法；8 人全滿時現行方法分出超過 8 人才改用它 |
 
-- 實際用了哪一個看結果（`GET /api/v1/jobs/{id}/result`）的 `diarization`：`{"requested": "auto", "engine": "nemotron", "note": null, "reason": null}`；
+- 實際用了哪一個看結果（`GET /api/v1/jobs/{id}/result`）的 `diarization`：`{"requested": "auto", "engine": "nemotron", "note": null, "reason": null, "saturated": false}`；
   退回現行方法時 `engine` 是 `legacy`、`note` 用中文說明原因；沒有要求 `diarize` 時整個欄位是 `null`
 - **api_revision 2.6（v2.26.1）起另有 `reason` 代碼**，給呼叫端翻成自己介面的語言（`note` 照舊）：
 
@@ -2033,6 +2033,9 @@ ssh -L 19781:127.0.0.1:19781 <帳號>@<伺服器>
   | `nemotron_failed` | Nemotron 執行時出錯 |
 
   沒有退回、`requested` 是 `legacy`、或講者辨識失敗時是 `null`。日後可能新增代碼，不認得的當成一般退回處理並顯示 `note`
+- **api_revision 2.7（v2.26.5）起另有 `saturated`**（true／false）：沒指定人數、Nemotron 的 8 個講者位置全部用到時為 `true`，不論最後用哪一種方法。
+  現行方法沒分出超過 8 人而照用 Nemotron 時，`engine` 是 `nemotron`、`reason` 是 `null`，只有 `saturated` 看得出來；這時結果最多 8 位，
+  實際發言者更多的話會有人被併在一起，可以提醒使用者填人數（大於 8）後重送。公開語料 36 場 3～7 人的會議都沒有用滿
 - `hints.num_speakers` 在 `auto`（Nemotron）下是**上限**，在 `legacy` 下是強制分群；不確定就不要填，要填寧可多不要少
 - 改用 `auto` 之後同一份錄音的講者代號與人數會和以前不同（更準），存過舊結果的系統要注意
 

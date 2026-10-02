@@ -73,7 +73,7 @@
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
       <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
-      <a class="lv3" href="#講者辨識方法api_revision-25v2260-起26-加原因代碼">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼）</a>
+      <a class="lv3" href="#講者辨識方法api_revision-25v2260-起26-加原因代碼27-加全滿標記">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼；2.7 加全滿標記）</a>
       <a class="lv3" href="#台語會議transcribetaiwanesev2252-起">台語會議（transcribe.taiwanese，v2.25.2 起）</a>
       <a class="lv3" href="#啟用-rest-api">啟用 REST API</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
@@ -125,7 +125,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.4 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.5 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3047,7 +3047,7 @@ cd C:\jt-live-whisper
 <li><strong>辨識失敗而且錯誤是可以重試的（<code>retryable: true</code>，例如 GPU 伺服器暫時不能用）時，上傳的檔案會保留</strong>，<code>POST /api/v1/jobs/{id}/retry</code> 直接重做，不必重新上傳（v2.25.3 起）。保留到重試成功、ACK、刪除作業或 7 天後內容到期。不可重試的失敗（例如檔案解不開）檔案會立刻刪除，這時要重新上傳、送新的一件</li>
 <li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
 </ul>
-<h3 id="講者辨識方法api_revision-25v2260-起26-加原因代碼">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼）</h3>
+<h3 id="講者辨識方法api_revision-25v2260-起26-加原因代碼27-加全滿標記">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼；2.7 加全滿標記）</h3>
 <p>送件時 <code>hints.diarize_engine</code> 選講者辨識方法；<strong>不送就是 <code>legacy</code>（現行方法），與 2.4 完全相同</strong>，
 既有的串接（jt-doc-tools、jt-vc-portal）不改就不會變。</p>
 <table>
@@ -3067,7 +3067,7 @@ cd C:\jt-live-whisper
 </tr>
 </tbody></table>
 <ul>
-<li><p>實際用了哪一個看結果（<code>GET /api/v1/jobs/{id}/result</code>）的 <code>diarization</code>：<code>{&quot;requested&quot;: &quot;auto&quot;, &quot;engine&quot;: &quot;nemotron&quot;, &quot;note&quot;: null, &quot;reason&quot;: null}</code>；
+<li><p>實際用了哪一個看結果（<code>GET /api/v1/jobs/{id}/result</code>）的 <code>diarization</code>：<code>{&quot;requested&quot;: &quot;auto&quot;, &quot;engine&quot;: &quot;nemotron&quot;, &quot;note&quot;: null, &quot;reason&quot;: null, &quot;saturated&quot;: false}</code>；
 退回現行方法時 <code>engine</code> 是 <code>legacy</code>、<code>note</code> 用中文說明原因；沒有要求 <code>diarize</code> 時整個欄位是 <code>null</code></p>
 </li>
 <li><p><strong>api_revision 2.6（v2.26.1）起另有 <code>reason</code> 代碼</strong>，給呼叫端翻成自己介面的語言（<code>note</code> 照舊）：</p>
@@ -3096,6 +3096,10 @@ cd C:\jt-live-whisper
 </tr>
 </tbody></table>
 <p>沒有退回、<code>requested</code> 是 <code>legacy</code>、或講者辨識失敗時是 <code>null</code>。日後可能新增代碼，不認得的當成一般退回處理並顯示 <code>note</code></p>
+</li>
+<li><p><strong>api_revision 2.7（v2.26.5）起另有 <code>saturated</code></strong>（true／false）：沒指定人數、Nemotron 的 8 個講者位置全部用到時為 <code>true</code>，不論最後用哪一種方法。
+現行方法沒分出超過 8 人而照用 Nemotron 時，<code>engine</code> 是 <code>nemotron</code>、<code>reason</code> 是 <code>null</code>，只有 <code>saturated</code> 看得出來；這時結果最多 8 位，
+實際發言者更多的話會有人被併在一起，可以提醒使用者填人數（大於 8）後重送。公開語料 36 場 3～7 人的會議都沒有用滿</p>
 </li>
 <li><p><code>hints.num_speakers</code> 在 <code>auto</code>（Nemotron）下是<strong>上限</strong>，在 <code>legacy</code> 下是強制分群；不確定就不要填，要填寧可多不要少</p>
 </li>

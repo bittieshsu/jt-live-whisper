@@ -521,7 +521,8 @@ class Engine:
         info = {}
         if self.settings.fake_engine:
             labels = [0 if i % 3 else 1 for i in range(len(raw))]
-            info = {"engine": "nemotron" if requested == "auto" else "legacy", "note": None, "reason": None}
+            info = {"engine": "nemotron" if requested == "auto" else "legacy", "note": None, "reason": None,
+                    "saturated": False}
         else:
             segs = [{"start": r["start_ms"] / 1000, "end": r["end_ms"] / 1000, "text": r["text"]}
                     for r in raw]
@@ -542,7 +543,10 @@ class Engine:
         job["_diarization"] = {"requested": requested, "engine": info.get("engine") if labels is not None else None,
                                "note": info.get("note") if labels is not None else None,
                                # api_revision 2.6：退回現行方法的代碼（JTDT 要翻成英文／日文）；note 照舊給人看
-                               "reason": info.get("reason") if labels is not None else None}
+                               "reason": info.get("reason") if labels is not None else None,
+                               # api_revision 2.7（JTDT 要求）：Nemotron 8 位全滿。照用 Nemotron 時 reason 是 null，
+                               # 只看 engine／reason 分不出來；JTDT 拿它提醒「實際發言者更多時請填人數」
+                               "saturated": bool(info.get("saturated")) if labels is not None else False}
         degraded = labels is None
         if degraded:
             labels = [0] * len(raw)

@@ -1,5 +1,15 @@
 # Changelog
 
+### v2.26.5 (2026-10-02)
+
+**REST API 2.7：講者辨識多一個「8 位全滿」標記（jt-doc-tools 要求）**
+- `Result.diarization.saturated`（true／false）：沒指定人數、Nemotron 的 8 個講者位置全部用到時為 true，不論最後採用哪一種方法
+- v2.26.4 起，8 位全滿但現行方法沒分出更多人時會照用 Nemotron（`engine: nemotron`、`reason: null`），
+  跟一般的結果分不出來；有了這個標記，呼叫端可以提醒「實際發言者更多時請填人數後重送」
+- 公開語料 36 場 3～7 人的會議（AMI、AISHELL-4）都沒有用滿 8 個位置，所以這個標記不會在一般會議上亂跳
+- `result_schema_version` 2.4。新增的欄位，既有的串接不用改；GPU 伺服器是舊版時一律是 false
+- 給呼叫端開發用的模擬伺服器多一個情境 `diarize_saturated`
+
 ### v2.26.4 (2026-10-02)
 
 **從 WebUI 停止長錄音時被強制結束**

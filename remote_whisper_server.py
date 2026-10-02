@@ -165,7 +165,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.26.4"
+SERVER_VERSION = "2.26.5"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -860,26 +860,29 @@ def _saturated_prefers_legacy(legacy_labels):
 
 
 def _diarize(wav_path, segments, num_speakers=None, engine="auto"):
-    """講者辨識入口，回傳 (labels, 實際用的方法, 說明)。labels 失敗為 None"""
+    """講者辨識入口，回傳 (labels, 實際用的方法, 說明, 8 位是否全滿)。labels 失敗為 None。
+    全滿（saturated，v2.26.5）：Nemotron 的 8 個位置都用到，不論最後採用哪一種方法都是 True，
+    呼叫端（JTDT）拿它提醒「實際發言者更多時請填人數」"""
     choice, why = _recommended_diarizer(num_speakers, engine)
     if choice == "nemotron":
         labels, why = _nemotron_diarize(wav_path, segments, num_speakers)
-        if labels is not None and why:          # 8 位全滿：現行方法再分一次，分出更多人才用它
+        saturated = labels is not None and bool(why)
+        if saturated:                           # 8 位全滿：現行方法再分一次，分出更多人才用它
             legacy = _diarize_legacy(wav_path, segments, num_speakers=num_speakers) if _HAS_DIARIZE else None
             if _saturated_prefers_legacy(legacy):
                 print(f"[diarize] 改用現行方法：{why}（現行方法分出 {len(set(legacy))} 位）")
-                return legacy, "legacy", why
+                return legacy, "legacy", why, True
             print(f"[diarize] Nemotron 8 位全滿，現行方法只分出 {len(set(legacy)) if legacy else 0} 位，採用 Nemotron")
             why = ""
         if labels is not None:
             print(f"[diarize] Nemotron（{_torch_device}）{len(set(labels))} 位講者")
-            return labels, "nemotron", ""
+            return labels, "nemotron", "", saturated
         print(f"[diarize] 改用現行方法：{why}")
     if not _HAS_DIARIZE:
-        return None, "legacy", why or "resemblyzer/spectralcluster 未安裝"
+        return None, "legacy", why or "resemblyzer/spectralcluster 未安裝", False
     note = why if (engine == "nemotron" or choice == "nemotron"
                    or (num_speakers and num_speakers > _NEMO_CHANNELS)) else ""
-    return _diarize_legacy(wav_path, segments, num_speakers=num_speakers), "legacy", note
+    return _diarize_legacy(wav_path, segments, num_speakers=num_speakers), "legacy", note, False
 
 
 def _diarize_legacy(wav_path, segments, num_speakers=None):
@@ -2026,7 +2029,7 @@ async def diarize(
                     yield (_line({"type": "heartbeat", "elapsed": round(time.monotonic() - t0, 1)})
                            if ndjson else b" ")
             try:
-                speaker_labels, used, note = work.result()
+                speaker_labels, used, note, saturated = work.result()
             except Exception as e:
                 print(f"[錯誤] diarize 失敗: {e}")
                 err = {"error": f"講者辨識失敗: {e}"}
@@ -2043,6 +2046,7 @@ async def diarize(
                 "engine": used,
                 "note": note,
                 "reason": _diar_reason(note) if used == "legacy" else None,   # v2.26.1
+                "saturated": bool(saturated),                                  # v2.26.5：Nemotron 8 位全滿
             }
             yield _line({"type": "result", **res}) if ndjson else json.dumps(res).encode()
         finally:
