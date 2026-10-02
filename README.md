@@ -1,4 +1,4 @@
-# jt-live-whisper v2.26.2
+# jt-live-whisper v2.26.3
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -669,6 +669,7 @@ cd C:\jt-live-whisper
 | `--mic` | 同時轉錄麥克風語音（即時模式） | |
 | `--record` | 即時模式同時錄製音訊 | |
 | `--rec-device ID` | 錄音裝置 ID（可與辨識裝置不同） | |
+| `--rec-source SRC` | 純錄音錄哪些聲音：`both`（系統音訊＋麥克風）／`system`／`mic`；`-d` 指定系統音訊、`--mic-device` 指定麥克風 | 偵測得到麥克風時 `both` |
 | `--denoise` | 即時模式啟用背景降噪 | |
 | `--local-asr` | 強制使用本機辨識（忽略 GPU 伺服器設定） | |
 | `--restart-server` | 強制重啟 GPU 伺服器 | |

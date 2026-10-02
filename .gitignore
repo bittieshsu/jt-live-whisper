@@ -27,6 +27,10 @@ api_data/
 .whisper_output.txt
 .tmp_*
 
+# WebUI 的靜音與暫停旗標（執行中暫存）
+.mute_*
+.webui_pause
+
 # IDE
 .vscode/
 .idea/

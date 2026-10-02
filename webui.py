@@ -60,6 +60,8 @@ try:
         _sck_request_permission as _tm_sck_request_permission,
         _sck_terminal_app_name as _tm_sck_terminal_app_name,
         PULSE_LOOPBACK_ID as _TM_PULSE_LOOPBACK_ID,
+        WASAPI_LOOPBACK_ID as _TM_WASAPI_LOOPBACK_ID,
+        _find_wasapi_loopback as _tm_find_wasapi_loopback,
         _pulse_available as _tm_pulse_available,
         _pulse_label as _tm_pulse_label,
         _detect_llm_server as _tm_detect_llm_server,
@@ -87,6 +89,8 @@ except Exception:
     _tm_sck_request_permission = None
     _tm_sck_terminal_app_name = None
     _TM_PULSE_LOOPBACK_ID = -500
+    _TM_WASAPI_LOOPBACK_ID = -100
+    _tm_find_wasapi_loopback = None
     _tm_pulse_available = None
     _tm_pulse_label = None
     _tm_detect_llm_server = None
@@ -412,6 +416,19 @@ async def _event_dispatcher():
 
 
 # ─── 子程序管理 ──────────────────────────────────────────────
+PAUSE_FLAG = BASE_DIR / ".webui_pause"     # translate_meeting.py 的 _WEBUI_PAUSE_FLAG
+
+
+def _set_pause_flag(paused):
+    try:
+        if paused:
+            PAUSE_FLAG.write_text("1")
+        elif PAUSE_FLAG.exists():
+            PAUSE_FLAG.unlink()
+    except OSError:
+        pass
+
+
 def _stop_proc():
     """停止子程序，三段升級：graceful → SIGTERM → SIGKILL。
     Windows 上若子程序在 native crash（如 0xC0000409）卡死，
@@ -453,6 +470,7 @@ def _stop_proc():
             (BASE_DIR / fn).unlink()
         except Exception:
             pass
+    _set_pause_flag(False)          # 停在暫停中結束時旗標也要收掉（v2.26.3）
     # 停止懸浮字幕子程序
     try:
         if sys.platform == "win32":
@@ -479,6 +497,7 @@ def _stop_proc():
 def _start_proc(args: list):
     global _proc
     _stop_proc()
+    _set_pause_flag(False)          # 每次開始都不是暫停（上一次停在暫停中也一樣）
     with _proc_lock:
         cmd = [sys.executable, str(TRANSLATE_SCRIPT), "--webui"] + args
         # stdin 持續送 'y\n' 自動確認所有互動提問（確認開始、錄音等）
@@ -560,6 +579,103 @@ def _qwen_status():
             _QWEN_PROBE.update(server=server, local=local, t=time.monotonic(), running=False)
         threading.Thread(target=_probe, daemon=True).start()
     return {"server": _QWEN_PROBE["server"], "local": _QWEN_PROBE["local"]}
+
+
+# ── 音訊裝置清單（v2.26.3）────────────────────────────────────
+# sounddevice（PortAudio）的裝置清單在初始化時就固定了：WebUI 開著的時候才接上的 AirPods 看不到，
+# 執行中「切換裝置」的清單也一樣；而按下開始／切換時另起的 translate_meeting 會重新列舉，
+# 兩邊的編號可能對不上。所以每次列裝置前重新初始化（WebUI 本身不開音訊串流，重來不影響錄音）。
+# kind：system＝系統音訊來源（ScreenCaptureKit／monitor 代號、BlackHole、loopback）、aggregate＝聚集裝置、
+# mic＝麥克風。麥克風下拉只列 mic：選到系統音訊來源時會把對方的聲音錄兩次、自己的一句都沒有
+_DEV_LOCK = threading.Lock()
+
+
+def _device_kind(name):
+    nl = name.lower()
+    if "blackhole" in nl or "loopback" in nl or (sys.platform.startswith("linux") and "monitor" in nl):
+        return "system"
+    if "aggregate" in nl or "聚集" in name:
+        return "aggregate"
+    return "mic"
+
+
+def _audio_devices():
+    devices = []
+    auto_loopback = ""
+    auto_mic = ""
+    with _DEV_LOCK:
+        try:
+            import sounddevice as _sd
+            _sd._terminate()
+            _sd._initialize()
+        except Exception:
+            pass
+        # macOS ScreenCaptureKit：零設定擷取系統音訊，優先作為預設來源
+        sck = {"supported": False, "permission": False, "macos": "", "app": ""}
+        if sys.platform == "darwin" and _tm_sck_check and _tm_sck_macos_ok:
+            try:
+                if _tm_sck_macos_ok():
+                    _info = _tm_sck_check(build=False) or {}
+                    sck = {"supported": bool(_info.get("available")),
+                           "permission": bool(_info.get("permission")),
+                           "macos": _info.get("macos", ""),
+                           # 授權對象是啟動 webui.py 的終端機程式，讓前端能直接指名
+                           "app": _tm_sck_terminal_app_name() if _tm_sck_terminal_app_name else ""}
+            except Exception:
+                pass
+        if sck["supported"] and sck["permission"]:
+            devices.append({"id": _TM_SCK_LOOPBACK_ID, "kind": "system",
+                            "name": "ScreenCaptureKit 系統音訊（免安裝 BlackHole）",
+                            "channels": 2, "sr": 48000})
+            auto_loopback = f"[{_TM_SCK_LOOPBACK_ID}] ScreenCaptureKit 系統音訊"
+        # Linux PipeWire / PulseAudio：預設喇叭的 monitor 來源
+        if sys.platform.startswith("linux") and _tm_pulse_available:
+            try:
+                if _tm_pulse_available():
+                    _pl = _tm_pulse_label()
+                    devices.append({"id": _TM_PULSE_LOOPBACK_ID, "kind": "system", "name": _pl,
+                                    "channels": 2, "sr": 48000})
+                    auto_loopback = f"[{_TM_PULSE_LOOPBACK_ID}] {_pl}"
+            except Exception:
+                pass
+        # Windows：WASAPI Loopback（系統播放的聲音）。以前清單裡沒有它：系統音訊下拉只列得出麥克風、
+        # 「自動偵測 →」的提示是空的（v2.26.3）
+        if sys.platform == "win32" and _tm_find_wasapi_loopback:
+            try:
+                _wb = _tm_find_wasapi_loopback()
+                if _wb:
+                    _wn = f"WASAPI Loopback（{_wb['name']}）"
+                    devices.append({"id": _TM_WASAPI_LOOPBACK_ID, "kind": "system", "name": _wn,
+                                    "channels": 2, "sr": 48000})
+                    auto_loopback = f"[{_TM_WASAPI_LOOPBACK_ID}] {_wn}"
+            except Exception:
+                pass
+        try:
+            import sounddevice as sd
+            for i, dev in enumerate(sd.query_devices()):
+                if dev["max_input_channels"] > 0:
+                    name = dev["name"]
+                    devices.append({"id": i, "name": name, "kind": _device_kind(name),
+                                    "channels": dev["max_input_channels"],
+                                    "sr": int(dev["default_samplerate"])})
+                    # 自動偵測 loopback
+                    nl = name.lower()
+                    if not auto_loopback and ("blackhole" in nl or "loopback" in nl
+                                              or (sys.platform.startswith("linux") and "monitor" in nl)):
+                        auto_loopback = f"[{i}] {name}"
+            # 自動偵測麥克風（系統預設輸入，排除 loopback/aggregate）
+            default_in = sd.default.device[0]
+            if default_in is not None and default_in >= 0:
+                dinfo = sd.query_devices(default_in)
+                dn = dinfo["name"].lower()
+                if (dinfo["max_input_channels"] > 0
+                        and "blackhole" not in dn and "loopback" not in dn
+                        and "monitor" not in dn
+                        and "aggregate" not in dn and "聚集" not in dinfo["name"]):
+                    auto_mic = f"[{default_in}] {dinfo['name']}"
+        except Exception:
+            pass
+    return {"devices": devices, "auto_loopback": auto_loopback, "auto_mic": auto_mic, "sck": sck}
 
 
 def _get_config():
@@ -650,63 +766,9 @@ def _get_config():
             last = cfg2.get("webui_last", {})
         except Exception:
             pass
-    # 音訊裝置
-    devices = []
-    auto_loopback = ""
-    auto_mic = ""
-    # macOS ScreenCaptureKit：零設定擷取系統音訊，優先作為預設來源
-    sck = {"supported": False, "permission": False, "macos": "", "app": ""}
-    if sys.platform == "darwin" and _tm_sck_check and _tm_sck_macos_ok:
-        try:
-            if _tm_sck_macos_ok():
-                _info = _tm_sck_check(build=False) or {}
-                sck = {"supported": bool(_info.get("available")),
-                       "permission": bool(_info.get("permission")),
-                       "macos": _info.get("macos", ""),
-                       # 授權對象是啟動 webui.py 的終端機程式，讓前端能直接指名
-                       "app": _tm_sck_terminal_app_name() if _tm_sck_terminal_app_name else ""}
-        except Exception:
-            pass
-    if sck["supported"] and sck["permission"]:
-        devices.append({"id": _TM_SCK_LOOPBACK_ID,
-                        "name": "ScreenCaptureKit 系統音訊（免安裝 BlackHole）",
-                        "channels": 2, "sr": 48000})
-        auto_loopback = f"[{_TM_SCK_LOOPBACK_ID}] ScreenCaptureKit 系統音訊"
-    # Linux PipeWire / PulseAudio：預設喇叭的 monitor 來源
-    if sys.platform.startswith("linux") and _tm_pulse_available:
-        try:
-            if _tm_pulse_available():
-                _pl = _tm_pulse_label()
-                devices.append({"id": _TM_PULSE_LOOPBACK_ID, "name": _pl,
-                                "channels": 2, "sr": 48000})
-                auto_loopback = f"[{_TM_PULSE_LOOPBACK_ID}] {_pl}"
-        except Exception:
-            pass
-    try:
-        import sounddevice as sd
-        for i, dev in enumerate(sd.query_devices()):
-            if dev["max_input_channels"] > 0:
-                name = dev["name"]
-                devices.append({"id": i, "name": name,
-                                "channels": dev["max_input_channels"],
-                                "sr": int(dev["default_samplerate"])})
-                # 自動偵測 loopback
-                nl = name.lower()
-                if not auto_loopback and ("blackhole" in nl or "loopback" in nl
-                                          or (sys.platform.startswith("linux") and "monitor" in nl)):
-                    auto_loopback = f"[{i}] {name}"
-        # 自動偵測麥克風（系統預設輸入，排除 loopback/aggregate）
-        default_in = sd.default.device[0]
-        if default_in is not None and default_in >= 0:
-            dinfo = sd.query_devices(default_in)
-            dn = dinfo["name"].lower()
-            if (dinfo["max_input_channels"] > 0
-                    and "blackhole" not in dn and "loopback" not in dn
-                    and "monitor" not in dn
-                    and "aggregate" not in dn and "聚集" not in dinfo["name"]):
-                auto_mic = f"[{default_in}] {dinfo['name']}"
-    except Exception:
-        pass
+    # 音訊裝置（每次都重新讀：會議中才接上的 AirPods 之類要看得到，v2.26.3）
+    _dev = _audio_devices()
+    devices, auto_loopback, auto_mic, sck = _dev["devices"], _dev["auto_loopback"], _dev["auto_mic"], _dev["sck"]
     # GPU 伺服器資訊
     has_gpu_server = bool(llm_host)  # 簡化判斷：有設 LLM host 通常也有 GPU server
     gpu_host = ""
@@ -746,7 +808,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.2",
+        "last": last, "version": "2.26.3",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -761,12 +823,21 @@ async def index():
     return HTMLResponse("<h1>webui.html not found</h1>", status_code=404)
 
 
+@app.get("/api/devices")
+async def api_devices(request: Request):
+    """重新偵測音訊裝置（設定頁的「重新偵測」、執行中的「切換裝置」清單，v2.26.3）"""
+    err = _check_auth(request, "read")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=401)
+    return await asyncio.to_thread(_audio_devices)
+
+
 @app.get("/api/config")
 async def api_config(request: Request):
     err = _check_auth(request, "read")
     if err:
         return JSONResponse({"auth_required": True, "error": err, "is_local": _is_local(request)}, status_code=401)
-    cfg = _get_config()
+    cfg = await asyncio.to_thread(_get_config)      # 列裝置要重新初始化音訊（v2.26.3），不擋住其他請求
     cfg["is_local"] = _is_local(request)
     return JSONResponse(cfg)
 
@@ -1268,11 +1339,15 @@ def _build_args(body: dict) -> list:
         args.append("--no-vtt")
     if body.get("subtitle_overlay"):
         args.append("--subtitle-overlay")
+    # 純錄音：錄音來源（雙方／只錄系統音訊／只錄麥克風，v2.26.3）；用不到的那個裝置不送
+    rec_source = body.get("rec_source") if mode == "record" else None
+    if rec_source in ("both", "system", "mic"):
+        args.extend(["--rec-source", rec_source])
     device = body.get("device")
-    if device is not None and device != "":
+    if device is not None and device != "" and rec_source != "mic":
         args.extend(["-d", str(device)])
     mic_device = body.get("mic_device")
-    if mic_device is not None and mic_device != "":
+    if mic_device is not None and mic_device != "" and rec_source != "system":
         args.extend(["--mic-device", str(mic_device)])
     return args
 
@@ -1294,6 +1369,7 @@ async def api_start(request: Request, body: dict = {}):
             "llm_model": body.get("llm_model"), "llm_host": body.get("llm_host"),
             "local_asr": body.get("local_asr", False),
             "record": body.get("record", False), "mic": body.get("mic", False),
+            "rec_source": body.get("rec_source") or "both",
             "denoise": body.get("denoise", True),
             "diarize": body.get("diarize", False),
             "num_speakers": body.get("num_speakers", 0),
@@ -1437,13 +1513,9 @@ async def websocket_endpoint(ws: WebSocket):
                         except Exception:
                             pass
                 elif msg.get("action") in ("pause", "resume"):
-                    # 送 SIGUSR1 到 translate_meeting.py 切換暫停
-                    with _proc_lock:
-                        if _proc and _proc.poll() is None:
-                            try:
-                                os.kill(_proc.pid, signal.SIGUSR1)
-                            except Exception:
-                                pass
+                    # 暫停／繼續（v2.26.3）：寫入／刪除旗標檔，translate_meeting.py 看到變化才切換。
+                    # 以前送 SIGUSR1：Windows 沒有這個訊號（暫停在 Windows 一直沒作用），而且是「切換」，漏一次就永遠相反
+                    _set_pause_flag(msg.get("action") == "pause")
             except Exception:
                 pass
     except WebSocketDisconnect:

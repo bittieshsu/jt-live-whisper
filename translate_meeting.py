@@ -33,6 +33,26 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
+# Windows：WebUI 停止時送 CTRL_BREAK。數值函式庫帶進來的 Intel Fortran 執行環境預設會攔下它、直接中止程式
+#（「forrtl: error (200): program aborting due to control-BREAK event」），收尾完全不跑：錄音檔的 WAV
+# 檔頭停在開頭、最後幾秒還在緩衝區、也不轉 MP3（2026-10-02 實測 5 秒的錄音檔頭寫 0 秒）。
+# 必須在載入那些函式庫之前關掉；CTRL_BREAK 改走與 Ctrl+C 相同的收尾（下面的 SIGBREAK 處理）
+if IS_WINDOWS:
+    os.environ.setdefault("FOR_DISABLE_CONSOLE_CTRL_HANDLER", "1")
+
+
+def _on_ctrl_break(signum, frame):
+    """CTRL_BREAK（WebUI 的停止）交給目前的 Ctrl+C 處理：各模式自己的收尾，沒有的話就是 KeyboardInterrupt"""
+    handler = signal.getsignal(signal.SIGINT)
+    if callable(handler):
+        handler(signal.SIGINT, frame)
+    else:
+        raise KeyboardInterrupt
+
+
+if IS_WINDOWS and hasattr(signal, "SIGBREAK"):
+    signal.signal(signal.SIGBREAK, _on_ctrl_break)
+
 
 _hf_ssl_bypassed = False
 
@@ -2067,7 +2087,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.2"
+APP_VERSION = "2.26.3"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2390,6 +2410,32 @@ def _handle_sigusr1(signum, frame):
 
 if not IS_WINDOWS and hasattr(signal, "SIGUSR1"):
     signal.signal(signal.SIGUSR1, _handle_sigusr1)
+
+# v2.26.3：WebUI 改用旗標檔通知暫停／繼續。SIGUSR1 在 Windows 不存在，WebUI 的暫停在 Windows 從來沒有作用；
+# 而且它是「切換」，漏一次之後狀態就永遠相反。旗標是明確的狀態，只在旗標「變化」時才動作，
+# 不會蓋掉終端機的 Ctrl+P。SIGUSR1 保留給舊版 webui.py
+_WEBUI_PAUSE_FLAG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".webui_pause")
+
+
+def _start_webui_pause_watch():
+    try:
+        os.remove(_WEBUI_PAUSE_FLAG)          # 上一次沒收乾淨的旗標，不可以一開始就是暫停
+    except OSError:
+        pass
+
+    def _watch():
+        last = False
+        while True:
+            now = os.path.exists(_WEBUI_PAUSE_FLAG)
+            ev = _webui_pause_event
+            if ev is not None and now != last:
+                if now:
+                    ev.set()
+                else:
+                    ev.clear()
+                last = now
+            time.sleep(0.25)
+    threading.Thread(target=_watch, daemon=True, name="webui-pause").start()
 
 # ─── WebUI Event System ──────────────────────────────────────────
 # --webui 啟動時透過 TCP socket 將事件推送到 webui.py
@@ -10047,6 +10093,13 @@ class _AudioRecorder:
         self._data_size = 0
         self._write_header()
         self._last_header_update = time.monotonic()
+        # 錄音檔大小回報 WebUI、磁碟快滿時自動停止（v2.26.3）
+        self._rel = os.path.relpath(self.path, os.path.dirname(os.path.abspath(__file__)))
+        self._last_report = 0.0
+        self._last_disk_check = 0.0
+        self._free = None
+        self.disk_stopped = False
+        self._check_disk(force=True)
 
     def _write_header(self):
         """寫入或更新 WAV header（seek 回檔頭覆寫）"""
@@ -10071,24 +10124,85 @@ class _AudioRecorder:
             self._f.flush()
             self._last_header_update = now
 
+    # 磁碟快滿時自動停止（v2.26.3）：寫到滿才停的話，WAV 的 header 來不及更新、結束時也沒空間轉 MP3，
+    # 整段可能都救不回來。要留的空間＝磁碟總容量的 2%（至少 1 GB、最多 10 GB）＋目前錄音的 30%
+    # （結束時轉 MP3 要寫新檔，WAV 刪掉之前兩份並存）；剩下不到兩倍時先提醒
+    _DISK_CHECK_INTERVAL = 5.0
+    _DISK_BASE_MIN, _DISK_BASE_MAX, _DISK_BASE_RATIO = 1 << 30, 10 << 30, 0.02
+    _DISK_CONVERT_RATIO = 0.3
+
+    def disk_reserve(self, total=None):
+        if total is None:
+            total = shutil.disk_usage(os.path.dirname(self.path)).total
+        base = min(max(self._DISK_BASE_MIN, int(total * self._DISK_BASE_RATIO)), self._DISK_BASE_MAX)
+        return base + int(self._data_size * self._DISK_CONVERT_RATIO)
+
+    def _check_disk(self, force=False):
+        now = time.monotonic()
+        if not force and now - self._last_disk_check < self._DISK_CHECK_INTERVAL:
+            return
+        self._last_disk_check = now
+        try:
+            du = shutil.disk_usage(os.path.dirname(self.path))
+        except OSError:
+            return
+        self._free = du.free
+        if du.free < self.disk_reserve(du.total):
+            self._stop_for_disk(du.free)
+
+    def _stop_for_disk(self, free):
+        if self.disk_stopped:
+            return
+        self.disk_stopped = True
+        try:
+            self._write_header()
+            self._f.flush()
+        except OSError:
+            pass
+        gb = free / (1 << 30)
+        if self._data_size == 0:
+            need = self.disk_reserve() / (1 << 30)
+            print(f"\n{C_ERR}[錄音] 磁碟只剩 {gb:.1f} GB，不開始錄音（至少要留 {need:.1f} GB，"
+                  f"錄到快滿時檔案可能救不回來）；請先清出空間{RESET}", flush=True)
+        else:
+            print(f"\n{C_ERR}[錄音] 磁碟只剩 {gb:.1f} GB，已自動停止錄音（保留結束時轉檔的空間）；"
+                  f"已錄的部分保存在 {self.path}{RESET}", flush=True)
+        _webui_send({"type": "rec_stopped", "reason": "disk_low", "free": free, "path": self._rel,
+                     "bytes": 44 + self._data_size})
+
+    def _after_write(self):
+        self._maybe_update_header()
+        now = time.monotonic()
+        if now - self._last_report >= 1.0:
+            self._last_report = now
+            self._check_disk()
+            if not self.disk_stopped:
+                low = self._free is not None and self._free < 2 * self.disk_reserve()
+                _webui_send({"type": "rec_size", "path": self._rel, "bytes": 44 + self._data_size,
+                             "free": self._free, "low": low})
+
     def write(self, float32_mono):
         """寫入 float32 單聲道音訊（自動轉換為 int16）"""
+        if self.disk_stopped:
+            return
         import numpy as np
         pcm = (float32_mono * 32767).clip(-32768, 32767).astype(np.int16)
         raw = pcm.tobytes()
         self._f.write(raw)
         self._data_size += len(raw)
-        self._maybe_update_header()
+        self._after_write()
 
     def write_raw(self, float32_data):
         """寫入 float32 音訊（多聲道或單聲道皆可，自動轉 int16）"""
+        if self.disk_stopped:
+            return
         import numpy as np
         data = float32_data.astype(np.float32)
         pcm = (data * 32767).clip(-32768, 32767).astype(np.int16)
         raw = pcm.tobytes()
         self._f.write(raw)
         self._data_size += len(raw)
-        self._maybe_update_header()
+        self._after_write()
 
     def _convert(self):
         """將中間 WAV 轉檔為目標格式。成功後刪除 WAV，更新 self.path。
@@ -10104,6 +10218,10 @@ class _AudioRecorder:
             "flac": ["-codec:a", "flac"],
         }
         args = codec_args.get(fmt, [])
+        # 聲道超過格式上限（MP3／OGG 2 聲道、FLAC 8 聲道）就降成立體聲：多聲道的 USB 錄音介面、
+        # 聚集裝置、PipeWire 的 default（回報 64 聲道）以前會轉檔失敗，留下 0 位元組的檔案（v2.26.3）
+        if self._channels > {"mp3": 2, "ogg": 2, "flac": 8}.get(fmt, 2):
+            args = ["-ac", "2"] + args
 
         # 計算 WAV 時長與檔案大小
         duration_s = self._data_size / max(self._samplerate * self._channels * self._sampwidth, 1)
@@ -10178,13 +10296,24 @@ class _AudioRecorder:
                 print(f"{C_OK}✓ WAV → {fmt_upper} 轉檔完成{out_str}{RESET}")
                 _webui_send({"type": "progress", "stage": "存檔完成", "detail": f"{fmt_upper} {out_str}"})
             else:
+                self._drop_partial(out_path)
                 print(f"{C_WARN}[警告] 錄音轉 {fmt} 失敗（保留 WAV）{RESET}")
                 _webui_send({"type": "progress", "stage": "存檔", "detail": f"轉檔失敗，保留 WAV"})
         except Exception:
             # 清除可能殘留的 spinner
             sys.stdout.write("\r\x1b[2K")
             sys.stdout.flush()
+            self._drop_partial(out_path)
             print(f"{C_WARN}[警告] 錄音轉 {fmt} 失敗（保留 WAV）{RESET}")
+
+    @staticmethod
+    def _drop_partial(out_path):
+        """轉檔失敗時刪掉沒轉完的目標檔（WAV 還在；留著空檔會讓人以為錄音壞了）"""
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except OSError:
+            pass
 
     def close(self):
         try:
@@ -10192,6 +10321,8 @@ class _AudioRecorder:
             self._f.close()
         except Exception:
             pass
+        if self._data_size == 0:          # 一開始磁碟空間就不夠、一個樣本都沒錄：不必轉檔
+            return self.path
         self._convert()
         return self.path
 
@@ -10228,6 +10359,12 @@ class _DualStreamMixer:
         self._lb_buf = self._lb_buf[n:]
         self._mic_buf = self._mic_buf[n:]
         self._recorder.write(self._np.clip(mixed, -1.0, 1.0))
+
+    def reset(self):
+        """暫停後繼續時丟掉兩邊還沒配對的部分，從同一個時間點重新對齊（暫停的那一刻兩路不會剛好同時停）"""
+        with self._lock:
+            self._lb_buf = self._np.zeros(0, dtype=self._np.float32)
+            self._mic_buf = self._np.zeros(0, dtype=self._np.float32)
 
     def flush_remaining(self):
         """停止時 flush 剩餘 buffer"""
@@ -10386,6 +10523,114 @@ def _auto_detect_rec_device():
     return None, None, None
 
 
+# ── 純錄音：照指定的來源與裝置錄（v2.26.3）──────────────────────
+# 以前命令列的 --mode record 一律自動偵測，-d／--mic-device 都不看，WebUI 的兩個裝置下拉在純錄音時等於擺設；
+# 互動選單印出的「等效指令」（-d -400 之類）拿去執行也重現不了當初的選擇。
+REC_SOURCES = ("both", "system", "mic")      # 雙方（混成一軌）／只錄系統音訊／只錄麥克風
+
+
+def _mixed_rec_id():
+    """目前平台的混合錄音 sentinel（系統音訊＋麥克風）"""
+    if IS_MACOS:
+        return SCK_MIXED_ID
+    if IS_LINUX:
+        return PULSE_MIXED_ID
+    return WASAPI_MIXED_ID
+
+
+def _auto_rec_mic():
+    """純錄音自動選的麥克風（排除 BlackHole、loopback、聚集裝置）"""
+    return _find_mac_mic() if IS_MACOS else _find_default_mic()
+
+
+def _auto_rec_loopback():
+    """純錄音自動選的系統音訊：平台內建的擷取（ScreenCaptureKit／WASAPI／monitor）能用就用，否則找 BlackHole 之類的裝置"""
+    if ((IS_WINDOWS and _find_wasapi_loopback()) or (IS_MACOS and _sck_available())
+            or (IS_LINUX and _pulse_available())):
+        return _sys_audio_loopback_id()
+    import sounddevice as sd
+    for i, dev in enumerate(sd.query_devices()):
+        if dev["max_input_channels"] > 0 and _is_loopback_device(dev["name"]):
+            return i
+    return None
+
+
+def _rec_device_name(dev_id):
+    if dev_id == _sys_audio_loopback_id():
+        if IS_MACOS:
+            return "ScreenCaptureKit 系統音訊"
+        if IS_LINUX:
+            return _pulse_label()
+        wb = _find_wasapi_loopback()
+        return f"WASAPI Loopback ({wb['name']})" if wb else "WASAPI Loopback"
+    import sounddevice as sd
+    return sd.query_devices(dev_id)["name"]
+
+
+def _check_rec_device(dev_id, what):
+    """指定的裝置代號要是這台的：負數只收本平台的系統音訊／混合錄音代號，其餘要是有輸入聲道的裝置"""
+    if dev_id < 0:
+        if dev_id in (_sys_audio_loopback_id(), _mixed_rec_id()):
+            return
+        raise SystemExit(f"[錯誤] {what} {dev_id} 不是這個平台的系統音訊代號"
+                         f"（這台是 {_sys_audio_loopback_id()}，混合錄音 {_mixed_rec_id()}）")
+    import sounddevice as sd
+    try:
+        dev = sd.query_devices(dev_id)
+    except Exception:
+        raise SystemExit(f"[錯誤] 找不到{what} {dev_id}，請用 --list-devices 查看可用的裝置")
+    if dev["max_input_channels"] <= 0:
+        raise SystemExit(f"[錯誤] {what} [{dev_id}] {dev['name']} 沒有輸入聲道，不能錄音")
+
+
+def _resolve_record_device(rec_source=None, device=None, mic_device=None):
+    """純錄音要錄什麼。回傳 (rec_id, 名稱, 說明, 系統音訊裝置, 麥克風裝置)；後兩個只在混合錄音時有值，
+    其餘情況 rec_id 就是要錄的那個裝置。找不到可錄的裝置時以 SystemExit 結束並說明。
+      rec_source  None＝沒指定：有 -d 就錄那個（-d 是混合錄音代號時＝both），沒有就自動偵測（預設雙方）
+                  both／system／mic＝WebUI 的「錄音來源」與命令列 --rec-source
+      device      系統音訊裝置（-d）；mic_device＝麥克風（--mic-device）"""
+    if device is not None:
+        _check_rec_device(device, "裝置")
+    if mic_device is not None:
+        if mic_device < 0:
+            raise SystemExit(f"[錯誤] 麥克風裝置 {mic_device} 不能是系統音訊代號")
+        _check_rec_device(mic_device, "麥克風裝置")
+    if rec_source is None:
+        if device is None:
+            rec_id, name, label = _auto_detect_rec_device()
+            if rec_id is None:
+                raise SystemExit("[錯誤] 找不到任何音訊輸入裝置！")
+            if rec_id not in _MIXED_REC_IDS:
+                return rec_id, name, label, None, None
+            rec_source = "both"                    # 自動偵測到「雙方」：麥克風可以另外指定
+        elif device in _MIXED_REC_IDS:
+            rec_source, device = "both", None
+        else:
+            label = "僅對方聲音" if (_is_sys_audio_device(device) or _is_loopback_device(_rec_device_name(device))) else "指定裝置"
+            return device, _rec_device_name(device), label, None, None
+    if rec_source == "system":
+        lb = device if device is not None and device not in _MIXED_REC_IDS else _auto_rec_loopback()
+        if lb is None:
+            raise SystemExit("[錯誤] 找不到系統音訊的擷取來源（macOS 需要螢幕錄製權限或 BlackHole）")
+        return lb, _rec_device_name(lb), "僅對方聲音", None, None
+    if rec_source == "mic":
+        mic = mic_device if mic_device is not None else _auto_rec_mic()
+        if mic is None:
+            raise SystemExit("[錯誤] 找不到麥克風")
+        return mic, _rec_device_name(mic), "僅我方聲音", None, None
+    lb = device if device is not None and device not in _MIXED_REC_IDS else _auto_rec_loopback()
+    mic = mic_device if mic_device is not None else _auto_rec_mic()
+    if lb is None and mic is None:
+        raise SystemExit("[錯誤] 找不到任何音訊輸入裝置！")
+    if mic is None:
+        print(f"  {C_HIGHLIGHT}[提醒] 找不到麥克風，只錄系統音訊{RESET}")
+        return lb, _rec_device_name(lb), "僅對方聲音", None, None
+    if lb is None:
+        print(f"  {C_HIGHLIGHT}[提醒] 找不到系統音訊的擷取來源，只錄麥克風{RESET}")
+        return mic, _rec_device_name(mic), "僅我方聲音", None, None
+    return _mixed_rec_id(), f"{_rec_device_name(lb)} + {_rec_device_name(mic)}", "雙方聲音", lb, mic
+
+
 def _ask_record_source():
     """純錄音模式：選擇錄音來源（雙方聲音 / 僅對方聲音）。
     回傳 (device_id, device_name, label)，找不到裝置則 sys.exit(1)。"""
@@ -10517,23 +10762,27 @@ def _ask_record_source():
         return aggregate_dev[0], aggregate_dev[1], "雙方聲音"
 
 
-def run_record_only(rec_device, topic=None):
+def run_record_only(rec_device, topic=None, lb_device=None, mic_device=None, channels=None):
     """純錄音模式：僅錄製音訊為 WAV 檔，不做 ASR 或翻譯。
-    聚集裝置（ch>=3）自動分離輸出/輸入音軌並分開顯示波形。"""
+    聚集裝置（ch>=3）自動分離輸出/輸入音軌並分開顯示波形。
+    混合錄音（rec_device 是混合錄音代號）：lb_device／mic_device 是要混的兩個來源，沒給就自動選（v2.26.3）"""
     import sounddevice as sd
     import numpy as np
 
     _is_mixed = rec_device in _MIXED_REC_IDS
     _mixer = None
     _mic_stream = None
-    _lb_device_id = _sys_audio_loopback_id()
+    _lb_device_id = lb_device if lb_device is not None else _sys_audio_loopback_id()
 
     if _is_mixed:
         # 混合錄音模式：2 個串流（系統音訊 + Mic），波形顯示 2 行
         rec_sr, _ = _capture_stream_info(_lb_device_id, cap_channels=None)
         rec_ch = 2  # 波形顯示用 2 行（系統音訊 / Mic）
-        dev_name = ("ScreenCaptureKit 混合錄音" if IS_MACOS
-                    else "系統音訊 + 麥克風混合錄音" if IS_LINUX else "WASAPI 混合錄音")
+        mic_id = mic_device if mic_device is not None else _auto_rec_mic()
+        if mic_id is None:
+            print("[錯誤] 找不到麥克風，無法混合錄音", file=sys.stderr)
+            sys.exit(1)
+        dev_name = f"{_rec_device_name(_lb_device_id)} + {_rec_device_name(mic_id)}"
     elif _is_sys_audio_device(rec_device):
         rec_sr, rec_ch = _capture_stream_info(rec_device, cap_channels=None)
         if IS_MACOS:
@@ -10545,10 +10794,15 @@ def run_record_only(rec_device, topic=None):
     else:
         dev_info = sd.query_devices(rec_device)
         rec_sr = int(dev_info["default_samplerate"])
-        rec_ch = max(dev_info["max_input_channels"], 1)
+        # channels：只錄麥克風時固定單聲道（v2.26.3）；其他照裝置的聲道數（聚集裝置要分得出各軌）
+        rec_ch = channels or max(dev_info["max_input_channels"], 1)
         dev_name = dev_info["name"]
 
     stop_event = threading.Event()
+    # 暫停（v2.26.3）：WebUI 的「暫停」以前對純錄音沒有作用，畫面寫已暫停、檔案照錄。暫停期間不寫入檔案
+    pause_event = threading.Event()
+    global _webui_pause_event
+    _webui_pause_event = pause_event
 
     # 每個聲道獨立的滾動音量歷史（波形顯示）
     _WAVE_MAX = 80  # 最多保留 80 筆歷史（約 8 秒）
@@ -10561,7 +10815,7 @@ def run_record_only(rec_device, topic=None):
         _ch_histories = [deque(maxlen=_WAVE_MAX), deque(maxlen=_WAVE_MAX)]
 
         def lb_callback(indata, frames, time_info, status):
-            if stop_event.is_set():
+            if stop_event.is_set() or pause_event.is_set():
                 return
             audio = indata.astype(np.float32)
             if audio.ndim > 1 and audio.shape[1] > 1:
@@ -10572,12 +10826,11 @@ def run_record_only(rec_device, topic=None):
             with _level_lock:
                 _ch_histories[0].append(float(np.sqrt(np.mean(mono ** 2))))
 
-        mic_id = _find_default_mic()
         mic_info = sd.query_devices(mic_id)
         mic_sr = int(mic_info["default_samplerate"])
 
         def mic_callback(indata, frames, time_info, status):
-            if stop_event.is_set():
+            if stop_event.is_set() or pause_event.is_set():
                 return
             audio = indata.astype(np.float32)
             if audio.ndim > 1 and audio.shape[1] > 1:
@@ -10615,7 +10868,7 @@ def run_record_only(rec_device, topic=None):
         _ch_histories = [deque(maxlen=_WAVE_MAX) for _ in range(rec_ch)]
 
         def rec_callback(indata, frames, time_info, status):
-            if stop_event.is_set():
+            if stop_event.is_set() or pause_event.is_set():
                 return
             recorder.write_raw(indata)
             data = indata.astype(np.float32)
@@ -10636,6 +10889,16 @@ def run_record_only(rec_device, topic=None):
             print(f"[錯誤] 無法開啟錄音裝置 [{rec_device}] {dev_name}: {e}", file=sys.stderr)
             recorder.close()
             sys.exit(1)
+
+    if recorder.disk_stopped:             # 一開始空間就不夠（訊息已印出）：沒錄到東西，空檔也不留
+        stream.close()
+        if _mic_stream:
+            _mic_stream.close()
+        try:
+            os.remove(recorder.close())
+        except OSError:
+            pass
+        sys.exit(1)
 
     # Banner
     print(f"\n{C_TITLE}{'=' * 60}{RESET}")
@@ -10660,6 +10923,17 @@ def run_record_only(rec_device, topic=None):
     if _mic_stream:
         _mic_stream.start()
     start_time = time.monotonic()
+    # 暫停的時間不算在錄音長度裡
+    _paused_total = 0.0
+    _paused_since = None
+    _rec_rel = os.path.relpath(recorder.path, os.path.dirname(os.path.abspath(__file__)))
+    _webui_send({"type": "started", "mode": "record"})
+    _webui_send({"type": "progress", "stage": "錄音中", "detail": _rec_rel})
+    _last_rms_sent = 0.0
+    # 從 WebUI 啟動時，輸出接在使用者開著的終端機視窗：每 0.15 秒重畫波形會讓終端機與 WindowServer
+    # 一直重繪（2026-10-02 使用者在 Mac 上覺得變慢）。WebUI 有自己的波形，這裡改成每 10 秒一行狀態
+    _quiet = _webui_queue is not None
+    _last_quiet = 0.0
 
     def _level_color(level):
         if level > 0.05:
@@ -10715,13 +10989,39 @@ def run_record_only(rec_device, topic=None):
     try:
         while True:
             time.sleep(0.15)
-            elapsed = time.monotonic() - start_time
+            if recorder.disk_stopped:         # 磁碟快滿，錄音元件已停止寫入：收尾、轉檔
+                break
+            now_t = time.monotonic()
+            if pause_event.is_set() and _paused_since is None:
+                _paused_since = now_t
+                _webui_send({"type": "progress", "stage": "已暫停", "detail": "這段不會錄進檔案"})
+            elif not pause_event.is_set() and _paused_since is not None:
+                _paused_total += now_t - _paused_since
+                _paused_since = None
+                if _mixer:
+                    _mixer.reset()
+                _webui_send({"type": "progress", "stage": "錄音中", "detail": _rec_rel})
+            elapsed = now_t - start_time - _paused_total - ((now_t - _paused_since) if _paused_since else 0.0)
+            # WebUI 右上的音量波形（每 0.3 秒；混合錄音取兩路較大的）
+            if now_t - _last_rms_sent >= 0.3:
+                _last_rms_sent = now_t
+                with _level_lock:
+                    _lv = max((h[-1] for h in _ch_histories if h), default=0.0)
+                _webui_send({"type": "rms", "value": 0.0 if _paused_since else float(_lv)})
             secs = int(elapsed)
             if secs >= 3600:
                 ts_raw = f"{secs // 3600}:{(secs % 3600) // 60:02d}:{secs % 60:02d}"
             else:
                 ts_raw = f"{secs // 60:02d}:{secs % 60:02d}"
             ts = ts_raw.rjust(_TS_W)
+            if _quiet:
+                if now_t - _last_quiet >= 10:
+                    _last_quiet = now_t
+                    _state = "暫停中（這段不會錄進檔案）" if _paused_since is not None else "錄音中"
+                    print(f"  {ts_raw}  {_state}  {(44 + recorder._data_size) / 1048576:.1f} MB", flush=True)
+                continue
+            if _paused_since is not None:
+                ts = f"{ts}  {C_HIGHLIGHT}暫停中（這段不會錄進檔案）{RESET}"
 
             try:
                 cols = os.get_terminal_size().columns
@@ -10794,7 +11094,9 @@ def run_record_only(rec_device, topic=None):
         if _mixer:
             _mixer.flush_remaining()
         path = recorder.close()
-        elapsed = time.monotonic() - start_time
+        _end_t = time.monotonic()
+        elapsed = _end_t - start_time - _paused_total - ((_end_t - _paused_since) if _paused_since else 0.0)
+        _webui_send_realtime_results(None, [path])
         secs = int(elapsed)
         if secs >= 3600:
             ts = f"{secs // 3600}:{(secs % 3600) // 60:02d}:{secs % 60:02d}"
@@ -15952,7 +16254,11 @@ def parse_args():
         help="錄音裝置 ID (可與 ASR 裝置不同，例如聚集裝置可同時錄雙方聲音)")
     parser.add_argument(
         "--mic-device", type=int, metavar="ID",
-        help="麥克風裝置 ID（--mic 或雙向模式時指定麥克風輸入裝置）")
+        help="麥克風裝置 ID（--mic、雙向模式、純錄音時指定麥克風輸入裝置）")
+    parser.add_argument(
+        "--rec-source", choices=list(REC_SOURCES),
+        help="純錄音（--mode record）錄哪些聲音：both＝系統音訊＋麥克風混成一軌（偵測得到麥克風時的預設）、"
+             "system＝只錄系統音訊、mic＝只錄麥克風。-d 指定系統音訊、--mic-device 指定麥克風")
     parser.add_argument(
         "--input", nargs="+", metavar="FILE",
         help="離線處理音訊檔 (mp3/wav/m4a/flac 等，用 faster-whisper 辨識)")
@@ -16106,9 +16412,17 @@ def _build_cli_command(**kwargs):
     if topic:
         parts.append(f"--topic {shlex.quote(topic)}")
 
+    rec_source = kwargs.get("rec_source")
+    if rec_source:
+        parts.append(f"--rec-source {rec_source}")
+
     device = kwargs.get("device")
     if device is not None:
         parts.append(f"-d {device}")
+
+    mic_device = kwargs.get("mic_device")
+    if mic_device is not None:
+        parts.append(f"--mic-device {mic_device}")
 
     diarize = kwargs.get("diarize")
     if diarize:
@@ -16200,6 +16514,7 @@ def main():
     # --webui：啟動 event sender（webui.py 由 start.sh 或使用者另外啟動）
     if args.webui:
         _start_webui_sender()
+        _start_webui_pause_watch()
 
     # 字幕轉發初始化（從 config.json 讀取設定）
     _init_subtitle_forwarder()
@@ -17054,15 +17369,23 @@ def main():
 
         # 純錄音模式：跳過 ASR，直接錄音
         if mode == "record":
-            rec_id, rec_name, rec_label = _auto_detect_rec_device()
-            if rec_id is None:
-                print("[錯誤] 找不到任何音訊輸入裝置！", file=sys.stderr)
+            # 照 --rec-source／-d／--mic-device 錄（v2.26.3 以前一律自動偵測，WebUI 選的裝置不生效）
+            try:
+                rec_id, rec_name, rec_label, rec_lb, rec_mic = _resolve_record_device(
+                    args.rec_source, args.device, args.mic_device)
+            except SystemExit as e:
+                print(e, file=sys.stderr)
                 sys.exit(1)
             print(f"{C_OK}錄音裝置: [{rec_id}] {rec_name}（{rec_label}）{RESET}")
-            _cli_kw = dict(mode="record", device=rec_id, topic=args.topic)
+            if args.rec_source:
+                _cli_kw = dict(mode="record", rec_source=args.rec_source, device=args.device,
+                               mic_device=args.mic_device, topic=args.topic)
+            else:
+                _cli_kw = dict(mode="record", device=rec_id, mic_device=args.mic_device, topic=args.topic)
             if not _confirm_start(_build_cli_command(**_cli_kw)):
                 sys.exit(0)
-            run_record_only(rec_id, topic=args.topic)
+            run_record_only(rec_id, topic=args.topic, lb_device=rec_lb, mic_device=rec_mic,
+                            channels=1 if rec_label == "僅我方聲音" else None)
             sys.exit(0)
 
         # ── 雙向翻譯模式（en_zh / ja_zh）：獨立路徑 ──
