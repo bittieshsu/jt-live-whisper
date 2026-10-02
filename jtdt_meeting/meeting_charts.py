@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import html
+import re
 from typing import Optional, Sequence
 
 #: 圖的配色。**同一個發言者在每張圖上要是同一個顏色** —— 不然兩張圖並排時
@@ -50,19 +51,33 @@ def _wrap(text: str, per_line: int) -> list[str]:
     text = " ".join(str(text or "").split())
     if not text:
         return []
+    # **英數字連成一串當一個單位** —— 原本逐字數到上限就切，「OfflineMirror」被切成
+    # 「OfflineMirro / r」（2026-10-02 使用者截圖）。中文照舊一個字一個單位。
+    # 一串英數字自己就比一行還長時，才在中間切。
+    # `per_line` 是以**中文字**計的寬度；英數字與標點大約半個字寬，照實算才不會
+    # 把放得下的英文字硬擠到下一行。
+    def wid(t: str) -> float:
+        return sum(0.6 if ord(ch) < 0x2E80 else 1.0 for ch in t)
+
+    units = re.findall(r"[A-Za-z0-9_.\-/+%]+|\s|.", text)
     out, cur = [], ""
-    for ch in text:
-        cur += ch
-        if len(cur) >= per_line:
-            cut = cur.rfind(" ")
-            if cut > per_line * 0.5:
-                out.append(cur[:cut])
-                cur = cur[cut + 1:]
-            else:
-                out.append(cur)
-                cur = ""
-    if cur:
-        out.append(cur)
+    for u in units:
+        if u == " " and not cur:
+            continue
+        if wid(cur) + wid(u) <= per_line:
+            cur += u
+            continue
+        if cur.strip():
+            out.append(cur.rstrip())
+        cur = "" if u == " " else u
+        while wid(cur) > per_line:
+            k = len(cur)
+            while k > 1 and wid(cur[:k]) > per_line:
+                k -= 1
+            out.append(cur[:k])
+            cur = cur[k:]
+    if cur.strip():
+        out.append(cur.rstrip())
     return out
 
 
@@ -75,11 +90,22 @@ def _mmss(ms: Optional[int]) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-def _svg(w: int, h: int, body: str, title: str = "") -> str:
+def _svg(w: int, h: int, body: str, title: str = "", crop_top: int = 0) -> str:
+    """`crop_top`：不畫圖內標題時，把上方那一截標題空間裁掉（用 viewBox，內容座標不必改）。"""
     t = f"<title>{_esc(title)}</title>" if title else ""
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-            f'viewBox="0 0 {w} {h}" font-family="{_FONT}" role="img">'
-            f'{t}<rect width="{w}" height="{h}" fill="#ffffff"/>{body}</svg>')
+    vh = h - crop_top
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{vh}" '
+            f'viewBox="0 {crop_top} {w} {vh}" font-family="{_FONT}" role="img">'
+            f'{t}<rect y="{crop_top}" width="{w}" height="{vh}" fill="#ffffff"/>{body}</svg>')
+
+
+#: **文件裡的圖不畫自己的標題**（`titled=False`）—— 文件本身有章節標題，
+#: 圖裡再畫一行 14px 的粗體，看起來像一行沒有排版的小字掛在圖上
+#: （2026-10-02 使用者回報「討論結構 標題不對」）。
+#: 單獨下載的 PNG / ZIP 裡的圖照舊有標題（那時候圖外面沒有任何說明）。
+def _title(text: str, y: int = 20) -> str:
+    return (f'<text x="0" y="{y}" font-size="14" font-weight="700" fill="#0f172a">'
+            f'{_esc(text)}</text>')
 
 
 # ------------------------------------------------------------------ 發言者佔比
@@ -96,7 +122,7 @@ def _spk(name: object) -> str:
 
 
 def speaker_timeline(segments: Sequence[dict], stats: dict, *,
-                     width: int = 760) -> Optional[str]:
+                     width: int = 760, titled: bool = True) -> Optional[str]:
     """發言者時間軸 —— **跟畫面上那一欄同一件事**。
 
     ## 為什麼不是長條圖
@@ -154,8 +180,7 @@ def speaker_timeline(segments: Sequence[dict], stats: dict, *,
 
     unit_note = ("橫軸是會議時間，色塊是那個人在講話" if use_time
                  else "這份逐字稿沒有時間戳記，橫軸改用逐字稿的順序")
-    body = [f'<text x="0" y="20" font-size="14" font-weight="700" fill="#0f172a">'
-            f'發言者時間軸</text>',
+    body = ([_title("發言者時間軸")] if titled else []) + [
             f'<text x="0" y="36" font-size="11" fill="#64748b">{unit_note}</text>']
 
     for i, (name, v) in enumerate(rows):
@@ -188,10 +213,10 @@ def speaker_timeline(segments: Sequence[dict], stats: dict, *,
                      (width, f"{v.get('turn_count') or 0} 次")):
             body.append(f'<text x="{x}" y="{y + row_h // 2 + 4}" font-size="11.5" '
                         f'text-anchor="end" fill="#64748b">{_esc(s)}</text>')
-    return _svg(width, h, "".join(body), "發言者時間軸")
+    return _svg(width, h, "".join(body), "發言者時間軸", 0 if titled else 22)
 
 
-def speaker_share(stats: dict, *, width: int = 760) -> Optional[str]:
+def speaker_share(stats: dict, *, width: int = 760, titled: bool = True) -> Optional[str]:
     """發言佔比（長條圖）。
 
     **只在沒有逐字稿可用時才畫** —— 有逐字稿的話 `speaker_timeline()` 說得
@@ -215,8 +240,7 @@ def speaker_share(stats: dict, *, width: int = 760) -> Optional[str]:
     bar_x = label_w + 12
     bar_w = width - bar_x - 96
     unit = "發言時間" if use_time else "發言字數"
-    body = [f'<text x="0" y="20" font-size="14" font-weight="700" fill="#0f172a">'
-            f'發言佔比（依{unit}）</text>',
+    body = ([_title(f"發言佔比（依{unit}）")] if titled else []) + [
             f'<text x="0" y="36" font-size="11" fill="#64748b">'
             f'{"重疊的插話只算一次" if use_time else "這份逐字稿沒有時間戳記，改用字數"}</text>']
     for i, (name, val, turns) in enumerate(rows):
@@ -231,12 +255,61 @@ def speaker_share(stats: dict, *, width: int = 760) -> Optional[str]:
             f'<rect x="{bar_x}" y="{y + 4}" width="{w}" height="14" rx="3" fill="{colour}"/>'
             f'<text x="{bar_x + w + 8}" y="{y + 15}" font-size="11.5" fill="#475569">'
             f'{pct:.1f}%　{_esc(shown)}　{turns} 次</text>')
-    return _svg(width, h, "".join(body), f"發言佔比（依{unit}）")
+    return _svg(width, h, "".join(body), f"發言佔比（依{unit}）", 0 if titled else 22)
 
 
 # ------------------------------------------------------------------ 章節時間軸
 
-def chapter_timeline(chapters: Sequence[dict], *, width: int = 760) -> Optional[str]:
+def chapter_list(chapters: Sequence[dict], *, width: int = 760,
+                 titled: bool = True) -> Optional[str]:
+    """議題時間軸 —— **跟畫面上那一區同一件事**：每個議題一列，左邊開始時間、
+    中間標題與長度條（以最長的那一個為滿格）、右邊佔比與長度。
+
+    匯出原本只有一份議題清單與「各議題時間佔比」那條橫條，畫面上這一張
+    沒有進去（2026-10-02 使用者回報）。
+    """
+    if not chapters:
+        return None
+    use_time = all(c.get("duration_ms") is not None for c in chapters)
+    vals = [int(c["duration_ms"]) if use_time else len(c.get("segment_ids") or [])
+            for c in chapters]
+    total = sum(vals) or 1
+    top_v = max(vals + [1])
+
+    time_x, line_x, text_x, row_h = 52, 66, 82, 40
+    top = 34 if titled else 6
+    bar_w = width - text_x - 130
+    per_line = max(10, (width - text_x) // 13)
+    body = [_title("議題時間軸")] if titled else []
+    y_end = top + row_h * (len(chapters) - 1) + 12
+    body.append(f'<line x1="{line_x}" y1="{top + 12}" x2="{line_x}" y2="{y_end}" '
+                f'stroke="#e2e8f0" stroke-width="2"/>')
+    for i, (c, v) in enumerate(zip(chapters, vals)):
+        y = top + i * row_h
+        colour = PALETTE[i % len(PALETTE)]
+        if c.get("start_ms") is not None:
+            when = _mmss(c.get("start_ms"))
+        else:
+            first = (c.get("segment_ids") or [None])[0]
+            when = f"第 {first} 段" if first is not None else ""
+        lines = _wrap(c.get("title") or "", per_line)
+        label = (lines[0] + ("…" if len(lines) > 1 else "")) if lines else ""
+        w = max(4, int(bar_w * v / top_v))
+        shown = _mmss(v) if use_time else f"{v} 段"
+        body.append(
+            f'<text x="{time_x}" y="{y + 16}" font-size="12" text-anchor="end" '
+            f'fill="#64748b">{_esc(when)}</text>'
+            f'<circle cx="{line_x}" cy="{y + 12}" r="4.5" fill="{colour}"/>'
+            f'<text x="{text_x}" y="{y + 16}" font-size="13" fill="#0f172a">{_esc(label)}</text>'
+            f'<rect x="{text_x}" y="{y + 24}" width="{w}" height="5" rx="2.5" fill="{colour}"/>'
+            f'<text x="{width}" y="{y + 30}" font-size="11.5" text-anchor="end" '
+            f'fill="#64748b">{v * 100 / total:.1f}%　{_esc(shown)}</text>')
+    h = top + row_h * len(chapters) + 4
+    return _svg(width, h, "".join(body), "議題時間軸")
+
+
+def chapter_timeline(chapters: Sequence[dict], *, width: int = 760,
+                     titled: bool = True) -> Optional[str]:
     """章節長度條。**沒有時間就按段落數畫** —— 那仍然是真的比例，
     只是單位不同；圖上要寫出來。"""
     if len(chapters) < 2:
@@ -252,19 +325,23 @@ def chapter_timeline(chapters: Sequence[dict], *, width: int = 760) -> Optional[
     legend_h = 22 * len(chapters)
     h = bar_y + bar_h + 18 + legend_h
     unit = "時間" if use_time else "發言段數"
-    body = [f'<text x="0" y="20" font-size="14" font-weight="700" fill="#0f172a">'
-            f'各議題{unit}佔比</text>']
+    body = [_title(f"各議題{unit}佔比")] if titled else []
     if not use_time:
         body.append('<text x="0" y="36" font-size="11" fill="#64748b">'
                     '這份逐字稿沒有時間戳記，改用發言段數</text>')
+    # **依佔比由高到低排**：長條由左到右、清單由上到下都照這個順序
+    # （2026-10-02 使用者要求）。**顏色仍用原本的章節順序** —— 同一個議題在
+    # 「議題時間軸」與這張圖上要是同一個顏色。畫面上那一份（JS）同一條規則。
+    order = sorted(range(len(vals)), key=lambda i: (-vals[i], i))
     x = 0
-    for i, (c, v) in enumerate(zip(chapters, vals)):
-        w = max(2, int(width * v / total))
+    for i in order:
+        w = max(2, int(width * vals[i] / total))
         colour = PALETTE[i % len(PALETTE)]
         body.append(f'<rect x="{x}" y="{bar_y}" width="{w}" height="{bar_h}" fill="{colour}"/>')
         x += w
-    for i, (c, v) in enumerate(zip(chapters, vals)):
-        y = bar_y + bar_h + 22 + i * 22
+    for k, i in enumerate(order):
+        c, v = chapters[i], vals[i]
+        y = bar_y + bar_h + 22 + k * 22
         colour = PALETTE[i % len(PALETTE)]
         extra = _mmss(c.get("start_ms")) if use_time else f"第 {(c.get('segment_ids') or [0])[0]} 段起"
         body.append(
@@ -272,7 +349,9 @@ def chapter_timeline(chapters: Sequence[dict], *, width: int = 760) -> Optional[
             f'<text x="18" y="{y}" font-size="12" fill="#334155">{_esc(c.get("title"))}</text>'
             f'<text x="{width}" y="{y}" font-size="11.5" text-anchor="end" fill="#64748b">'
             f'{v * 100 / total:.1f}%　{_esc(extra)}</text>')
-    return _svg(width, h, "".join(body), f"各議題{unit}佔比")
+    # 不畫標題時：有「沒有時間戳記」那行說明就留著（裁到它上方），沒有就裁到長條上方
+    crop = 0 if titled else (22 if not use_time else bar_y - 8)
+    return _svg(width, h, "".join(body), f"各議題{unit}佔比", crop)
 
 
 # ------------------------------------------------------------------ 心智圖
@@ -282,7 +361,8 @@ _NODE_CHARS = 14
 _LINE_H = 16
 
 
-def mindmap(nodes: Sequence[dict], *, width: int = 980) -> Optional[str]:
+def mindmap(nodes: Sequence[dict], *, width: int = 980,
+            titled: bool = True) -> Optional[str]:
     """討論結構：左邊主題、右邊掛決議／待辦／風險／未決問題。
 
     **是「組」出來的不是「生成」的** —— 每個節點都來自已經通過引用驗證的項目，
@@ -317,8 +397,8 @@ def mindmap(nodes: Sequence[dict], *, width: int = 980) -> Optional[str]:
         return max(34, len(_wrap(label, w_chars)) * _LINE_H + 16)
 
     body, y = [], pad + 26
-    body.append('<text x="0" y="18" font-size="14" font-weight="700" fill="#0f172a">'
-                '討論結構</text>')
+    if titled:
+        body.append(_title("討論結構", 18))
     for root in roots:
         children = kids.get(root.get("node_id")) or []
         rc, _ = KIND_STYLE.get(root.get("type") or "topic", ("#4338ca", ""))
@@ -379,7 +459,7 @@ def mindmap(nodes: Sequence[dict], *, width: int = 980) -> Optional[str]:
                             f'font-size="12.5" fill="#1e293b">{_esc(line)}</text>')
             cy += ch + 8
         y += block_h + 18
-    return _svg(width, y + 4, "".join(body), "討論結構")
+    return _svg(width, y + 4, "".join(body), "討論結構", 0 if titled else pad + 26 - 10)
 
 
 # ------------------------------------------------------------------ 轉檔
@@ -410,26 +490,33 @@ def to_pdf_pages(svgs: Sequence[str]) -> bytes:
         out.close()
 
 
-def build_all(analysis: dict, segments: Optional[Sequence[dict]] = None) -> dict:
+def build_all(analysis: dict, segments: Optional[Sequence[dict]] = None, *,
+              titled: bool = True) -> dict:
     """一次產出這場會議適合的每一張圖：`{名稱: svg}`。
 
     **哪幾張畫得出來由資料決定**（`meeting_insight.suitable_charts` 同一條規則）
     —— 一場只有一個主題的會議畫章節佔比沒有意義，而沒有內容的圖會讓人以為
     功能壞了。
     """
+    # **順序跟畫面一樣**：議題時間軸 → 各議題佔比 → 發言者 → 討論結構。
+    # 疊成一張長圖（PNG 下載）時就是這個順序。
     out: dict[str, str] = {}
-    mm = mindmap(analysis.get("mindmap") or [])
-    if mm:
-        out["mindmap"] = mm
+    chs = analysis.get("chapters") or []
+    cl = chapter_list(chs, titled=titled)
+    if cl:
+        out["chapters"] = cl
+    tl = chapter_timeline(chs, titled=titled)
+    if tl:
+        out["timeline"] = tl
     # **有逐段資料就畫「發言者時間軸」** —— 跟畫面上那一欄同一件事。
     # 沒有（公開 API 只給分析結果）才退到長條圖。
     stats = analysis.get("speaker_stats") or {}
-    sp = speaker_timeline(segments, stats) if segments else None
+    sp = speaker_timeline(segments, stats, titled=titled) if segments else None
     if sp is None:
-        sp = speaker_share(stats)
+        sp = speaker_share(stats, titled=titled)
     if sp:
         out["speaker_share"] = sp
-    tl = chapter_timeline(analysis.get("chapters") or [])
-    if tl:
-        out["timeline"] = tl
+    mm = mindmap(analysis.get("mindmap") or [], titled=titled)
+    if mm:
+        out["mindmap"] = mm
     return out
