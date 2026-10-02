@@ -1,5 +1,13 @@
 # Changelog
 
+### v2.26.7 (2026-10-02)
+
+**REST API：ACK 之後再 retry 會講清楚原因**
+- 確認收到（ACK）或 7 天到期之後，逐字稿已經刪除，`POST /api/v1/jobs/{id}/retry` 回 409 `invalid_request` 時，
+  `details` 多一個 `reason: content_cleared`，呼叫端可以據此請使用者重新送件（以前只有 `status`，看不出原因）
+- 補專有名詞只重跑校正（帶新的 `glossary` 呼叫 retry）要在 ACK 之前；SOP 補上這段說明
+- 給呼叫端開發用的模擬伺服器同步
+
 ### v2.26.6 (2026-10-02)
 
 **會議摘要：同步 jt-doc-tools v1.16.37 的會議分析**

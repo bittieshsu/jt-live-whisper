@@ -1151,7 +1151,9 @@ async def retry_job(request: Request, job_id: str, authorization: str = Header(N
     updates_correction = bool(entries is not None or body.get("glossary_url")
                               or body.get("correction_level"))
     if not job.get("content_available"):
-        return error_response(409, "invalid_request", details={"status": job["status"]})
+        # ACK 之後（或 7 天到期）逐字稿已清掉，沒有東西可以重跑（v2.26.7，JTDT 要求講清楚）：
+        # 呼叫端要讓使用者重新送件。想補專有名詞重跑校正的，要在 ACK 之前 retry
+        return error_response(409, "invalid_request", details={"status": job["status"], "reason": "content_cleared"})
     if job["status"] not in ("failed", "partially_succeeded") and not (
             updates_correction and job["status"] == "succeeded" and "correct" in job["tasks"]):
         return error_response(409, "invalid_request", details={"status": job["status"]})

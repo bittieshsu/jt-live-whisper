@@ -125,7 +125,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.6 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.7 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3045,6 +3045,7 @@ cd C:\jt-live-whisper
 <li>摘要由另一條執行緒一次做一件，不會卡住別件作業的辨識；摘要失敗只讓 <code>summarize</code> 失敗（<code>partially_succeeded</code>），逐字稿照樣交付，可以只重做摘要</li>
 <li>上傳的檔案處理成功就刪除；沒用來送件的 24 小時後刪除。會議摘要與逐字稿一樣，ACK 或刪除作業時一起刪除</li>
 <li><strong>辨識失敗而且錯誤是可以重試的（<code>retryable: true</code>，例如 GPU 伺服器暫時不能用）時，上傳的檔案會保留</strong>，<code>POST /api/v1/jobs/{id}/retry</code> 直接重做，不必重新上傳（v2.25.3 起）。保留到重試成功、ACK、刪除作業或 7 天後內容到期。不可重試的失敗（例如檔案解不開）檔案會立刻刪除，這時要重新上傳、送新的一件</li>
+<li><strong>補專有名詞只重跑校正</strong>：辨識成功的作業可以帶新的 <code>glossary</code>（或 <code>correction_level</code>）呼叫 <code>POST /api/v1/jobs/{id}/retry</code>，只重跑校正（有要求摘要的話摘要也重做），辨識與講者不變、<code>seq</code> 不變。<strong>要在 ACK 之前</strong>：ACK（或 7 天到期）之後逐字稿已經刪掉，回 409 <code>invalid_request</code>、<code>details.reason=content_cleared</code>（v2.26.7 起），只能重新送件。所以想讓使用者補詞重跑的呼叫端，存好之後可以先保留一段時間（例如 24 小時）再 ACK</li>
 <li>日文、韓文的會議目前不能摘要（送件當下回 422 <code>language_not_supported</code>），逐字稿不受影響</li>
 </ul>
 <h3 id="講者辨識方法api_revision-25v2260-起26-加原因代碼27-加全滿標記">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼；2.7 加全滿標記）</h3>
