@@ -1443,7 +1443,7 @@ def summary_is_grounded(summary: str, chapters: list[dict],
     那一類只能靠人看與 evidence 連結 —— **這個函式回 True 不等於摘要是對的**。
     """
     # **每一段之間要有分隔** —— 原本內文、負責人、期限直接黏在一起，內文以英文結尾時
-    # （「…寄給Acme-Alex」＋負責人「Bella」）就變成 `Acme-AlexBella` 一個詞，
+    # （「…寄給Acme-Kevin」＋負責人「Bella」）就變成 `Acme-KevinBella` 一個詞，
     # 兩個名字都被判成「找不到依據」（2026-10-02 使用者回報：逐字稿一開始就有那個名字）。
     src = " ".join(
         [c.get("title", "") for c in chapters]

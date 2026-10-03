@@ -2089,7 +2089,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.9"
+APP_VERSION = "2.26.10"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3220,13 +3220,40 @@ _PUNCT_NORMALIZE = str.maketrans({"\u00a0": " ", "\u202f": " ", "\u2007": " ",
 _GLOSSARY_SPLIT_RE = re.compile(r"\s+/\s*|\s*/\s+|\s*[／、，,;；|｜\n]\s*")
 
 
+_GLOSSARY_EDGE = " \t\r\"'「」『』"
+
+
+def _glossary_trim(part):
+    """去頭尾空白與引號；括號只拿掉**落單的半邊**（拆開 `(Proxmox, PVE)` 剩下的）與**包住整個詞的那一對**，
+    詞裡成對的括號留著。v2.26.10 前一律剝掉頭尾括號：`Proxmox (PVE)` 變成 `Proxmox (PVE`，
+    附錯寫法時照表換進逐字稿的就是少了右括號的字"""
+    while True:
+        p = part.strip(_GLOSSARY_EDGE)
+        for o, c in (("(", ")"), ("（", "）")):
+            if p.startswith(o) and p.count(o) > p.count(c):
+                p = p[1:]
+            if p.endswith(c) and p.count(c) > p.count(o):
+                p = p[:-1]
+            if p.startswith(o) and p.endswith(c):
+                depth = 0
+                for i, ch in enumerate(p):
+                    depth += (ch == o) - (ch == c)
+                    if depth == 0:
+                        break
+                if i == len(p) - 1:            # 開頭那個括號一直到最後一個字才關上：整個詞被包住
+                    p = p[1:-1]
+        if p == part:
+            return p
+        part = p
+
+
 def _glossary_parts(sources):
     """專有名詞（呼叫端一行一筆）→ 一個一個的詞：拆開一行裡的多個詞、去頭尾空白與引號、
     去掉一個字的、不分大小寫去重，保留原本的順序（ASR 提示只取前面幾個）"""
     out, seen = [], set()
     for src in sources or []:
         for part in _GLOSSARY_SPLIT_RE.split(str(src)):
-            part = part.strip(" \t\r\"'「」『』()（）")
+            part = _glossary_trim(part)
             if len(part) < 2 or part.lower() in seen:
                 continue
             seen.add(part.lower())

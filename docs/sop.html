@@ -126,7 +126,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.9 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.10 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3113,6 +3113,7 @@ cd C:\jt-live-whisper
 <ul>
 <li><strong>一筆寫一個詞最好</strong>。一筆寫好幾個時會自動拆開：<code>Proxmox VE / PVE</code> → <code>Proxmox VE</code>、<code>PVE</code>；<code>王經理、李主任</code> → 兩個詞。
 分隔符號是頓號、逗號、分號、直線，以及<strong>兩邊至少一邊有空白的斜線</strong>（<code>TCP/IP</code>、<code>I/O</code> 這種本身就是一個詞，不拆）。
+全形斜線（<code>／</code>）與換行也拆；拆開後只剩一個字的不算（<code>X / Proxmox</code> 只有 <code>Proxmox</code>）。頭尾的空白與引號拿掉；括號只拿掉<strong>包住整個詞的那一對</strong>（<code>(PVE)</code> → <code>PVE</code>）與拆開後<strong>落單的半邊</strong>，詞裡成對的括號留著：<code>Proxmox (PVE)</code> 是一個詞（v2.26.9 以前會被剝成 <code>Proxmox (PVE</code>，附錯寫法時換進逐字稿的少一個右括號）
 <code>glossary.entries</code> 回報的是送來的筆數，不是拆開後的詞數。v2.26.7 以前整筆當一個詞，<code>Proxmox VE / PVE</code> 永遠比對不到</li>
 <li>校正時，<strong>拼法相近的誤聽</strong>會換成專有名詞的寫法（實測語料裡的 <code>Proximity</code> → <code>Proxmox</code>、<code>Groxmoxity</code> → <code>Proxmox</code>），<code>punctuation_only</code> 也放行；
 拼法不相近的不會硬換（<code>Proximity</code> 不會被換成 <code>VMware</code>），原文裡已經是專有名詞的也不會被換掉（<code>VMware</code> 不會被換成 <code>Proxmox</code>）。
@@ -3138,7 +3139,7 @@ cd C:\jt-live-whisper
 <code>standard</code> 另外擋下 14～19 筆把中日文換成英文專有名詞的改法（全部是改錯的）</li>
 <li><strong>語音辨識不用專有名詞</strong>，<code>glossary.asr_bias_terms</code> 一律是 0（v2.26.9 起；v2.26.7 以前照詞數回報，但 GPU 伺服器那條路根本沒傳）。
 實測給辨識模型專有名詞（faster-whisper 的 hotwords）：內容真的有那些詞時辨識率明顯提高，但在<strong>跟清單無關的會議</strong>裡會憑空插入那些詞
-（中文一場 37 分鐘的會議冒出 14 次清單上的人名）、中文慢 5.5 倍、段落併成一半（講者辨識一段只能標一個人）。
+（中文一場 37 分鐘的會議冒出 18 次清單上的人名：李主任 14 次、王經理 4 次）、中文慢 5.5 倍、段落併成一半（講者辨識一段只能標一個人）。
 使用者的清單不可能每個詞每場都出現，所以不用，見 BENCHMARKS.md 第六節</li>
 <li>retry 帶 <code>glossary_url</code> 時，新的詞彙表在校正前下載（v2.26.7 以前只在拉檔階段下載，只重跑校正時新的詞彙表不會生效）</li>
 </ul>
