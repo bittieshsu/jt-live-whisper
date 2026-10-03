@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 
 from . import config
 from .config import Settings
-from .engine import STAGES, STAGE_FOR_TASK, Engine, EngineError
+from .engine import STAGES, STAGE_FOR_TASK, Engine, EngineError, glossary_from_entries, glossary_summary, predicted_asr_bias
 from . import log as jlog
 from .events import EventBus, now_iso, ulid
 from .store import Store
@@ -830,8 +830,8 @@ async def create_job(request: Request, authorization: str = Header(None),
 
     stages = [s for s in STAGES
               if s in ("fetch", "normalize", "finalize") or any(STAGE_FOR_TASK[t] == s for t in tasks)]
-    terms = [e["source"] for e in (entries or []) if e.get("source")]
-    keep = [e["source"] for e in (entries or []) if e.get("mode") == "keep" and e.get("source")]
+    # 一筆寫好幾個詞（`Proxmox VE / PVE`）時拆開；統計回報呼叫端送來的筆數（v2.26.8）
+    terms, keep, n_entries, n_keep = glossary_from_entries(entries)
     job_id = "job_" + ulid()
     if upload:
         if not STATE.store.claim_upload(upload["upload_id"], job_id):      # 同時送兩件用同一個上傳
@@ -848,17 +848,18 @@ async def create_job(request: Request, authorization: str = Header(None),
         "tasks": {t: "pending" for t in TASKS if t in tasks},
         "last_event_seq": 0, "segment_count": 0, "acknowledged": False,
         "content_available": True, "result_url": None,
-        "glossary": ({"entries": len(terms), "keep_terms": len(keep),
-                      "asr_bias_terms": min(len(terms), config.ASR_BIAS_MAX_TERMS)} if terms else None),
+        "glossary": None,                   # 下面算（要用到 _glossary_terms）
         "correction_level": (body.get("correction_level") or "standard") if "correct" in tasks else None,
         "errors": [],
         "warnings": ([{"code": "profile_deprecated", "fields": ["profile_id"]}] if profile.get("deprecated") else []),
         "_language": lang, "_hints": body.get("hints") or {},
         "_client": client, "_stages": stages, "_source": src,
-        "_glossary_terms": terms, "_glossary_keep": keep,
+        "_glossary_terms": terms, "_glossary_keep": keep, "_glossary_counts": (n_entries, n_keep),
         "_glossary_url": body.get("glossary_url"),
         "_webhook": wh, "_total_audio_ms": None, "_processed_ms": 0,
     }
+    # 辨識時會參考幾個專有名詞：GPU 伺服器那條路目前傳不了，照實回報（辨識完會再依實際走的路更新）
+    job["glossary"] = glossary_summary(job, predicted_asr_bias(STATE.settings, terms))
     STATE.store.put_job(job)
     job["queue_position"] = STATE.store.jobs_ahead(job)      # 前面還有幾件（沒有就是 0）
     STATE.store.put_idempotent(client, idempotency_key, job_id, body_hash, body)
@@ -972,6 +973,8 @@ async def read_result(job_id: str, authorization: str = Header(None)):
         # api_revision 2.4：要求 summarize 而且成功時才有值
         "summary_url": (f"/api/v1/jobs/{job_id}/summary"
                         if job["tasks"].get("summarize") == "succeeded" else None),
+        # api_revision 2.8（JTDT 要求）：語音辨識用的模型、在哪裡跑（整場一個值；辨識失敗或升級前的作業為 null）
+        "asr": job.get("_asr") if job["tasks"].get("transcribe") == "succeeded" else None,
         # api_revision 2.5：講者辨識要求的與實際用的方法（沒有要求 diarize 時為 null）
         # api_revision 2.7：saturated（升級前做完的作業沒有這個欄位，補 False）
         "diarization": ({"saturated": False, **job["_diarization"]} if job.get("_diarization") else job.get("_diarization"))
@@ -1158,14 +1161,20 @@ async def retry_job(request: Request, job_id: str, authorization: str = Header(N
             updates_correction and job["status"] == "succeeded" and "correct" in job["tasks"]):
         return error_response(409, "invalid_request", details={"status": job["status"]})
 
+    # 辨識已經做完的作業，retry 不會重新辨識：辨識時參考了幾個專有名詞維持原本的值
+    # （v2.26.7 以前照新的詞數重算，等於宣稱新的詞有拿去辨識）
+    asr_done = job["tasks"].get("transcribe") == "succeeded"
+    prev_bias = (job.get("glossary") or {}).get("asr_bias_terms", 0) if asr_done else None
     if entries is not None:
-        terms = [e["source"] for e in entries if e.get("source")]
-        keep = [e["source"] for e in entries if e.get("mode") == "keep" and e.get("source")]
+        terms, keep, n_entries, n_keep = glossary_from_entries(entries)
         job["_glossary_terms"], job["_glossary_keep"] = terms, keep
-        job["glossary"] = {"entries": len(terms), "keep_terms": len(keep),
-                           "asr_bias_terms": min(len(terms), config.ASR_BIAS_MAX_TERMS)} if terms else None
+        job["_glossary_counts"] = (n_entries, n_keep)
+        job["glossary"] = glossary_summary(job, prev_bias if asr_done else predicted_asr_bias(STATE.settings, terms))
     elif body.get("glossary_url"):
         job["_glossary_url"] = body["glossary_url"]
+        # 只重跑校正時不會經過「拉檔」階段，詞彙表要在校正前另外下載（v2.26.7 以前新的詞彙表不會生效）
+        job["_glossary_reload"] = True
+        job["_glossary_prev_bias"] = prev_bias
     if body.get("correction_level"):
         job["correction_level"] = body["correction_level"]
 

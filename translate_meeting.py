@@ -26,6 +26,7 @@ import shutil
 import threading
 import time
 import wave
+import collections
 from collections import deque
 from functools import lru_cache
 
@@ -2088,7 +2089,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.7"
+APP_VERSION = "2.26.8"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3081,6 +3082,8 @@ def _script_profile(text):
 _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z'’]*")
 # 「這個詞是某個保護詞的誤聽」的相似度門檻，見 _accept_correction
 _GARBLED_TERM_RATIO = 0.6
+_GLOSSARY_RELATED_RATIO = 0.5   # LLM 換上去的專有名詞跟原文的字要多像才算「有關」（Uboot → Ubuntu 是 0.545）
+_GLOSSARY_PROMPT_MAX = 80        # 校正提示詞最多列幾個專有名詞（太長會擠掉逐字稿的份量）
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群。
 # 1.6s 是 resemblyzer partial utterance 的長度，短於它的聲紋是補零算出來的
@@ -3211,6 +3214,84 @@ _PUNCT_NORMALIZE = str.maketrans({"\u00a0": " ", "\u202f": " ", "\u2007": " ",
                                   "\u2010": "-", "\u2011": "-"})
 
 
+# 呼叫端送來的專有名詞常常一行寫好幾個（`Proxmox VE / PVE`、`王經理、李主任`）。
+# 整行當一個詞永遠比對不到（v2.26.7 以前就是這樣：`Proxmox` 從來不在清單裡）。
+# 「/」兩邊至少一邊有空白才拆：`TCP/IP`、`I/O` 這種本身就是一個詞
+_GLOSSARY_SPLIT_RE = re.compile(r"\s+/\s*|\s*/\s+|\s*[／、，,;；|｜\n]\s*")
+
+
+def _glossary_parts(sources):
+    """專有名詞（呼叫端一行一筆）→ 一個一個的詞：拆開一行裡的多個詞、去頭尾空白與引號、
+    去掉一個字的、不分大小寫去重，保留原本的順序（ASR 提示只取前面幾個）"""
+    out, seen = [], set()
+    for src in sources or []:
+        for part in _GLOSSARY_SPLIT_RE.split(str(src)):
+            part = part.strip(" \t\r\"'「」『』()（）")
+            if len(part) < 2 or part.lower() in seen:
+                continue
+            seen.add(part.lower())
+            out.append(part)
+    return out
+
+
+def _glossary_words(parts):
+    """專有名詞裡的拉丁字（小寫、3 個字母以上、不是常見字）：校正把關拿它判斷
+    「誤聽換成專有名詞的拼法」（Proximity → Proxmox）與「專有名詞不可被換掉」"""
+    out = set()
+    for part in parts or []:
+        for w in _LATIN_TOKEN_RE.findall(part):
+            w = w.lower()
+            if len(w) >= 3 and w not in _COMMON_WORDS:
+                out.add(w)
+    return out
+
+
+def _glossary_fix(word, candidates):
+    """被換掉的字 word 是不是某個專有名詞字的誤聽（拼法相近）。
+    長度下限與門檻沿用 _GARBLED_TERM_RATIO 的量測：短字光靠相似度一定會誤判（I 對 AI 是 0.667）"""
+    if len(word) < 4:
+        return False
+    return any(len(g) >= 3 and difflib.SequenceMatcher(None, word, g).ratio() >= _GARBLED_TERM_RATIO
+               for g in candidates)
+
+
+def _latin_counts(text):
+    return collections.Counter(w.lower() for w in _LATIN_TOKEN_RE.findall(text))
+
+
+def _glossary_more(original, corrected, glossary):
+    """校正後出現次數變多的專有名詞字（＝校正換上去的）"""
+    co, cn = _latin_counts(original), _latin_counts(corrected)
+    return {g for g in glossary if cn[g] > co[g]}
+
+
+def _looks_proper(text, m):
+    """原文裡這個英文字像不像專有名詞：全大寫、大小寫混合、或不在句首的大寫開頭（與 _protected_terms 同一套判斷）"""
+    tok = m.group(0)
+    before = text[:m.start()].rstrip()
+    sentence_start = not before or before[-1] in ".?!:;\"“。！？"
+    return tok.isupper() or any(c.isupper() for c in tok[1:]) or (tok[0].isupper() and not sentence_start)
+
+
+def _glossary_garbled(original, corrected, glossary):
+    """原文裡像某個專有名詞的字（Proximity 像 Proxmox）被換成了不相干的東西：回 True＝要擋（v2.26.8）。
+
+    - 只看原文裡像專有名詞的字：清單裡難免有 turbo、premium 這種一般字，句首的 Medium 改成 Median 不可以被擋
+    - 換上去的是另一個也算相近（0.5 以上）的專有名詞時放行：Uboot 像 turbo（0.6）、但換成 Ubuntu（0.545）是對的
+    - 用出現次數判斷「換上去」：同一行本來就有 Proxmox，再把 Proximity 改成 Proxmox 也算"""
+    new_words = set(_latin_counts(corrected))
+    more = _glossary_more(original, corrected, glossary)
+    for m in _LATIN_TOKEN_RE.finditer(original):
+        w = m.group(0).lower()
+        if w in new_words or w in glossary or len(w) < 4 or w in _COMMON_WORDS or not _looks_proper(original, m):
+            continue
+        close = [g for g in glossary if len(g) >= 3 and
+                 difflib.SequenceMatcher(None, w, g).ratio() >= _GARBLED_TERM_RATIO]
+        if close and not any(difflib.SequenceMatcher(None, w, g).ratio() >= _GLOSSARY_RELATED_RATIO for g in more):
+            return True
+    return False
+
+
 def _protected_terms(texts):
     """整份逐字稿中出現兩次以上的專有名詞（全大寫縮寫，或不在句首的大寫開頭詞），回傳 {小寫: 次數}。
     校正時不可把它們改成別的詞（例如 Ceph 被改成 Cef、人名 Ida 被改成 I）；
@@ -3232,8 +3313,9 @@ def _normalize_correction(text):
     return text.translate(_PUNCT_NORMALIZE)
 
 
-def _accept_correction(original, corrected, protected=None):
-    """判斷 LLM 校正後的單行文字能不能採用（protected：不可刪改的專有名詞，小寫）"""
+def _accept_correction(original, corrected, protected=None, glossary=None):
+    """判斷 LLM 校正後的單行文字能不能採用（protected：不可刪改的專有名詞，小寫；
+    glossary：呼叫端給的專有名詞拉丁字，小寫，見 _glossary_words）"""
     if corrected == original or corrected == "[雜音]":
         return True
     if not corrected.strip():
@@ -3250,14 +3332,34 @@ def _accept_correction(original, corrected, protected=None):
     if (set(corrected) - set(original)) & _BRACKET_CHARS:
         return False
     # 專有名詞不可被刪改；只能換成另一個出現次數更多的專有名詞（修正誤聽）
+    glossary = glossary or set()
+    if glossary:
+        # 呼叫端給的專有名詞本身不可被換掉（VMware → Proxmox 這種兩個專有名詞互換），v2.26.8
+        co, cn = _latin_counts(original), _latin_counts(corrected)
+        if any(cn[g] < co[g] for g in glossary):
+            return False
+        # 換上英文專有名詞時，原文必須有被換掉的英文字（聽錯的拼法：safe → Ceph、Proximity → Proxmox）。
+        # 從中日文換過來的等於翻譯或硬塞，擋（校正語料實測：新竹 → Hsinchu、林エンジニア → Engineer Lin、
+        # セフ → Ceph，答案就是原文的寫法）
+        if _glossary_more(original, corrected, glossary) and not any(cn[w] < co[w] for w in co):
+            return False
+        # 原文裡像某個專有名詞的字被換成不相干的東西（Proximity → VMware）
+        if _glossary_garbled(original, corrected, glossary):
+            return False
     if protected:
         orig_words = {w.lower() for w in _LATIN_TOKEN_RE.findall(original)}
         new_words = {w.lower() for w in _LATIN_TOKEN_RE.findall(corrected)}
         removed = (orig_words & protected.keys()) - new_words
         added = {w for w in new_words - orig_words if w in protected}
+        more_glossary = _glossary_more(original, corrected, glossary) if glossary else set()
         for w in removed:
-            if not any(protected[a] > protected[w] for a in added):
-                return False
+            if any(protected[a] > protected[w] for a in added):
+                continue
+            # 聽錯的字在整份逐字稿出現兩次以上，就會被當成「聽對的專有名詞」保護起來；
+            # 換成拼法相近的專有名詞（Proximity → Proxmox）是修正誤聽，要放行（v2.26.8）
+            if _glossary_fix(w, more_glossary):
+                continue
+            return False
         # 辨識聽壞的專有名詞，被換成「別的」詞。
         # 上面那條看不到它：聽壞的詞（Groxmoxity）不在保護清單裡，交集是空的——
         # 我們保護了辨識聽對的專有名詞，對聽壞的卻一條規則都沒有，
@@ -11874,8 +11976,10 @@ def call_ollama_raw(prompt, model, host, port, timeout=300, spinner=None, live_o
 
 
 def _correct_segments_with_llm(segments_data, model, host, port, server_type="ollama",
-                                topic=None, on_progress=None):
-    """用 LLM 校正離線逐字稿的 ASR 辨識錯誤，原地修改 segments_data"""
+                                topic=None, on_progress=None, glossary=None):
+    """用 LLM 校正離線逐字稿的 ASR 辨識錯誤，原地修改 segments_data。
+    glossary：呼叫端給的專有名詞（已用 _glossary_parts 拆開）。提示詞列出正確拼法，
+    把關放行「誤聽換成拼法相近的專有名詞」、不准把專有名詞換掉（v2.26.8，REST API 用）"""
     # 1. 提取所有文字行，建立編號對應
     all_lines = []   # [(seg_idx, line_idx, text), ...]
     for si, seg in enumerate(segments_data):
@@ -11908,13 +12012,25 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
         chunks.append(current_chunk)
 
     # 4. 依逐字稿語言選提示詞，並準備 topic 行
+    glossary = list(glossary or [])[:_GLOSSARY_PROMPT_MAX]
     if _transcript_is_chinese([text for _, _, text in all_lines]):
         prompt_template = TRANSCRIPT_CORRECT_PROMPT_TEMPLATE
         topic_line = f"- 本次會議主題：{topic}，請根據此主題的領域知識理解專業術語並正確校正\n" if topic else ""
+        if glossary:
+            topic_line += (f"- 本次會議的專有名詞（正確寫法）：{'、'.join(glossary)}。逐字稿裡發音或拼法相近的誤聽請改成這裡的寫法；"
+                           "不是這些詞的不要硬改成它們，也不要把中文翻成這些詞\n")
     else:
         prompt_template = TRANSCRIPT_CORRECT_PROMPT_TEMPLATE_EN
         topic_line = (f"- Meeting topic: {topic}. Use domain knowledge of this topic to fix technical terms\n"
                       if topic else "")
+        if glossary:
+            topic_line += (f"- Proper nouns in this meeting (correct spelling): {', '.join(glossary)}. "
+                           "If a word in the transcript is a mishearing or misspelling of one of these, use the spelling given here. "
+                           "Do not force other words into these terms, and do not translate\n")
+    glossary_words = _glossary_words(glossary)
+    glossary_tokens = set()                 # 跨行搬移檢查不算專有名詞：兩行都把誤聽改成同一個詞是正常的
+    for g in glossary:
+        glossary_tokens |= _content_tokens(g)
 
     # 5. 設定狀態列
     _llm_loc = "本機" if host in ("localhost", "127.0.0.1", "::1") else "伺服器"
@@ -11948,7 +12064,7 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
                     corrected_text = _s2twp_safe(corrected_text)
                 corrected_text = _normalize_correction(corrected_text)
                 if (corrected_text != orig_text and corrected_text != "[雜音]"
-                        and _accept_correction(orig_text, corrected_text, protected)):
+                        and _accept_correction(orig_text, corrected_text, protected, glossary_words)):
                     _corrected_tc = corrected_text
                     _webui_send({"type": "correction",
                                  "original": orig_text,
@@ -12006,7 +12122,7 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
                         if not _KANA_RE.search(orig_text):
                             corrected_text = _s2twp_safe(corrected_text)
                         corrected_text = _normalize_correction(corrected_text)
-                        if _accept_correction(orig_text, corrected_text, protected):
+                        if _accept_correction(orig_text, corrected_text, protected, glossary_words):
                             corrected[global_idx] = corrected_text
                         else:
                             n_rejected += 1
@@ -12020,7 +12136,7 @@ def _correct_segments_with_llm(segments_data, model, host, port, server_type="ol
         if new_text == "[雜音]":
             continue
         own = all_lines[idx][2]
-        gained = _content_tokens(new_text) - _content_tokens(own) - _COMMON_WORDS
+        gained = _content_tokens(new_text) - _content_tokens(own) - _COMMON_WORDS - glossary_tokens
         neighbors = set()
         for j in (idx - 1, idx + 1):
             if 0 <= j < len(all_lines):

@@ -52,6 +52,7 @@ def _to_tw(text):
         return text
     return tm._s2twp_safe(text)
 _PUNCT_RE = re.compile(r"[\s\W_]+", re.UNICODE)
+_NON_LATIN_RE = re.compile(r"[^\x00-\x7f]")     # 中日韓文字（正規化之後標點已經拿掉）
 
 
 class EngineError(Exception):
@@ -70,6 +71,28 @@ def _normalize_for_compare(text):
     return _PUNCT_RE.sub("", text).lower()
 
 
+def _undo_glossary_fixes(original, corrected, glossary_words):
+    """校正把誤聽換成拼法相近的專有名詞（Proximity → Proxmox，v2.26.8）：把那個字換回原文的寫法，
+    剩下的差異再照「只動標點、或換成整個專有名詞」判斷。拼法不相近的換不回去，照樣被擋"""
+    if not glossary_words:
+        return corrected
+    orig_toks = tm._LATIN_TOKEN_RE.findall(original)
+    orig_lower = {t.lower() for t in orig_toks}
+    new_toks = tm._LATIN_TOKEN_RE.findall(corrected)
+    new_lower = {t.lower() for t in new_toks}
+    gone = [t for t in dict.fromkeys(orig_toks) if t.lower() not in new_lower and t.lower() not in glossary_words]
+    out = corrected
+    for t in dict.fromkeys(new_toks):
+        g = t.lower()
+        if g not in glossary_words or g in orig_lower or not gone:
+            continue
+        best = max(gone, key=lambda o: difflib.SequenceMatcher(None, o.lower(), g).ratio())
+        if tm._glossary_fix(best.lower(), {g}):
+            out = re.sub(rf"(?<![A-Za-z]){re.escape(t)}(?![A-Za-z])", lambda _m, b=best: b, out)
+            gone.remove(best)
+    return out
+
+
 def punctuation_only_ok(original, corrected, glossary_terms=()):
     """punctuation_only：只允許標點／大小寫／空白的變動，或詞彙庫詞彙的替換。
 
@@ -78,6 +101,12 @@ def punctuation_only_ok(original, corrected, glossary_terms=()):
     只看「長度沒變長」是不夠的——那會讓「已經接好 → 還沒接好」這種
     整句反意的改寫通過（旗標等於沒作用）。
     """
+    gw = tm._glossary_words(glossary_terms)
+    corrected = _undo_glossary_fixes(original, corrected, gw)
+    # 原文的字像某個專有名詞（Proximity 像 Proxmox），校正後卻沒有那個專有名詞：換成了別的東西，擋
+    # （與 translate_meeting._accept_correction 同一條規則；這裡另外檢查，不依賴前一道把關）
+    if gw and tm._glossary_garbled(original, corrected, gw):
+        return False
     a = _normalize_for_compare(original)
     b = _normalize_for_compare(corrected)
     if a == b:
@@ -85,6 +114,14 @@ def punctuation_only_ok(original, corrected, glossary_terms=()):
     terms = [t for t in (_normalize_for_compare(x) for x in glossary_terms) if t]
     if not terms:
         return False
+    # 原文裡本來就是專有名詞的位置不可以被改（兩個專有名詞互換也算），v2.26.8
+    kept = [False] * len(a)
+    for t in terms:
+        start = a.find(t)
+        while start >= 0:
+            for k in range(start, start + len(t)):
+                kept[k] = True
+            start = a.find(t, start + 1)
     # 校正後的文字裡，詞彙庫詞彙佔到的位置（替換只能發生在這些位置上）
     covered = [False] * len(b)
     for t in terms:
@@ -112,11 +149,44 @@ def punctuation_only_ok(original, corrected, glossary_terms=()):
         old, new = a[i1:i2], b[j1:j2]
         if not new:
             return False                      # 只刪不補，不是詞彙庫替換
+        if any(kept[k] for k in range(i1, i2)) or (i1 == i2 and 0 < i1 < len(a) and kept[i1 - 1] and kept[i1]):
+            return False                      # 原文的專有名詞被改掉（含在中間插字：PVE → Proxmox VE）
+        if _NON_LATIN_RE.search(old) and not _NON_LATIN_RE.search(new):
+            # 非英文字母的原文整段換成英文專有名詞（v2.26.8，校正語料實測）：日文的セフ → Ceph、
+            # 林エンジニア → Engineer Lin（等於翻譯）、中文的「即從」→ Ceph、「分P」→ PVE（硬塞）。
+            # 同一種文字之間的修正照舊放行（safe → Ceph、王金理 → 王經理）
+            return False
         if not all(covered[k] for k in range(j1, j2)):
             return False                      # 改到了詞彙庫範圍以外的地方
         if len(old) > len(new) + 4:
             return False                      # 被換掉的原文太長，是整句改寫不是換詞
     return True
+
+
+def glossary_from_entries(entries):
+    """詞彙表的 entries → (拆開的詞, 拆開的 keep 詞, 呼叫端的筆數, 呼叫端的 keep 筆數)。
+    一筆寫好幾個詞（`Proxmox VE / PVE`）時拆開（v2.26.8），統計回報的是呼叫端送來的筆數"""
+    srcs = [e["source"] for e in entries or [] if isinstance(e, dict) and e.get("source")]
+    keep = [e["source"] for e in entries or []
+            if isinstance(e, dict) and e.get("mode") == "keep" and e.get("source")]
+    return tm._glossary_parts(srcs), tm._glossary_parts(keep), len(srcs), len(keep)
+
+
+def predicted_asr_bias(settings, terms):
+    """辨識時會參考幾個專有名詞。GPU 伺服器那條路目前傳不了（v2.26.7 以前照樣回報有用到，是錯的），
+    只有在 API 主機本機辨識時用得到"""
+    if not terms:
+        return 0
+    rw = settings.remote_whisper
+    return 0 if (rw and rw.get("host")) else min(len(terms), config.ASR_BIAS_MAX_TERMS)
+
+
+def glossary_summary(job, asr_bias):
+    """作業的 glossary 統計（Job.glossary）；沒有詞彙表時為 None"""
+    if not job.get("_glossary_terms"):
+        return None
+    n, nk = job.get("_glossary_counts") or (len(job["_glossary_terms"]), len(job.get("_glossary_keep") or []))
+    return {"entries": n, "keep_terms": nk, "asr_bias_terms": asr_bias}
 
 
 class Engine:
@@ -294,15 +364,7 @@ class Engine:
         self._download(src["url"], dest, expect_sha=src.get("sha256"),
                        expect_size=src.get("size_bytes"), stage="fetch")
         if job.get("_glossary_url"):
-            g = job["_glossary_url"]
-            gp = os.path.join(self.settings.work_dir, f"{job['job_id']}.glossary.json")
-            try:
-                self._download(g["url"], gp, expect_sha=g.get("sha256"),
-                               expect_size=g.get("size_bytes"), stage="fetch")
-            except EngineError:
-                raise EngineError("glossary_unreachable", "fetch")
-            job["_glossary_terms"], job["_glossary_keep"] = self._load_glossary_file(gp)
-            job["glossary"] = self._glossary_summary(job)
+            self._load_glossary_url(job, "fetch")
         return dest
 
     def _download(self, url, dest, expect_sha=None, expect_size=None, stage="fetch"):
@@ -340,6 +402,20 @@ class Engine:
                 raise EngineError("source_checksum_mismatch", stage, {"field": "sha256"})
         return dest
 
+    def _load_glossary_url(self, job, stage, asr_bias=None):
+        """下載 glossary_url 的詞彙表。送件時在拉檔階段；只重跑校正的 retry 在校正前（v2.26.8）"""
+        g = job["_glossary_url"]
+        gp = os.path.join(self.settings.work_dir, f"{job['job_id']}.glossary.json")
+        try:
+            self._download(g["url"], gp, expect_sha=g.get("sha256"),
+                           expect_size=g.get("size_bytes"), stage=stage)
+        except EngineError:
+            raise EngineError("glossary_unreachable", stage)
+        terms, keep, n, nk = self._load_glossary_file(gp)
+        job["_glossary_terms"], job["_glossary_keep"], job["_glossary_counts"] = terms, keep, (n, nk)
+        job["glossary"] = glossary_summary(job, predicted_asr_bias(self.settings, terms)
+                                           if asr_bias is None else asr_bias)
+
     def _load_glossary_file(self, path):
         import json
         try:
@@ -350,19 +426,10 @@ class Engine:
         if not isinstance(entries, list) or len(entries) > self.settings.limits["max_glossary_entries"]:
             raise EngineError("glossary_too_large", "fetch",
                               {"max_entries": self.settings.limits["max_glossary_entries"]})
-        terms = [e.get("source", "") for e in entries if isinstance(e, dict) and e.get("source")]
-        keep = [e["source"] for e in entries
-                if isinstance(e, dict) and e.get("mode") == "keep" and e.get("source")]
-        return terms, keep
+        return glossary_from_entries(entries)
 
     def _glossary_summary(self, job):
-        terms = job.get("_glossary_terms") or []
-        if not terms:
-            return None
-        # 遠端辨識（GPU 伺服器）目前無法傳遞 hotwords，只有本機辨識用得到
-        bias = 0 if job.get("_use_remote_asr") else min(len(terms), config.ASR_BIAS_MAX_TERMS)
-        return {"entries": len(terms), "keep_terms": len(job.get("_glossary_keep") or []),
-                "asr_bias_terms": bias}
+        return glossary_summary(job, predicted_asr_bias(self.settings, job.get("_glossary_terms")))
 
     def _normalize(self, job):
         """轉 16 kHz 單聲道，取得總長度"""
@@ -386,8 +453,15 @@ class Engine:
 
     def _asr(self, job, wav_path, cancelled):
         """辨識並分批送出 raw 段落"""
+        job["_asr"] = None
         segments = (self._fake_segments(job) if self.settings.fake_engine
                     else self._real_asr(job, wav_path))
+        if self.settings.fake_engine:
+            job["_asr"] = {"model": self.settings.asr_model, "location": "api_host", "device": "cpu"}
+        elif job.get("_glossary_terms"):
+            # 照實際走的那條路回報（GPU 伺服器傳不了專有名詞），v2.26.8
+            job["glossary"] = glossary_summary(job, 0 if job.get("_use_remote_asr") else
+                                               min(len(job["_glossary_terms"]), config.ASR_BIAS_MAX_TERMS))
         batch, last_flush = [], time.time()
         seq = 0
         langs = []
@@ -438,6 +512,8 @@ class Engine:
                 segs, _dur, _pt, _dev = tm._remote_whisper_transcribe(
                     rw, wav_path, model, detect_lang, on_event=self._gpu_event_handler(job))
                 job["_use_remote_asr"] = True
+                # api_revision 2.8（JTDT 要求）：Result.asr，整場一個值（不會一半在伺服器、一半在本機）
+                job["_asr"] = {"model": model, "location": "gpu_server", "device": _dev or None}
                 # 伺服器端不回語言，用送件指定或本機偵測到的語言標記每一段
                 job["_detected_language"] = _to_bcp47(detect_lang)
                 return [{"start": s["start"], "end": s["end"], "text": s["text"],
@@ -469,6 +545,7 @@ class Engine:
                 details["hint"] = "GPU 伺服器需 v2.25.2 以上才支援台語"
             raise EngineError("asr_failed", "asr", details)
         job["_use_remote_asr"] = True
+        job["_asr"] = {"model": tm.BREEZE_MODEL, "location": "gpu_server", "device": _dev or None}
         job["_detected_language"] = "nan-Hant"
         return [{"start": s["start"], "end": s["end"], "text": s["text"], "confidence": None,
                  "language": "nan-Hant"} for s in segs]
@@ -504,6 +581,8 @@ class Engine:
                             "confidence": conf,
                             "language": tm._bcp47(info.language) if hasattr(tm, "_bcp47") else None})
             job["_detected_language"] = _to_bcp47(lang or getattr(info, "language", None))
+            job["_asr"] = {"model": model, "location": "api_host",
+                           "device": "cuda" if tm._fw_local_cuda_ok() else "cpu"}
             del seg_iter, m
             tm._release_gpu_resources()
             return out
@@ -569,6 +648,10 @@ class Engine:
         if not raw:
             job["tasks"]["correct"] = "failed"
             return
+        if job.get("_glossary_reload") and job.get("_glossary_url"):
+            # retry 換了 glossary_url、只重跑校正：拉檔階段不會跑，在這裡下載（辨識沒重做，參考數維持原值）
+            self._load_glossary_url(job, "correction", asr_bias=job.get("_glossary_prev_bias") or 0)
+        job["_glossary_reload"] = False
         level = job.get("correction_level") or "standard"
         if self.settings.fake_engine:
             finals = [{"seq": r["seq"], "text": r["text"].replace(" ,", ","), "edited": r["seq"] % 3 == 0}
@@ -604,11 +687,11 @@ class Engine:
                  "lines": [{"label": "EN", "text": r["text"]}]} for r in raw]
         before = [r["text"] for r in raw]
         keep_terms = job.get("_glossary_keep") or []
-        topic = " / ".join(job.get("_glossary_terms", [])[:20]) or None
         try:
+            # 專有名詞以前塞在「會議主題」那一行；v2.26.8 起獨立一行列出正確拼法，把關也認得它們
             tm._correct_segments_with_llm(
                 data, self.settings.correction_model, host, port,
-                server_type=server_type, topic=topic,
+                server_type=server_type, glossary=job.get("_glossary_terms") or None,
                 on_progress=lambda done, total: self._progress(
                     job, items_done=done, items_total=total, force=(done == total)))
         except Exception as e:

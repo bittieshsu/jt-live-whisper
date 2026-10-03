@@ -546,6 +546,27 @@ SHAPES: dict[str, str] = {
 SUPPORTED = (".vtt", ".srt", ".json", ".txt", ".md", ".docx", ".odt")
 
 
+def _json_inside_text(data: bytes, text: str) -> list[dict]:
+    """`.txt` / `.md` 的**內容**其實是 JSON 時照 JSON 讀；不是的話回空清單。
+
+    **判斷格式看內容，不看副檔名**（2026-10-02 使用者回報）：工作區只收 `.txt` / `.md`
+    兩種文字檔名，「會議錄音轉逐字稿」轉送時存進去的 JSON 就被改名成 `.txt`。
+    之後從工作區載入那個檔，照副檔名當純文字切的話，一行 JSON 變成一段、
+    發言者 0 位、沒有時間 —— 而時間與發言者其實都在檔案裡。
+
+    **讀不出段落就退回純文字**：`[00:12] S1：…`（轉逐字稿自己的純文字格式）也是
+    `[` 開頭，那一種必須照舊當純文字讀，不可以因為開頭像 JSON 就被丟掉。
+    """
+    head = text.lstrip()[:1]
+    if head not in ("{", "["):
+        return []
+    try:
+        # 用已經去掉 BOM 的那一份 —— `json.loads` 遇到 BOM 會直接失敗
+        return parse_json(text.encode("utf-8"))
+    except TranscriptError:
+        return []
+
+
 def parse(data: bytes, filename: str, shape: str = "auto"
           ) -> tuple[list[dict], str]:
     """依副檔名挑解析方式，回 `(段落, 用了哪一種排法)`。
@@ -569,7 +590,10 @@ def parse(data: bytes, filename: str, shape: str = "auto"
         segs, used = parse_plain(_office_text(data, ext), shape)
     else:
         text = data.decode("utf-8-sig", "replace")
-        if "-->" in text:
+        segs = _json_inside_text(data, text)
+        if segs:
+            used = "json"
+        elif "-->" in text:
             segs, used = parse_cues(text), "cues"
         else:
             segs, used = parse_plain(text, shape)

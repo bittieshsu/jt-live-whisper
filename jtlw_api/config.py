@@ -19,13 +19,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_FILE = os.path.join(ROOT, "config.json")
 
 API_VERSION = "v1"
-API_REVISION = "2.7"                   # 2.5（2026-10-01）：hints.diarize_engine、Result.diarization；2.6（同日，JTDT 要求）：diarization.reason；2.7（10-02，JTDT 要求）：diarization.saturated
+API_REVISION = "2.8"                   # 2.5（2026-10-01）：hints.diarize_engine、Result.diarization；2.6（同日，JTDT 要求）：diarization.reason；2.7（10-02，JTDT 要求）：diarization.saturated；2.8（10-03，JTDT 要求）：Result.asr
 # 講者辨識方法：API 一律**明確送出**，預設維持現行方法（resemblyzer）。
 # 2026-09-28 JTDT v2.17 要求、使用者同意：Nemotron 由 JTDT 自己送參數切換（api_revision 2.5 的 hints.diarize_engine），
 # 不可以因為 GPU 伺服器裝了 transformers 5.18 就悄悄換掉他們的逐字稿。
 # 不送的話用戶端會送 "auto"，GPU 伺服器能用 Nemotron 時就會改用它
 DIARIZE_ENGINE_DEFAULT = "legacy"
-RESULT_SCHEMA_VERSION = "2.4"          # 2.1（api_revision 2.4）：新增選填的 summary_url；2.2（2.5）：diarization；2.3（2.6）：diarization.reason；2.4（2.7）：diarization.saturated
+RESULT_SCHEMA_VERSION = "2.5"          # 2.1（api_revision 2.4）：新增選填的 summary_url；2.2（2.5）：diarization；2.3（2.6）：diarization.reason；2.4（2.7）：diarization.saturated；2.5（2.8）：asr
 
 # 上限（會回在 /capabilities.limits）
 DEFAULT_LIMITS = {

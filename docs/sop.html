@@ -74,6 +74,7 @@
       <a class="lv3" href="#已上線的整合jt-vc-portal">已上線的整合：jt-vc-portal</a>
       <a class="lv3" href="#會議摘要與上傳api_revision-24">會議摘要與上傳（api_revision 2.4）</a>
       <a class="lv3" href="#講者辨識方法api_revision-25v2260-起26-加原因代碼27-加全滿標記">講者辨識方法（api_revision 2.5，v2.26.0 起；2.6 加原因代碼；2.7 加全滿標記）</a>
+      <a class="lv3" href="#專有名詞glossary與語音辨識模型api_revision-28v2268-起">專有名詞（glossary）與語音辨識模型（api_revision 2.8，v2.26.8 起）</a>
       <a class="lv3" href="#台語會議transcribetaiwanesev2252-起">台語會議（transcribe.taiwanese，v2.25.2 起）</a>
       <a class="lv3" href="#啟用-rest-api">啟用 REST API</a>
       <a class="lv3" href="#金鑰與憑證要去哪裡看">金鑰與憑證要去哪裡看</a>
@@ -125,7 +126,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.7 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.8 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3106,6 +3107,35 @@ cd C:\jt-live-whisper
 </li>
 <li><p>改用 <code>auto</code> 之後同一份錄音的講者代號與人數會和以前不同（更準），存過舊結果的系統要注意</p>
 </li>
+</ul>
+<h3 id="專有名詞glossary與語音辨識模型api_revision-28v2268-起">專有名詞（<code>glossary</code>）與語音辨識模型（api_revision 2.8，v2.26.8 起）</h3>
+<p>送件或 retry 時的 <code>glossary.entries</code> 是會議裡的人名、公司與產品名稱、術語，校正時用來把聽錯的字改回正確寫法。</p>
+<ul>
+<li><strong>一筆寫一個詞最好</strong>。一筆寫好幾個時會自動拆開：<code>Proxmox VE / PVE</code> → <code>Proxmox VE</code>、<code>PVE</code>；<code>王經理、李主任</code> → 兩個詞。
+分隔符號是頓號、逗號、分號、直線，以及<strong>兩邊至少一邊有空白的斜線</strong>（<code>TCP/IP</code>、<code>I/O</code> 這種本身就是一個詞，不拆）。
+<code>glossary.entries</code> 回報的是送來的筆數，不是拆開後的詞數。v2.26.7 以前整筆當一個詞，<code>Proxmox VE / PVE</code> 永遠比對不到</li>
+<li>校正時，<strong>拼法相近的誤聽</strong>會換成專有名詞的寫法（實測語料裡的 <code>Proximity</code> → <code>Proxmox</code>、<code>Groxmoxity</code> → <code>Proxmox</code>），<code>punctuation_only</code> 也放行；
+拼法不相近的不會硬換（<code>Proximity</code> 不會被換成 <code>VMware</code>），原文裡已經是專有名詞的也不會被換掉（<code>VMware</code> 不會被換成 <code>Proxmox</code>）。
+英文字要 4 個字母以上才看拼法：3 個字母的縮寫差一個字母就很像，不能靠相似度</li>
+<li><strong>中日文不會被換成英文的專有名詞</strong>：英文專有名詞只能換掉聽錯的英文字。日文的片假名（<code>セフ</code>）、中文地名（<code>新竹</code>）、
+<code>林エンジニア</code> 這種寫法照原樣保留，不會變成 <code>Ceph</code>、<code>Hsinchu</code>、<code>Engineer Lin</code>；中文行裡憑空插入專有名詞也會擋。
+同一種文字之間的修正照舊（<code>王金理</code> → <code>王經理</code>）</li>
+<li>辨識時聽錯、而且拼法差很多的（例如中文寫成另一個詞），校正不一定改得回來：專有名詞<strong>目前只用在校正</strong></li>
+<li>實測（校正回歸語料 882 段、標準答案裁判、<code>qwen3.8:27b</code>）：同一批校正提案改用新規則判斷，<code>punctuation_only</code> 字元錯誤率
+中文 13.64% → 13.39%、英文 13.02% → 12.88%、日文 13.22% → 13.12%，新放行的修正<strong>沒有一筆改錯</strong>；
+<code>standard</code> 另外擋下 14～19 筆把中日文換成英文專有名詞的改法（全部是改錯的）</li>
+<li><code>glossary.asr_bias_terms</code> 是「辨識時實際參考了幾個專有名詞」。<strong>走 GPU 伺服器辨識時是 0</strong>：那條路目前傳不了專有名詞；
+只有 GPU 伺服器不能用、在 jtlw 服務本機辨識時才會參考（最多 50 個）。v2.26.7 以前一律照詞數回報，是錯的。
+只重跑校正的 retry 不會重新辨識，這個數字維持原值</li>
+<li>retry 帶 <code>glossary_url</code> 時，新的詞彙表在校正前下載（v2.26.7 以前只在拉檔階段下載，只重跑校正時新的詞彙表不會生效）</li>
+</ul>
+<p>結果（<code>GET /api/v1/jobs/{id}/result</code>）的 <code>asr</code> 記下語音辨識用的模型：</p>
+<pre><code class="language-json">&quot;asr&quot;: {&quot;model&quot;: &quot;large-v3-turbo&quot;, &quot;location&quot;: &quot;gpu_server&quot;, &quot;device&quot;: &quot;cuda&quot;}
+</code></pre>
+<ul>
+<li>整場一個值：辨識一次做完整場；GPU 伺服器不能用時整場改在 jtlw 服務本機做（<code>location</code> 是 <code>api_host</code>，<code>warnings</code> 有 <code>asr_fallback_local</code>）</li>
+<li>台語模式的 <code>model</code> 是 <code>breeze-asr-26</code>；辨識失敗、或 v2.26.7 以前做完的作業是 <code>null</code></li>
+<li><code>asr_fallback_local</code> 這個警告服務一直會發，v2.26.8 才補進介面規格的代碼清單</li>
 </ul>
 <h3 id="台語會議transcribetaiwanesev2252-起">台語會議（<code>transcribe.taiwanese</code>，v2.25.2 起）</h3>
 <p>送件時 <code>profile_id</code> 填 <code>transcribe.taiwanese</code>，就會用台語模型（MediaTek Breeze-ASR-26）辨識；其他模式一律用一般模型。</p>
