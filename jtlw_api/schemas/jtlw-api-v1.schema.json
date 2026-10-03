@@ -2,7 +2,7 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://jt-live-whisper.local/schemas/jtlw-api-v1.schema.json",
  "title": "jtlw REST API v1",
- "description": "jtlw ↔ JTDT 介面的資料結構（對應〈JTLW ↔ JTDT 介面回覆〉v0.5，api_revision 2.8）。範圍：jtlw 只負責聲音 → 逐字稿（拉檔、正規化、語音辨識、語言偵測、語者分離、校正）；摘要、主題、章節、決議、待辦、風險、心智圖、實體、逐字稿翻譯等後續處理都在 JTDT。api_revision 2.4 起另有選用的會議摘要任務 summarize（給沒有自己摘要功能的呼叫端，例如 jtvc；與 JTDT 的會議摘要是同一套分析）與上傳來源 source.type=upload，兩者都要主動要求才有，不送就與 2.3 完全相同。api_revision 2.5 起可用 hints.diarize_engine 選講者辨識方法（legacy＝現行方法、預設；auto＝能用 NVIDIA Nemotron 就用），實際用了哪一個回在 Result.diarization；api_revision 2.6 起退回現行方法時另附原因代碼 Result.diarization.reason。各結構在 $defs 中，以 $ref 引用，例如 #/$defs/JobCreateRequest。",
+ "description": "jtlw ↔ JTDT 介面的資料結構（對應〈JTLW ↔ JTDT 介面回覆〉v0.5，api_revision 2.9）。範圍：jtlw 只負責聲音 → 逐字稿（拉檔、正規化、語音辨識、語言偵測、語者分離、校正）；摘要、主題、章節、決議、待辦、風險、心智圖、實體、逐字稿翻譯等後續處理都在 JTDT。api_revision 2.4 起另有選用的會議摘要任務 summarize（給沒有自己摘要功能的呼叫端，例如 jtvc；與 JTDT 的會議摘要是同一套分析）與上傳來源 source.type=upload，兩者都要主動要求才有，不送就與 2.3 完全相同。api_revision 2.5 起可用 hints.diarize_engine 選講者辨識方法（legacy＝現行方法、預設；auto＝能用 NVIDIA Nemotron 就用），實際用了哪一個回在 Result.diarization；api_revision 2.6 起退回現行方法時另附原因代碼 Result.diarization.reason。各結構在 $defs 中，以 $ref 引用，例如 #/$defs/JobCreateRequest。",
  "$defs": {
   "JobId": {
    "type": "string",
@@ -204,9 +204,10 @@
       "idempotency_body_mismatch",
       "profile_deprecated",
       "diarization_degraded",
-      "asr_fallback_local"
+      "asr_fallback_local",
+      "glossary_variants_ignored"
      ],
-     "description": "asr_fallback_local（v2.26.8 補進清單；服務一直會發）：GPU 伺服器不能用，整場改在 jtlw 服務本機辨識，這時 Result.asr.location 是 api_host"
+     "description": "asr_fallback_local（v2.26.8 補進清單；服務一直會發）：GPU 伺服器不能用，整場改在 jtlw 服務本機辨識，這時 Result.asr.location 是 api_host；glossary_variants_ignored（v2.26.9）：glossary_url 給的詞彙表裡有不能用的錯寫法（理由同送件的 400），那幾筆的錯寫法不用、作業照做，fields 列出是哪幾筆"
     },
     "fields": {
      "type": "array",
@@ -282,6 +283,16 @@
     "case_sensitive": {
      "type": "boolean",
      "default": false
+    },
+    "variants": {
+     "type": "array",
+     "maxItems": 20,
+     "items": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 200
+     },
+     "description": "api_revision 2.9（v2.26.9）：這個詞已知的錯寫法（例如 Proxmox 的 [\"Proximity\", \"Groxmoxity\"]）。要求 correct 時，校正前把逐字稿裡的錯寫法照表換成 source（確定性替換、不經過 LLM，任何校正等級都做；raw 層不變）。有英文字母的要整個詞相符才換（Prox 不會換掉 Proxmox 的一段），case_sensitive 為 true 時分大小寫；中日文照字面。附錯寫法時 source 只能寫一個詞（variants_need_single_term）；錯寫法不可以是清單上的另一個詞（variant_is_a_glossary_term）、也不可以同時對到兩個不同的詞（ambiguous_variant），違反時送件回 400 invalid_request、details.reason 說明"
     }
    }
   },
@@ -349,7 +360,12 @@
     "asr_bias_terms": {
      "type": "integer",
      "minimum": 0,
-     "description": "辨識時實際參考了幾個專有名詞。GPU 伺服器那條路目前傳不了專有名詞，為 0（v2.26.7 以前照樣回報詞數，是錯的）；只有在 jtlw 服務本機辨識時才會用，最多 50 個。只重跑校正的 retry 不會重新辨識，維持原值"
+     "description": "辨識時參考了幾個專有名詞。v2.26.9 起一律 0：實測給辨識模型專有名詞會在無關的會議裡憑空插入那些詞、中文慢 5.5 倍、段落併成一半，GPU 伺服器與本機辨識都不用；專有名詞只用在校正（含錯寫法照表換）。v2.26.8 以前照詞數回報，是錯的"
+    },
+    "variants": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "api_revision 2.9：收下的錯寫法個數"
     }
    }
   },
@@ -1823,6 +1839,11 @@
       "null"
      ],
      "description": "實際用來校正的 LLM 模型名稱。校正品質與模型高度相關（實測同一批語料換模型，英文的語意損壞率相差數倍），所以要記錄「這份結果是在什麼條件下產生的」"
+    },
+    "variant_replacements": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "api_revision 2.9：照詞彙表的錯寫法換掉了幾處"
     }
    }
   },

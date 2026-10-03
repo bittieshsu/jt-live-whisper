@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 
 from . import config
 from .config import Settings
-from .engine import STAGES, STAGE_FOR_TASK, Engine, EngineError, glossary_from_entries, glossary_summary, predicted_asr_bias
+from .engine import STAGES, STAGE_FOR_TASK, Engine, EngineError, glossary_from_entries, set_glossary
 from . import log as jlog
 from .events import EventBus, now_iso, ulid
 from .store import Store
@@ -830,8 +830,10 @@ async def create_job(request: Request, authorization: str = Header(None),
 
     stages = [s for s in STAGES
               if s in ("fetch", "normalize", "finalize") or any(STAGE_FOR_TASK[t] == s for t in tasks)]
-    # 一筆寫好幾個詞（`Proxmox VE / PVE`）時拆開；統計回報呼叫端送來的筆數（v2.26.8）
-    terms, keep, n_entries, n_keep = glossary_from_entries(entries)
+    # 一筆寫好幾個詞（`Proxmox VE / PVE`）時拆開；統計回報呼叫端送來的筆數（v2.26.8）；錯寫法（v2.26.9）
+    gl = glossary_from_entries(entries)
+    if gl["problems"]:
+        return error_response(400, "invalid_request", details=gl["problems"][0])
     job_id = "job_" + ulid()
     if upload:
         if not STATE.store.claim_upload(upload["upload_id"], job_id):      # 同時送兩件用同一個上傳
@@ -854,12 +856,10 @@ async def create_job(request: Request, authorization: str = Header(None),
         "warnings": ([{"code": "profile_deprecated", "fields": ["profile_id"]}] if profile.get("deprecated") else []),
         "_language": lang, "_hints": body.get("hints") or {},
         "_client": client, "_stages": stages, "_source": src,
-        "_glossary_terms": terms, "_glossary_keep": keep, "_glossary_counts": (n_entries, n_keep),
         "_glossary_url": body.get("glossary_url"),
         "_webhook": wh, "_total_audio_ms": None, "_processed_ms": 0,
     }
-    # 辨識時會參考幾個專有名詞：GPU 伺服器那條路目前傳不了，照實回報（辨識完會再依實際走的路更新）
-    job["glossary"] = glossary_summary(job, predicted_asr_bias(STATE.settings, terms))
+    set_glossary(job, gl)
     STATE.store.put_job(job)
     job["queue_position"] = STATE.store.jobs_ahead(job)      # 前面還有幾件（沒有就是 0）
     STATE.store.put_idempotent(client, idempotency_key, job_id, body_hash, body)
@@ -1161,20 +1161,15 @@ async def retry_job(request: Request, job_id: str, authorization: str = Header(N
             updates_correction and job["status"] == "succeeded" and "correct" in job["tasks"]):
         return error_response(409, "invalid_request", details={"status": job["status"]})
 
-    # 辨識已經做完的作業，retry 不會重新辨識：辨識時參考了幾個專有名詞維持原本的值
-    # （v2.26.7 以前照新的詞數重算，等於宣稱新的詞有拿去辨識）
-    asr_done = job["tasks"].get("transcribe") == "succeeded"
-    prev_bias = (job.get("glossary") or {}).get("asr_bias_terms", 0) if asr_done else None
     if entries is not None:
-        terms, keep, n_entries, n_keep = glossary_from_entries(entries)
-        job["_glossary_terms"], job["_glossary_keep"] = terms, keep
-        job["_glossary_counts"] = (n_entries, n_keep)
-        job["glossary"] = glossary_summary(job, prev_bias if asr_done else predicted_asr_bias(STATE.settings, terms))
+        gl = glossary_from_entries(entries)
+        if gl["problems"]:
+            return error_response(400, "invalid_request", details=gl["problems"][0])
+        set_glossary(job, gl)
     elif body.get("glossary_url"):
         job["_glossary_url"] = body["glossary_url"]
         # 只重跑校正時不會經過「拉檔」階段，詞彙表要在校正前另外下載（v2.26.7 以前新的詞彙表不會生效）
         job["_glossary_reload"] = True
-        job["_glossary_prev_bias"] = prev_bias
     if body.get("correction_level"):
         job["correction_level"] = body["correction_level"]
 

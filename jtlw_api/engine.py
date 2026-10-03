@@ -163,30 +163,91 @@ def punctuation_only_ok(original, corrected, glossary_terms=()):
     return True
 
 
+def _term_pattern(term, case_sensitive=False):
+    """詞的比對樣式：有英文字母的要整個詞相符（Prox 不會換掉 Proxmox 的一段），中日文照字面"""
+    if re.search(r"[A-Za-z0-9]", term):
+        return re.compile(rf"(?<![A-Za-z0-9]){re.escape(term)}(?![A-Za-z0-9])", 0 if case_sensitive else re.I)
+    return re.compile(re.escape(term))
+
+
 def glossary_from_entries(entries):
-    """詞彙表的 entries → (拆開的詞, 拆開的 keep 詞, 呼叫端的筆數, 呼叫端的 keep 筆數)。
-    一筆寫好幾個詞（`Proxmox VE / PVE`）時拆開（v2.26.8），統計回報的是呼叫端送來的筆數"""
-    srcs = [e["source"] for e in entries or [] if isinstance(e, dict) and e.get("source")]
-    keep = [e["source"] for e in entries or []
-            if isinstance(e, dict) and e.get("mode") == "keep" and e.get("source")]
-    return tm._glossary_parts(srcs), tm._glossary_parts(keep), len(srcs), len(keep)
+    """詞彙表的 entries → dict：
+    terms／keep：拆開的詞（一筆寫好幾個時拆開，v2.26.8）；counts：呼叫端送來的筆數與 keep 筆數；
+    variants：[[錯寫法, 正確寫法, 分不分大小寫], ...]（v2.26.9）；problems：錯寫法不能用的原因（呼叫端送件時回 400）"""
+    srcs, keep, variants, problems = [], [], [], []
+    for i, e in enumerate(entries or []):
+        if not isinstance(e, dict) or not e.get("source"):
+            continue
+        srcs.append(e["source"])
+        if e.get("mode") == "keep":
+            keep.append(e["source"])
+    terms = tm._glossary_parts(srcs)
+    lower_terms = {t.lower() for t in terms}
+    seen = {}
+    for i, e in enumerate(entries or []):
+        if not isinstance(e, dict) or not e.get("source") or not e.get("variants"):
+            continue
+        parts = tm._glossary_parts([e["source"]])
+        field = f"glossary.entries[{i}].variants"
+        if len(parts) != 1:
+            # `Proxmox VE / PVE` 附錯寫法時不知道要換成哪一個
+            problems.append({"field": field, "reason": "variants_need_single_term"})
+            continue
+        cs = bool(e.get("case_sensitive"))
+        for v in dict.fromkeys(str(x).strip() for x in e["variants"]):
+            if len(v) < 2:
+                continue
+            if v.lower() in lower_terms:
+                # 錯寫法剛好是清單上的另一個詞（或就是自己）：照表換會把寫對的換掉
+                problems.append({"field": field, "reason": "variant_is_a_glossary_term", "variant": v})
+                continue
+            if v.lower() in seen and seen[v.lower()] != parts[0]:
+                problems.append({"field": field, "reason": "ambiguous_variant", "variant": v})
+                continue
+            seen[v.lower()] = parts[0]
+            variants.append([v, parts[0], cs])
+    return {"terms": terms, "keep": tm._glossary_parts(keep), "counts": (len(srcs), len(keep)),
+            "variants": variants, "problems": problems}
 
 
-def predicted_asr_bias(settings, terms):
-    """辨識時會參考幾個專有名詞。GPU 伺服器那條路目前傳不了（v2.26.7 以前照樣回報有用到，是錯的），
-    只有在 API 主機本機辨識時用得到"""
-    if not terms:
-        return 0
-    rw = settings.remote_whisper
-    return 0 if (rw and rw.get("host")) else min(len(terms), config.ASR_BIAS_MAX_TERMS)
+def apply_variants(text, variants):
+    """照表把已知的錯寫法換成正確寫法（v2.26.9，JTDT 要求）。回傳 (新文字, 換了幾處)。
+
+    確定性的替換、不經過 LLM：錯寫法是使用者自己確認過的。原文裡本來就寫對的先遮起來，
+    錯寫法比正確寫法短時（王經 → 王經理）才不會把「王經理」換成「王經理理」；長的錯寫法先換"""
+    if not text or not variants:
+        return text, 0
+    masks = []
+
+    def hide(word):
+        masks.append(word)
+        return f"\x00{len(masks) - 1}\x00"
+    out = text
+    for src in sorted({v[1] for v in variants}, key=len, reverse=True):
+        out = _term_pattern(src).sub(lambda m: hide(m.group(0)), out)
+    n = 0
+    for wrong, right, cs in sorted(variants, key=lambda v: len(v[0]), reverse=True):
+        out, k = _term_pattern(wrong, cs).subn(lambda m, r=right: hide(r), out)
+        n += k
+    return re.sub("\x00(\\d+)\x00", lambda m: masks[int(m.group(1))], out), n
 
 
-def glossary_summary(job, asr_bias):
-    """作業的 glossary 統計（Job.glossary）；沒有詞彙表時為 None"""
+def glossary_summary(job):
+    """作業的 glossary 統計（Job.glossary）；沒有詞彙表時為 None。
+    asr_bias_terms 一律 0（v2.26.9）：實測給辨識模型專有名詞會在無關的會議裡憑空插入那些詞、
+    中文慢 5.5 倍、段落併成一半（BENCHMARKS.md 第六節），GPU 伺服器與本機辨識都不用"""
     if not job.get("_glossary_terms"):
         return None
     n, nk = job.get("_glossary_counts") or (len(job["_glossary_terms"]), len(job.get("_glossary_keep") or []))
-    return {"entries": n, "keep_terms": nk, "asr_bias_terms": asr_bias}
+    return {"entries": n, "keep_terms": nk, "asr_bias_terms": 0,
+            "variants": len(job.get("_glossary_variants") or [])}
+
+
+def set_glossary(job, g):
+    """把 glossary_from_entries 的結果寫進作業"""
+    job["_glossary_terms"], job["_glossary_keep"] = g["terms"], g["keep"]
+    job["_glossary_counts"], job["_glossary_variants"] = g["counts"], g["variants"]
+    job["glossary"] = glossary_summary(job)
 
 
 class Engine:
@@ -402,7 +463,7 @@ class Engine:
                 raise EngineError("source_checksum_mismatch", stage, {"field": "sha256"})
         return dest
 
-    def _load_glossary_url(self, job, stage, asr_bias=None):
+    def _load_glossary_url(self, job, stage):
         """下載 glossary_url 的詞彙表。送件時在拉檔階段；只重跑校正的 retry 在校正前（v2.26.8）"""
         g = job["_glossary_url"]
         gp = os.path.join(self.settings.work_dir, f"{job['job_id']}.glossary.json")
@@ -411,10 +472,12 @@ class Engine:
                            expect_size=g.get("size_bytes"), stage=stage)
         except EngineError:
             raise EngineError("glossary_unreachable", stage)
-        terms, keep, n, nk = self._load_glossary_file(gp)
-        job["_glossary_terms"], job["_glossary_keep"], job["_glossary_counts"] = terms, keep, (n, nk)
-        job["glossary"] = glossary_summary(job, predicted_asr_bias(self.settings, terms)
-                                           if asr_bias is None else asr_bias)
+        g = self._load_glossary_file(gp)
+        set_glossary(job, g)
+        if g["problems"]:
+            # 網址給的詞彙表沒有在送件當下驗：有問題的錯寫法不用，作業照做，用警告講清楚
+            job.setdefault("warnings", []).append(
+                {"code": "glossary_variants_ignored", "fields": sorted({p["field"] for p in g["problems"]})})
 
     def _load_glossary_file(self, path):
         import json
@@ -427,9 +490,6 @@ class Engine:
             raise EngineError("glossary_too_large", "fetch",
                               {"max_entries": self.settings.limits["max_glossary_entries"]})
         return glossary_from_entries(entries)
-
-    def _glossary_summary(self, job):
-        return glossary_summary(job, predicted_asr_bias(self.settings, job.get("_glossary_terms")))
 
     def _normalize(self, job):
         """轉 16 kHz 單聲道，取得總長度"""
@@ -458,10 +518,6 @@ class Engine:
                     else self._real_asr(job, wav_path))
         if self.settings.fake_engine:
             job["_asr"] = {"model": self.settings.asr_model, "location": "api_host", "device": "cpu"}
-        elif job.get("_glossary_terms"):
-            # 照實際走的那條路回報（GPU 伺服器傳不了專有名詞），v2.26.8
-            job["glossary"] = glossary_summary(job, 0 if job.get("_use_remote_asr") else
-                                               min(len(job["_glossary_terms"]), config.ASR_BIAS_MAX_TERMS))
         batch, last_flush = [], time.time()
         seq = 0
         langs = []
@@ -565,10 +621,9 @@ class Engine:
 
     def _local_asr(self, job, wav_path, model, lang):
         from faster_whisper import WhisperModel
+        # 不給專有名詞（hotwords）：實測會在無關的會議裡憑空插入那些詞、中文慢 5.5 倍（v2.26.9，BENCHMARKS.md 第六節）。
+        # 本機是 GPU 伺服器不能用時的退路，只有 CPU，慢 5.5 倍就是好幾個小時
         kw = dict(tm._FW_OFFLINE_KW)
-        terms = job.get("_glossary_terms") or []
-        if terms:
-            kw["hotwords"] = " ".join(terms[:config.ASR_BIAS_MAX_TERMS])
         try:
             m = WhisperModel(model, **tm._fw_device_kwargs())
             seg_iter, info = m.transcribe(wav_path, language=lang, **kw)
@@ -649,16 +704,23 @@ class Engine:
             job["tasks"]["correct"] = "failed"
             return
         if job.get("_glossary_reload") and job.get("_glossary_url"):
-            # retry 換了 glossary_url、只重跑校正：拉檔階段不會跑，在這裡下載（辨識沒重做，參考數維持原值）
-            self._load_glossary_url(job, "correction", asr_bias=job.get("_glossary_prev_bias") or 0)
+            # retry 換了 glossary_url、只重跑校正：拉檔階段不會跑，在這裡下載
+            self._load_glossary_url(job, "correction")
         job["_glossary_reload"] = False
         level = job.get("correction_level") or "standard"
+        # 已知的錯寫法照表換掉（v2.26.9）：確定性、不經過 LLM，任何校正等級都做；LLM 看到的是換過的文字
+        variants = job.get("_glossary_variants") or []
+        fixed, n_variants = [], 0
+        for r in raw:
+            t, k = apply_variants(r["text"], variants)
+            fixed.append(t)
+            n_variants += k
         if self.settings.fake_engine:
-            finals = [{"seq": r["seq"], "text": r["text"].replace(" ,", ","), "edited": r["seq"] % 3 == 0}
-                      for r in raw]
+            finals = [{"seq": r["seq"], "text": t.replace(" ,", ","),
+                       "edited": r["seq"] % 3 == 0 or t != r["text"]} for r, t in zip(raw, fixed)]
             rejected = 0
         else:
-            finals, rejected = self._llm_correct(job, raw, level)
+            finals, rejected = self._llm_correct(job, raw, level, fixed)
         self.store.replace_layer(job["job_id"], "final", finals)
         edited = sum(1 for f in finals if f["edited"])
         # 一併回報實際使用的校正模型：校正品質與模型高度相關
@@ -667,7 +729,8 @@ class Engine:
         job["_correction"] = {"edited_segments": edited,
                               "unchanged_segments": len(finals) - edited,
                               "kept_original_segments": rejected,
-                              "model": self.settings.correction_model}
+                              "model": self.settings.correction_model,
+                              "variant_replacements": n_variants}
         job["tasks"]["correct"] = "succeeded"
         self.bus.emit(job, "final_segments.appended",
                       {"first_seq": finals[0]["seq"], "last_seq": finals[-1]["seq"],
@@ -675,7 +738,7 @@ class Engine:
         self.bus.emit(job, "task.completed", {"task": "correct", "status": "succeeded"})
         self.store.put_job(job)
 
-    def _llm_correct(self, job, raw, level):
+    def _llm_correct(self, job, raw, level, fixed=None):
         host, port = self.settings.llm_host, self.settings.llm_port
         if not host:
             raise EngineError("llm_unavailable", "correction", {"reason": "未設定 LLM 伺服器"})
@@ -683,9 +746,9 @@ class Engine:
         if not server_type:
             raise EngineError("llm_unavailable", "correction", {"host": f"{host}:{port}"})
         # 借用既有的逐行校正（含把關）：包成它要的 segments_data 結構
+        before = list(fixed) if fixed is not None else [r["text"] for r in raw]     # 照表換過錯寫法的文字
         data = [{"start": r["start_ms"] / 1000, "end": r["end_ms"] / 1000, "speaker": None,
-                 "lines": [{"label": "EN", "text": r["text"]}]} for r in raw]
-        before = [r["text"] for r in raw]
+                 "lines": [{"label": "EN", "text": t}]} for r, t in zip(raw, before)]
         keep_terms = job.get("_glossary_keep") or []
         try:
             # 專有名詞以前塞在「會議主題」那一行；v2.26.8 起獨立一行列出正確拼法，把關也認得它們
@@ -703,7 +766,7 @@ class Engine:
                     not punctuation_only_ok(orig, text, keep_terms + (job.get("_glossary_terms") or [])):
                 text = orig            # 保守模式：超出標點與詞彙庫範圍的修改一律退回
                 rejected += 1
-            finals.append({"seq": r["seq"], "text": text, "edited": text != orig})
+            finals.append({"seq": r["seq"], "text": text, "edited": text != r["text"]})
         return finals, rejected
 
     def _fake_segments(self, job):

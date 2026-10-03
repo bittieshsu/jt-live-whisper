@@ -2089,7 +2089,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.8"
+APP_VERSION = "2.26.9"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3372,6 +3372,10 @@ def _accept_correction(original, corrected, protected=None, glossary=None):
         # 短 token 光靠相似度一定會誤判（第一版就把一句正常的校正擋掉了）。
         for w in orig_words - new_words:
             if len(w) < 4 or w in protected or w in _COMMON_WORDS:
+                continue
+            # 換成拼法相近的專有名詞（呼叫端給的）優先：同一個詞有兩種聽錯的寫法時，較少的那種像出現較多次的那種
+            # （被當成專有名詞保護），但那種本身也是聽錯的；換成清單上的正確寫法是對的（v2.26.9，JTDT 回報）
+            if _glossary_fix(w, more_glossary):
                 continue
             for p in protected:
                 if len(p) >= 3 and p not in new_words and \
