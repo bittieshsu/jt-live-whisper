@@ -27,7 +27,7 @@ for _arg in "$@"; do
         --doctor)    LINUX_ACTION="doctor" ;;
         --uninstall) LINUX_ACTION="uninstall" ;;
         -h|--help)   LINUX_ACTION="help" ;;
-        *) echo -e "${C_ERR}[錯誤] 不認得的參數: $_arg（可用 --help 查看）${NC}"; exit 1 ;;
+        *) echo -e "${C_ERR}[錯誤] 不認得的參數: ${_arg}（可用 --help 查看）${NC}"; exit 1 ;;
     esac
 done
 
@@ -297,7 +297,7 @@ check_linux_venv() {
 # ─── ARM64 + NVIDIA：本機編譯 CTranslate2 CUDA 版 ───────────
 # install.sh 的 _build_ctranslate2_from_source 原本透過 ssh 在 GPU 伺服器上執行；
 # 這裡用同名的 ssh 函式把指令改在本機執行，只有 apt 需要 sudo。
-# 函式庫裝在 $CT2_LOCAL_PREFIX（見檔案開頭），不裝進 /usr/local。
+# 函式庫裝在 ${CT2_LOCAL_PREFIX}（見檔案開頭），不裝進 /usr/local。
 build_ctranslate2_local() {
     (
         ssh() {

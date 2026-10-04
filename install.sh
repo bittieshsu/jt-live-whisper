@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.10 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.11 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -317,14 +317,14 @@ check_running_processes() {
     # 檢查 whisper-stream
     pids=$(pgrep -f "whisper-stream" 2>/dev/null || true)
     if [ -n "$pids" ]; then
-        echo -e "  ${C_WARN}[警告]${NC} whisper-stream 正在執行中（PID: $pids）"
+        echo -e "  ${C_WARN}[警告]${NC} whisper-stream 正在執行中（PID: ${pids}）"
         echo -e "  ${C_DIM}重新編譯可能失敗，建議先關閉${NC}"
         found=1
     fi
     # 檢查 translate_meeting.py
     pids=$(pgrep -f "translate_meeting.py" 2>/dev/null || true)
     if [ -n "$pids" ]; then
-        echo -e "  ${C_WARN}[警告]${NC} translate_meeting.py 正在執行中（PID: $pids）"
+        echo -e "  ${C_WARN}[警告]${NC} translate_meeting.py 正在執行中（PID: ${pids}）"
         echo -e "  ${C_DIM}安裝期間可能衝突，建議先關閉${NC}"
         found=1
     fi
@@ -2363,7 +2363,7 @@ else:
     echo ""
     echo -e "  ${C_DIM}測試 SSH 連線...${NC}"
     if ! ssh $ssh_opts "$rw_user@$rw_host" "echo ok" &>/dev/null; then
-        check_fail "SSH 連線失敗（$rw_user@$rw_host:$rw_ssh_port）"
+        check_fail "SSH 連線失敗（$rw_user@$rw_host:${rw_ssh_port}）"
         echo -e "  ${C_DIM}請確認 SSH 設定後重新執行 install.sh${NC}"
         _cleanup_ssh_cm
         return 1
