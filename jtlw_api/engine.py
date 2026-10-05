@@ -610,6 +610,7 @@ class Engine:
         """用最小的模型偵測語言（只讀前 30 秒），失敗時回退英文"""
         try:
             from faster_whisper import WhisperModel
+            tm._fw_av_compat()   # av 19 起沒有 metadata_errors：不補的話這裡每次都失敗，下面的 except 會一律退回英文
             m = WhisperModel("base", **tm._fw_device_kwargs())
             _segs, info = m.transcribe(wav_path, vad_filter=True, without_timestamps=True)
             lang = getattr(info, "language", None) or "en"
@@ -621,6 +622,7 @@ class Engine:
 
     def _local_asr(self, job, wav_path, model, lang):
         from faster_whisper import WhisperModel
+        tm._fw_av_compat()
         # 不給專有名詞（hotwords）：實測會在無關的會議裡憑空插入那些詞、中文慢 5.5 倍（v2.26.9，BENCHMARKS.md 第六節）。
         # 本機是 GPU 伺服器不能用時的退路，只有 CPU，慢 5.5 倍就是好幾個小時
         kw = dict(tm._FW_OFFLINE_KW)

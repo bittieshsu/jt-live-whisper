@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.26.11 (by Jason Cheng)
+即時英翻中字幕系統 v2.26.12 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -612,7 +612,7 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 
 ```bash
 cd ~/jt-whisper-server
-python3 -m venv venv-qwen
+python3.12 -m venv venv-qwen      # 沒有 python3.12 才用 python3
 venv-qwen/bin/pip install --upgrade pip
 venv-qwen/bin/pip install "qwen-asr[vllm]==0.0.6"
 venv-qwen/bin/pip install --force-reinstall torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
@@ -622,6 +622,7 @@ curl -s http://localhost:8978/health           # 1~3 分鐘後 "qwen": {"ready":
 ```
 
 - 獨立的 `venv-qwen` 是必要的：它需要的 PyTorch 版本與辨識服務本身不同，裝在一起會互相衝突
+- 用固定版本的 `python3.12` 建立：用 `python3` 建的 venv 在作業系統升級換了 Python 版本後，看起來正常、套件卻全部不見（見 3-5）
 - 服務會自動用 `~/jt-whisper-server/venv-qwen/bin/python` 帶起一個只聽本機（127.0.0.1）的子行程；位置不同時設環境變數
   `JT_QWEN_PYTHON`，埠號預設為服務埠號＋11（`JT_QWEN_PORT` 可改）。服務停止時子行程會一起結束，不會殘留佔用顯示記憶體
 - 載入失敗時看 `/health` 的 `qwen.error` 與 `/tmp/jt-qwen-worker-<埠號>.log`
@@ -768,6 +769,19 @@ Linux 的 `--upgrade` 下載完新檔案後會自動重新執行安裝檢查，�
   第二次 `--upgrade`（或重新執行一次安裝腳本）才會問。Linux 的 `--upgrade` 會接著用新版安裝腳本檢查相依套件，第一次就會問
 - 已經開著 WebUI 時再點一次捷徑，會直接在瀏覽器開啟原本那個，不會把它關掉重開；啟動失敗時視窗會停住，看得到錯誤訊息
 - **捷徑圖示是 jt-live-whisper 的 logo**（v2.26.2 起，圖示檔在安裝資料夾的 `icons/`）。之前建的捷徑升級時會換上；從 v2.26.1 以前升級的，macOS、Windows 要第二次 `--upgrade`（`icons/` 那時才會到）才換。Windows 的桌面若還顯示舊圖示，是系統的圖示快取，重新登入後就會更新
+
+### 3-5. 升級作業系統之後（Python 版本改變）
+
+升級作業系統的大版本（例如 Ubuntu 22.04 → 24.04）常會換掉系統的 Python 版本。venv 裡裝好的套件跟著建立 venv 時的 Python 版本走，版本一換就全部不能用：每個程式都找不到套件，服務一直重啟。
+
+- **升級完先在安裝資料夾執行一次安裝腳本**，會偵測到版本不同、重建 venv 並重新安裝套件（要連網路，PyTorch 等套件有好幾 GB）：
+  Linux 用 `./install.sh --upgrade`、macOS 用 `./install.sh`、Windows 用 `.\install.ps1`
+- **升級後、重開機前看起來都還正常**：服務還在跑升級前就載入的舊程式，重開機或重新啟動服務之後才會壞
+- 沒重建就啟動時，程式會直接說明「venv 是用 Python 3.x 建立的，現在是 3.y」與修法後結束（結束碼 78），不會只丟一串 `ModuleNotFoundError`；
+  GPU 伺服器與 REST API 的 systemd 服務遇到這個結束碼會停止重啟（GPU 伺服器的服務單元在下次執行安裝程式時更新；REST API 的單元照第五章的範例加上 `RestartPreventExitStatus=78`）
+- **GPU 伺服器**：在用戶端重新執行安裝程式，檢查 GPU 伺服器時選擇修復，會重建伺服器的 venv。Qwen3-ASR 的 `venv-qwen` 要照「Qwen3-ASR（實驗）」重建
+- Linux 的 `./install.sh --doctor` 會直接指出 venv 的 Python 版本與建立時不同
+- 新的作業系統若只有比 3.12 更新的 Python，部分套件可能還沒有對應的版本、安裝會失敗；安裝腳本有 `python3.12` 時會優先用它
 
 ---
 
@@ -2124,6 +2138,8 @@ WorkingDirectory=/home/<帳號>/Apps/jt-live-whisper
 ExecStart=/home/<帳號>/Apps/jt-live-whisper/venv/bin/python -m jtlw_api --host 0.0.0.0 --port 8790
 Restart=on-failure
 RestartSec=5
+# 78＝venv 的 Python 版本與建立時不同（作業系統升級，見 3-5）：重啟也沒用
+RestartPreventExitStatus=78
 MemoryMax=2G
 
 [Install]

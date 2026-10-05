@@ -53,6 +53,7 @@
       <a class="lv3" href="#3-2-升級至最新版本">3-2. 升級至最新版本</a>
       <a class="lv3" href="#3-3-搬遷資料夾後">3-3. 搬遷資料夾後</a>
       <a class="lv3" href="#3-4-桌面與應用程式選單捷徑v2254-起">3-4. 桌面與應用程式選單捷徑（v2.25.4 起）</a>
+      <a class="lv3" href="#3-5-升級作業系統之後python-版本改變">3-5. 升級作業系統之後（Python 版本改變）</a>
       <a class="" href="#四啟動與使用">四、啟動與使用</a>
       <a class="lv3" href="#4-1-啟動">4-1. 啟動</a>
       <a class="lv3" href="#4-2-webui-瀏覽器介面">4-2. WebUI 瀏覽器介面</a>
@@ -126,7 +127,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.11 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.12 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1080,7 +1081,7 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 </ul>
 <p><strong>安裝（在 GPU 伺服器上，用執行辨識服務的同一個帳號）：</strong></p>
 <pre><code class="language-bash">cd ~/jt-whisper-server
-python3 -m venv venv-qwen
+python3.12 -m venv venv-qwen      # 沒有 python3.12 才用 python3
 venv-qwen/bin/pip install --upgrade pip
 venv-qwen/bin/pip install &quot;qwen-asr[vllm]==0.0.6&quot;
 venv-qwen/bin/pip install --force-reinstall torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
@@ -1090,6 +1091,7 @@ curl -s http://localhost:8978/health           # 1~3 分鐘後 &quot;qwen&quot;:
 </code></pre>
 <ul>
 <li>獨立的 <code>venv-qwen</code> 是必要的：它需要的 PyTorch 版本與辨識服務本身不同，裝在一起會互相衝突</li>
+<li>用固定版本的 <code>python3.12</code> 建立：用 <code>python3</code> 建的 venv 在作業系統升級換了 Python 版本後，看起來正常、套件卻全部不見（見 3-5）</li>
 <li>服務會自動用 <code>~/jt-whisper-server/venv-qwen/bin/python</code> 帶起一個只聽本機（127.0.0.1）的子行程；位置不同時設環境變數
 <code>JT_QWEN_PYTHON</code>，埠號預設為服務埠號＋11（<code>JT_QWEN_PORT</code> 可改）。服務停止時子行程會一起結束，不會殘留佔用顯示記憶體</li>
 <li>載入失敗時看 <code>/health</code> 的 <code>qwen.error</code> 與 <code>/tmp/jt-qwen-worker-&lt;埠號&gt;.log</code></li>
@@ -1282,6 +1284,18 @@ cd C:\jt-live-whisper
 第二次 <code>--upgrade</code>（或重新執行一次安裝腳本）才會問。Linux 的 <code>--upgrade</code> 會接著用新版安裝腳本檢查相依套件，第一次就會問</li>
 <li>已經開著 WebUI 時再點一次捷徑，會直接在瀏覽器開啟原本那個，不會把它關掉重開；啟動失敗時視窗會停住，看得到錯誤訊息</li>
 <li><strong>捷徑圖示是 jt-live-whisper 的 logo</strong>（v2.26.2 起，圖示檔在安裝資料夾的 <code>icons/</code>）。之前建的捷徑升級時會換上；從 v2.26.1 以前升級的，macOS、Windows 要第二次 <code>--upgrade</code>（<code>icons/</code> 那時才會到）才換。Windows 的桌面若還顯示舊圖示，是系統的圖示快取，重新登入後就會更新</li>
+</ul>
+<h3 id="3-5-升級作業系統之後python-版本改變">3-5. 升級作業系統之後（Python 版本改變）</h3>
+<p>升級作業系統的大版本（例如 Ubuntu 22.04 → 24.04）常會換掉系統的 Python 版本。venv 裡裝好的套件跟著建立 venv 時的 Python 版本走，版本一換就全部不能用：每個程式都找不到套件，服務一直重啟。</p>
+<ul>
+<li><strong>升級完先在安裝資料夾執行一次安裝腳本</strong>，會偵測到版本不同、重建 venv 並重新安裝套件（要連網路，PyTorch 等套件有好幾 GB）：
+Linux 用 <code>./install.sh --upgrade</code>、macOS 用 <code>./install.sh</code>、Windows 用 <code>.\install.ps1</code></li>
+<li><strong>升級後、重開機前看起來都還正常</strong>：服務還在跑升級前就載入的舊程式，重開機或重新啟動服務之後才會壞</li>
+<li>沒重建就啟動時，程式會直接說明「venv 是用 Python 3.x 建立的，現在是 3.y」與修法後結束（結束碼 78），不會只丟一串 <code>ModuleNotFoundError</code>；
+GPU 伺服器與 REST API 的 systemd 服務遇到這個結束碼會停止重啟（GPU 伺服器的服務單元在下次執行安裝程式時更新；REST API 的單元照第五章的範例加上 <code>RestartPreventExitStatus=78</code>）</li>
+<li><strong>GPU 伺服器</strong>：在用戶端重新執行安裝程式，檢查 GPU 伺服器時選擇修復，會重建伺服器的 venv。Qwen3-ASR 的 <code>venv-qwen</code> 要照「Qwen3-ASR（實驗）」重建</li>
+<li>Linux 的 <code>./install.sh --doctor</code> 會直接指出 venv 的 Python 版本與建立時不同</li>
+<li>新的作業系統若只有比 3.12 更新的 Python，部分套件可能還沒有對應的版本、安裝會失敗；安裝腳本有 <code>python3.12</code> 時會優先用它</li>
 </ul>
 <hr>
 <h2 id="四啟動與使用">四、啟動與使用</h2>
@@ -3186,6 +3200,8 @@ WorkingDirectory=/home/&lt;帳號&gt;/Apps/jt-live-whisper
 ExecStart=/home/&lt;帳號&gt;/Apps/jt-live-whisper/venv/bin/python -m jtlw_api --host 0.0.0.0 --port 8790
 Restart=on-failure
 RestartSec=5
+# 78＝venv 的 Python 版本與建立時不同（作業系統升級，見 3-5）：重啟也沒用
+RestartPreventExitStatus=78
 MemoryMax=2G
 
 [Install]

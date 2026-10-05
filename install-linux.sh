@@ -178,8 +178,9 @@ check_linux_audio() {
 check_linux_venv() {
     section "Python 虛擬環境"
 
-    if [ -d "$VENV_DIR" ] && ! "$VENV_DIR/bin/python3" --version >/dev/null 2>&1; then
-        echo -e "  ${C_WARN}[偵測]${NC} venv 已損壞（可能路徑已變更或從其他作業系統複製），需重建"
+    # 路徑搬遷、從別的作業系統複製、或作業系統升級換了 Python 版本（venv_problem 在 install.sh）
+    if [ -d "$VENV_DIR" ] && ! venv_problem "$VENV_DIR"; then
+        echo -e "  ${C_WARN}[偵測]${NC} ${VENV_PROBLEM}，需重建"
         rm -rf "$VENV_DIR"
     fi
     if [ ! -d "$VENV_DIR" ]; then
@@ -520,7 +521,10 @@ linux_doctor() {
     local app_ver
     app_ver=$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/')
     check_ok "jt-live-whisper v${app_ver:-未知}"
-    if [ -x "$VENV_DIR/bin/python3" ]; then
+    if [ -x "$VENV_DIR/bin/python3" ] && ! venv_problem "$VENV_DIR"; then
+        # 作業系統升級換了 Python 版本：下面每個套件都會 import 失敗，先講真正的原因
+        _dr_fail "${VENV_PROBLEM}：執行 ./install.sh --upgrade 會重建 venv、重新安裝套件"
+    elif [ -x "$VENV_DIR/bin/python3" ]; then
         check_ok "虛擬環境 $("$VENV_DIR/bin/python3" --version 2>&1)"
         local mod
         for mod in faster_whisper ctranslate2 sounddevice opencc fastapi uvicorn resemblyzer; do

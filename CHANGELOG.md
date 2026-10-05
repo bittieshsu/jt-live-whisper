@@ -1,5 +1,24 @@
 # Changelog
 
+### v2.26.12 (2026-10-05)
+
+**新安裝的機器本機辨識每一段都失敗（`metadata_errors`）**
+- PyAV 19 拿掉了 `av.open` 的 `metadata_errors` 參數，faster-whisper（目前最新的 1.2.1）讀音檔時還在傳，而它對 PyAV 的版本沒有設上限：
+  新安裝、或重新安裝過套件的機器拿到 PyAV 19，本機辨識每一段都是「open() got an unexpected keyword argument 'metadata_errors'」
+  （Windows 11 使用者回報）。REST API 走本機辨識時，語言偵測還會因此一律判成英文
+- 改成 PyAV 不認得這個參數時自動把它濾掉。**升級程式就好，不用重裝套件**；PyAV 18 以前的機器行為不變
+
+**作業系統升級換了 Python 版本時，venv 會被認出來**
+- 升級作業系統的大版本（例如 Ubuntu 22.04 → 24.04）會換掉系統的 Python。venv 指向通用的 `python3` 時，
+  `python3 --version` 照樣成功，裝好的套件卻全在舊版本的目錄裡：每個程式都找不到套件、服務一直重啟，
+  而安裝程式只看 `--version`，會說「venv 正常」。GPU 伺服器的 venv 就是這種建法
+- 安裝程式（本機與 GPU 伺服器）改成比對建立 venv 時的 Python 版本，不同就說明原因並重建；Linux 的 `--doctor` 也會指出
+- 主程式、WebUI、GPU 伺服器在沒重建的 venv 裡啟動時，直接說明原因與修法後結束（結束碼 78），不再只丟一串 `ModuleNotFoundError`；
+  GPU 伺服器的 systemd 服務遇到這個結束碼會停止重啟（服務單元在下次執行安裝程式時更新）
+- 新建的 GPU 伺服器 venv 優先用固定版本的 `python3.12`；手冊裡 Qwen3-ASR 的 `venv-qwen` 也改用 `python3.12` 建立
+- 手冊新增「3-5. 升級作業系統之後」
+- 版本相同的 venv 判斷為可用，不會被重建（已用開發機、伺服器版與 GPU 伺服器上的實際 venv 確認）
+
 ### v2.26.11 (2026-10-05)
 
 **macOS 安裝程式的三則訊息印不出 PID 與連接埠**

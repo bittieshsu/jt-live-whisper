@@ -22,6 +22,45 @@ import time
 import webbrowser
 from pathlib import Path
 
+
+# ── venv 的 Python 版本與建立時不同（2026-10-05）──────────────────────────
+# venv 的 python3 指向 /usr/bin/python3 時，作業系統升級（Ubuntu 22.04→24.04 是 3.10→3.12）把它換成新版本，
+# 套件卻還在 lib/python<舊版>：每個 import 都失敗、看起來像套件全部消失，服務每 5 秒重啟一次。
+# 在任何第三方 import 之前先講清楚原因與修法；結束碼 78 讓 systemd 停止重啟（RestartPreventExitStatus=78）。
+# translate_meeting.py、webui.py、remote_whisper_server.py 各一份，逐字相同（tools/test_venv_python_version.py 比對）；
+# REST API（python -m jtlw_api）一載入就 import translate_meeting，用的是那一份。
+def _venv_python_mismatch():
+    """回傳 (建立 venv 時的版本, 現在的版本)；沒有不同、不在 venv 裡、讀不到 pyvenv.cfg 時回傳 None"""
+    if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+        return None
+    built = ""
+    try:
+        with open(os.path.join(sys.prefix, "pyvenv.cfg"), encoding="utf-8") as f:
+            for line in f:
+                key, _, val = line.partition("=")
+                if key.strip() in ("version", "version_info"):
+                    built = ".".join(val.strip().split(".")[:2])
+    except OSError:
+        return None
+    now = "%d.%d" % sys.version_info[:2]
+    return (built, now) if built and built != now else None
+
+
+def _exit_if_venv_python_changed(fix):
+    mm = _venv_python_mismatch()
+    if mm:
+        sys.stderr.write(
+            f"[錯誤] 這個 venv 是用 Python {mm[0]} 建立的，現在執行的是 Python {mm[1]}"
+            f"（作業系統升級換了 Python 版本？），裝好的套件都在 {mm[0]} 的目錄裡，全部無法使用。\n"
+            f"       {fix}\n")
+        sys.exit(78)
+
+
+_exit_if_venv_python_changed(
+    "請在安裝資料夾執行 " + (r".\install.ps1" if os.name == "nt" else "./install.sh --upgrade"
+                            if sys.platform.startswith("linux") else "./install.sh")
+    + "：會重建 venv、重新安裝套件")
+
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
     from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -859,7 +898,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.11",
+        "last": last, "version": "2.26.12",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }

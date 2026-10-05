@@ -29,6 +29,44 @@ import tempfile
 import threading
 import time
 
+
+# ── venv 的 Python 版本與建立時不同（2026-10-05）──────────────────────────
+# venv 的 python3 指向 /usr/bin/python3 時，作業系統升級（Ubuntu 22.04→24.04 是 3.10→3.12）把它換成新版本，
+# 套件卻還在 lib/python<舊版>：每個 import 都失敗、看起來像套件全部消失，服務每 5 秒重啟一次。
+# 在任何第三方 import 之前先講清楚原因與修法；結束碼 78 讓 systemd 停止重啟（RestartPreventExitStatus=78）。
+# translate_meeting.py、webui.py、remote_whisper_server.py 各一份，逐字相同（tools/test_venv_python_version.py 比對）；
+# REST API（python -m jtlw_api）一載入就 import translate_meeting，用的是那一份。
+def _venv_python_mismatch():
+    """回傳 (建立 venv 時的版本, 現在的版本)；沒有不同、不在 venv 裡、讀不到 pyvenv.cfg 時回傳 None"""
+    if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
+        return None
+    built = ""
+    try:
+        with open(os.path.join(sys.prefix, "pyvenv.cfg"), encoding="utf-8") as f:
+            for line in f:
+                key, _, val = line.partition("=")
+                if key.strip() in ("version", "version_info"):
+                    built = ".".join(val.strip().split(".")[:2])
+    except OSError:
+        return None
+    now = "%d.%d" % sys.version_info[:2]
+    return (built, now) if built and built != now else None
+
+
+def _exit_if_venv_python_changed(fix):
+    mm = _venv_python_mismatch()
+    if mm:
+        sys.stderr.write(
+            f"[錯誤] 這個 venv 是用 Python {mm[0]} 建立的，現在執行的是 Python {mm[1]}"
+            f"（作業系統升級換了 Python 版本？），裝好的套件都在 {mm[0]} 的目錄裡，全部無法使用。\n"
+            f"       {fix}\n")
+        sys.exit(78)
+
+
+_exit_if_venv_python_changed(
+    "Qwen3-ASR 的 venv-qwen 要照手冊「Qwen3-ASR（實驗）」重建" if "--qwen-worker" in sys.argv else
+    "請在用戶端重新執行安裝程式（./install.sh 或 install.ps1），檢查 GPU 伺服器時選擇修復：會重建伺服器的 venv")
+
 # ── Qwen3-ASR worker（v2.23.0，實驗）──────────────────────────────
 # vLLM 0.14 鎖 torch 2.9.1，這支服務的 venv 是 torch 2.10 → Qwen 必須在**獨立 venv 的子行程**跑。
 # 伺服器自動更新只推 server.py 一個檔案，所以 worker 也寫在這裡，以 `--qwen-worker <port>` 啟動；
@@ -165,7 +203,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.26.11"
+SERVER_VERSION = "2.26.12"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -1086,9 +1124,44 @@ def _diarize_legacy(wav_path, segments, num_speakers=None):
 
 # ── 模型載入 ──
 
+_FW_AV_PATCHED = False
+
+
+def _fw_av_compat():
+    """PyAV 19（2026-10）拿掉了 av.open 的 metadata_errors 參數，faster-whisper（到 1.2.1 都是）讀音檔時還在傳，
+    而它對 av 的版本沒設上限 → 新安裝的機器每一段辨識都是「open() got an unexpected keyword argument
+    'metadata_errors'」（Windows 11 使用者回報）。av 不認得這個參數時，換上一個把它濾掉的 av.open；
+    認得（av 18 以前）或沒裝 av 時什麼都不做。只檢查一次，載入 faster-whisper 之後呼叫。
+    translate_meeting.py 與 remote_whisper_server.py 各一份，逐字相同（tools/test_av_compat.py 比對）"""
+    global _FW_AV_PATCHED
+    if _FW_AV_PATCHED:
+        return
+    _FW_AV_PATCHED = True
+    import io
+    try:
+        import av
+        orig = av.open
+    except Exception:
+        return
+    try:
+        orig(io.BytesIO(b""), metadata_errors="ignore")
+    except TypeError as e:
+        if "metadata_errors" not in str(e):
+            return
+    except Exception:
+        return                      # 參數收下了（空的資料本來就打不開）
+    else:
+        return
+
+    def _open(*args, metadata_errors=None, **kwargs):
+        return orig(*args, **kwargs)
+    av.open = _open
+
+
 def _get_model_faster(model_size: str):
     """faster-whisper 模型"""
     from faster_whisper import WhisperModel
+    _fw_av_compat()
     key = f"fw:{model_size}"
     if key not in _models:
         print(f"[載入模型] {model_size} (faster-whisper, device={_device}, compute={_compute_type})")
@@ -1215,6 +1288,7 @@ _FW_NAN_KW = dict(
 def _transcribe_breeze_stream(wav_path):
     """台語辨識串流版：逐視窗辨識，yield (segment_dict, duration)。language 標成 "nan"（用戶端據此標台語）"""
     from faster_whisper.audio import decode_audio
+    _fw_av_compat()
     m = _get_model_faster(_BREEZE_REPO)
     audio = decode_audio(wav_path, sampling_rate=16000)
     duration = len(audio) / 16000.0

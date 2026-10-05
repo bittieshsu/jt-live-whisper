@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.11 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.12 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -769,6 +769,35 @@ check_whisper_models() {
     fi
 }
 
+# ─── venv 能不能用（2026-10-05）──────────────────
+# 以前只看 `venv/bin/python3 --version`。venv 的 python3 指向 /usr/bin/python3 時，作業系統升級
+# （Ubuntu 22.04→24.04 是 3.10→3.12）把它換成新版本，--version 照樣成功，套件卻全在 lib/python<舊版>：
+# 每個 import 都失敗、服務一直重啟，安裝程式還說「venv 正常」。改成比對建立 venv 時的版本（pyvenv.cfg）。
+# 同一段 Python 也送到 GPU 伺服器上跑（_rw_venv_ok），install.ps1 有一份逐字相同的（tools/test_venv_python_version.py 比對）。
+_VENV_CHECK_PY='import os, sys
+v = ""
+for l in open(os.path.join(sys.prefix, "pyvenv.cfg"), encoding="utf-8"):
+    k, _, x = l.partition("=")
+    if k.strip() in ("version", "version_info"):
+        v = ".".join(x.strip().split(".")[:2])
+n = "%d.%d" % sys.version_info[:2]
+print(v, n)
+sys.exit(0 if v in ("", n) else 3)'
+
+# $1=venv 資料夾。可用回傳 0；要重建回傳 1，原因放在 VENV_PROBLEM
+venv_problem() {
+    local out rc
+    VENV_PROBLEM=""
+    out=$(printf '%s\n' "$_VENV_CHECK_PY" | "$1/bin/python3" - 2>/dev/null); rc=$?
+    [ $rc -eq 0 ] && return 0
+    if [ $rc -eq 3 ]; then
+        VENV_PROBLEM="venv 是用 Python ${out%% *} 建立的，現在的 python3 是 ${out##* }（作業系統升級換了 Python 版本？）"
+    else
+        VENV_PROBLEM="venv 已損壞（可能路徑已變更或從其他作業系統複製）"
+    fi
+    return 1
+}
+
 # ─── Python venv ─────────────────────────────────
 check_venv() {
     section "Python 虛擬環境"
@@ -777,9 +806,9 @@ check_venv() {
     if [ ! -d "$VENV_DIR" ]; then
         need_create=1
     else
-        # 檢查 venv 是否可用（路徑搬遷後會壞）
-        if ! "$VENV_DIR/bin/python3" --version &>/dev/null 2>&1; then
-            echo -e "  ${C_WARN}[偵測]${NC} venv 已損壞（可能路徑已變更），需重建"
+        # 檢查 venv 是否可用（路徑搬遷、或作業系統升級換了 Python 版本都會壞）
+        if ! venv_problem "$VENV_DIR"; then
+            echo -e "  ${C_WARN}[偵測]${NC} ${VENV_PROBLEM}，需重建"
             need_create=1
         # Apple Silicon：檢查 venv 是否為 ARM64（x86 venv 跑不了 Moonshine）
         elif [ "$(uname -m)" = "arm64" ]; then
@@ -1524,6 +1553,8 @@ EnvironmentFile=-$D/server.env
 ExecStart=$D/venv/bin/python3 server.py --port %i
 Restart=on-failure
 RestartSec=5
+# 78＝venv 的 Python 版本與建立時不同（作業系統升級）：重啟也沒用，停下來讓 log 最後一行說明原因
+RestartPreventExitStatus=78
 StandardOutput=append:/tmp/jt-whisper-server.log
 StandardError=inherit
 
@@ -2035,11 +2066,11 @@ if os.path.isfile(p):
                     repair_items="${repair_items} python3"
                 fi
 
-                # 3. venv
-                if ssh $chk_opts "$existing_user@$existing_host" "~/jt-whisper-server/venv/bin/python3 --version" &>/dev/null; then
+                # 3. venv（也要是建立時的 Python 版本：伺服器作業系統升級後 --version 照樣成功，套件卻全部不見）
+                if printf '%s\n' "$_VENV_CHECK_PY" | ssh $chk_opts "$existing_user@$existing_host" "~/jt-whisper-server/venv/bin/python3 -" &>/dev/null; then
                     check_ok "venv 正常"
                 else
-                    echo -e "  ${C_WARN}[缺少]${NC} venv 損壞或不存在"
+                    echo -e "  ${C_WARN}[缺少]${NC} venv 損壞、不存在，或作業系統升級後 Python 版本與建立時不同"
                     need_repair=1
                     repair_items="${repair_items} venv"
                 fi
@@ -2459,11 +2490,16 @@ else:
         echo -e "  ${C_WARN}未偵測到 NVIDIA GPU，PyTorch 將安裝 CPU 版（辨識速度較慢）${NC}"
     fi
 
-    # 建立 venv
+    # 建立 venv。已經有、但壞了或 Python 版本與建立時不同（作業系統升級）就重建：留著也不能用。
+    # 優先用固定版本的 python3.12：venv 指向通用的 python3 時，系統換版後它會「看起來正常、套件全不見」
+    if printf '%s\n' "$_VENV_CHECK_PY" | ssh $ssh_opts "$rw_user@$rw_host" "test -d ~/jt-whisper-server/venv && ! ~/jt-whisper-server/venv/bin/python3 -" &>/dev/null; then
+        echo -e "  ${C_WARN}[偵測]${NC} 伺服器的 venv 不能用（損壞，或 Python 版本與建立時不同），重建中"
+        ssh $ssh_opts "$rw_user@$rw_host" "rm -rf ~/jt-whisper-server/venv"
+    fi
     ssh $ssh_opts "$rw_user@$rw_host" "
         mkdir -p ~/jt-whisper-server
         if [ ! -d ~/jt-whisper-server/venv ]; then
-            python3 -m venv ~/jt-whisper-server/venv
+            if command -v python3.12 >/dev/null 2>&1; then python3.12 -m venv ~/jt-whisper-server/venv; else python3 -m venv ~/jt-whisper-server/venv; fi
         fi
     "
 

@@ -53,6 +53,21 @@ $SCRIPT_DIR = if ($MyInvocation.MyCommand.Path) {
 $GITHUB_REPO    = "https://github.com/jasoncheng7115/jt-live-whisper.git"
 $GITHUB_ZIP     = "https://github.com/jasoncheng7115/jt-live-whisper/archive/refs/heads/main.zip"
 
+# venv 能不能用：python 跑得起來，而且是建立 venv 時的那個 Python 版本（2026-10-05）。
+# 與 install.sh 的 _VENV_CHECK_PY 逐字相同（tools/test_venv_python_version.py 比對），理由見那邊：
+# 伺服器作業系統升級後 `python3 --version` 照樣成功，套件卻全在舊版本的目錄裡
+$VENV_CHECK_PY = @'
+import os, sys
+v = ""
+for l in open(os.path.join(sys.prefix, "pyvenv.cfg"), encoding="utf-8"):
+    k, _, x = l.partition("=")
+    if k.strip() in ("version", "version_info"):
+        v = ".".join(x.strip().split(".")[:2])
+n = "%d.%d" % sys.version_info[:2]
+print(v, n)
+sys.exit(0 if v in ("", n) else 3)
+'@
+
 # ─── Bootstrap：透過 irm | iex 執行時，自動下載並安裝 ─────────
 if (-not (Test-Path (Join-Path $SCRIPT_DIR "translate_meeting.py"))) {
     Write-Host ""
@@ -425,7 +440,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.11 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.12 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -943,10 +958,14 @@ $venvNeedCreate = $true
 if (Test-Path $VENV_DIR) {
     $venvPy = Join-Path $VENV_DIR "Scripts\python.exe"
     if (Test-Path $venvPy) {
-        $venvCheck = & $venvPy --version 2>$null
-        if ($LASTEXITCODE -eq 0) {
+        $null = $VENV_CHECK_PY | & $venvPy - 2>$null
+        $venvRc = $LASTEXITCODE
+        if ($venvRc -eq 0) {
             check_ok "虛擬環境已存在且正常: venv\"
             $venvNeedCreate = $false
+        } elseif ($venvRc -eq 3) {
+            check_detect "虛擬環境是用另一個 Python 版本建立的（Python 換了版本），裝好的套件不能用，正在重建..."
+            Remove-Item $VENV_DIR -Recurse -Force -ErrorAction SilentlyContinue
         } else {
             check_detect "虛擬環境損壞（python.exe 無法執行），正在重建..."
             Remove-Item $VENV_DIR -Recurse -Force -ErrorAction SilentlyContinue
@@ -1756,6 +1775,8 @@ EnvironmentFile=-$D/server.env
 ExecStart=$D/venv/bin/python3 server.py --port %i
 Restart=on-failure
 RestartSec=5
+# 78＝venv 的 Python 版本與建立時不同（作業系統升級）：重啟也沒用，停下來讓 log 最後一行說明原因
+RestartPreventExitStatus=78
 StandardOutput=append:/tmp/jt-whisper-server.log
 StandardError=inherit
 
@@ -1766,6 +1787,12 @@ systemctl daemon-reload
 systemctl enable "jt-whisper-server@$PORT" >/dev/null 2>&1
 echo ENABLED
 '@
+
+# 伺服器的 venv 檢查（$VENV_CHECK_PY 定義在檔案開頭的常數區）
+function rw_venv_check_cmd() {   # 遠端指令：伺服器的 venv 可用時結束碼 0
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($VENV_CHECK_PY -replace "`r", "")))
+    return "echo $b64 | base64 -d | ~/jt-whisper-server/venv/bin/python3 -"
+}
 
 function rw_install_unit([string]$sshOpts, [string]$userHost, [string]$port) {
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($RW_UNIT_SCRIPT -replace "`r", "")))
@@ -2161,11 +2188,11 @@ if ($existingHost) {
             $needRepair = 1; $repairItems += " python3"
         }
 
-        # 3. venv
-        if (ssh_test $sshOpts $userHost "~/jt-whisper-server/venv/bin/python3 --version") {
+        # 3. venv（也要是建立時的 Python 版本：伺服器作業系統升級後 --version 照樣成功，套件卻全部不見）
+        if (ssh_test $sshOpts $userHost (rw_venv_check_cmd)) {
             check_ok "venv 正常"
         } else {
-            check_missing "venv 損壞或不存在"
+            check_missing "venv 損壞、不存在，或作業系統升級後 Python 版本與建立時不同"
             $needRepair = 1; $repairItems += " venv"
         }
 
@@ -2476,8 +2503,13 @@ echo "`$missing"
             check_notice "未偵測到 NVIDIA GPU，PyTorch 將安裝 CPU 版（辨識速度較慢）"
         }
 
-        # 建立 venv
-        ssh_cmd $sshOpts $userHost "mkdir -p ~/jt-whisper-server && if [ ! -d ~/jt-whisper-server/venv ]; then python3 -m venv ~/jt-whisper-server/venv; fi" | Out-Null
+        # 建立 venv。已經有、但壞了或 Python 版本與建立時不同（作業系統升級）就重建：留著也不能用。
+        # 優先用固定版本的 python3.12（與 install.sh 相同，理由見那邊）
+        if (ssh_test $sshOpts $userHost ("test -d ~/jt-whisper-server/venv && ! " + (rw_venv_check_cmd))) {
+            info "伺服器的 venv 不能用（損壞，或 Python 版本與建立時不同），重建中"
+            ssh_cmd $sshOpts $userHost "rm -rf ~/jt-whisper-server/venv" | Out-Null
+        }
+        ssh_cmd $sshOpts $userHost "mkdir -p ~/jt-whisper-server && if [ ! -d ~/jt-whisper-server/venv ]; then if command -v python3.12 >/dev/null 2>&1; then python3.12 -m venv ~/jt-whisper-server/venv; else python3 -m venv ~/jt-whisper-server/venv; fi; fi" | Out-Null
 
         # PyTorch（檢查是否已正常，避免重複安裝 2-3 GB）
         $skipTorch = $false
