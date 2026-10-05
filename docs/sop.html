@@ -1696,7 +1696,7 @@ cd C:\jt-live-whisper
 # 批次摘要多個檔案，指定摘要模型
 ./start.sh --summarize logs/log1.txt logs/log2.txt --summary-model phi4:14b
 </code></pre>
-<p>只要帶任何參數，程式就會進入 CLI 模式，未指定的參數自動使用預設值。不帶任何參數則進入互動式選單。<code>--input</code> 不帶 <code>--mode</code> 時也會進入互動選單（選擇模式、講者辨識、摘要）。互動式選單第一步為「輸入來源」，可選擇即時音訊擷取或從 <code>recordings/</code> 讀入已有的錄音檔。</p>
+<p>只要帶任何參數，程式就會進入 CLI 模式，未指定的參數自動使用預設值。不帶任何參數則進入互動式選單。<code>--input</code> 只給檔案、沒帶其他參數時，也會進入離線處理的互動選單（見 4-12）。互動式選單第一步為「輸入來源」，可選擇即時音訊擷取或從 <code>recordings/</code> 讀入已有的錄音檔。</p>
 <h3 id="4-7-互動式選單">4-7. 互動式選單</h3>
 <p><img src="images/interactive-menu.png" alt="互動式選單"></p>
 <p>啟動後會依序出現以下選單（都可按 Enter 使用預設值）：</p>
@@ -2566,7 +2566,7 @@ cd C:\jt-live-whisper
 <p><img src="images/offline-menu-2.png" alt="離線處理選單：LLM 伺服器與講者辨識"></p>
 <p><img src="images/offline-menu-3.png" alt="離線處理選單：設定總覽與等效 CLI 指令"></p>
 <p>對音訊檔案進行離線轉錄和翻譯，不需要 BlackHole 或即時音訊裝置。使用 <strong>faster-whisper</strong>（CTranslate2 引擎）進行辨識，支援 VAD 過濾靜音段。</p>
-<p><strong>互動選單模式：</strong> <code>--input</code> 不帶 <code>--mode</code> 時，程式會進入三步互動選單，讓使用者選擇功能模式、講者辨識、摘要。帶 <code>--mode</code> 則直接執行，不問。</p>
+<p><strong>互動選單模式：</strong> <code>--input</code> 只給檔案、沒帶其他參數時，程式會進入互動選單，依序選擇功能模式、辨識位置、辨識模型、LLM 伺服器與翻譯模型（翻譯模式才問）、講者辨識、摘要與逐字稿校正、摘要模型、會議主題，最後顯示設定總覽與等效指令再確認開始（上面三張截圖）。帶了 <code>--mode</code>、<code>-m</code>、<code>--diarize</code>、<code>--summarize</code>、<code>--topic</code> 等任何一個參數就直接執行，沒指定的用預設值。</p>
 <p><strong>支援格式：</strong> mp3、wav、m4a、flac 等常見音訊格式（非 wav 格式會自動用 ffmpeg 轉換為 16kHz mono WAV）。可一次指定多個檔案，程式會逐檔處理，搭配 <code>--summarize</code> 時合併產出一份摘要。</p>
 <p><strong>基本用法：</strong></p>
 <pre><code class="language-bash"># 進入互動選單（選擇模式、辨識、摘要）

@@ -486,7 +486,7 @@ cd C:\jt-live-whisper
 
 ![互動式選單](images/interactive-menu.png)
 
-![互動式選單：GPU 伺服器 與錄音設定](images/interactive-menu-2.png)
+![互動式選單：使用場景、錄音設定與開始即時翻譯](images/interactive-menu-2.png)
 
 &nbsp;
 
