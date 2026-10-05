@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.12 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.13 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1155,7 +1155,14 @@ check_faster_whisper_model() {
         local _fw_found
         _fw_found=$(python3 -c "
 import os
-for d in [os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')]:
+dirs = []
+try:
+    from huggingface_hub.constants import HF_HUB_CACHE   # 有設 HF_HOME／HF_HUB_CACHE 時模型在那裡（2026-10-05）
+    dirs.append(HF_HUB_CACHE)
+except Exception: pass
+default = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')
+if default not in dirs: dirs.append(default)
+for d in dirs:
     for prefix in ['Systran', 'mobiuslabsgmbh', 'deepdml']:
         if os.path.isdir(os.path.join(d, 'models--' + prefix + '--faster-whisper-$_fw_name')):
             print('found'); exit()
@@ -1193,7 +1200,14 @@ except:
             local _fw_check
             _fw_check=$(python3 -c "
 import os
-for d in [os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')]:
+dirs = []
+try:
+    from huggingface_hub.constants import HF_HUB_CACHE   # 有設 HF_HOME／HF_HUB_CACHE 時模型在那裡（2026-10-05）
+    dirs.append(HF_HUB_CACHE)
+except Exception: pass
+default = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')
+if default not in dirs: dirs.append(default)
+for d in dirs:
     for prefix in ['Systran', 'mobiuslabsgmbh', 'deepdml']:
         if os.path.isdir(os.path.join(d, 'models--' + prefix + '--faster-whisper-$_fw_name')):
             print('found'); exit()
@@ -2313,7 +2327,8 @@ else:
         echo ""
         echo -e "  ${C_WARN}偵測到問題:${repair_items}${NC}"
         echo -ne "  ${C_WHITE}是否修復伺服器環境？(Y/n): ${NC}"
-        read -r do_repair
+        # 讀不到輸入（沒有終端機、自動化派送）時當成「否」：預設是「是」，無人值守時不可以去動 GPU 伺服器（2026-10-05）
+        read -r do_repair || do_repair="n"
         if [[ "$do_repair" =~ ^[Nn]$ ]]; then
             echo -e "  ${C_DIM}跳過修復${NC}"
             return 0
@@ -2333,7 +2348,8 @@ else:
         echo -e "  ${C_DIM}不設定則使用本機 CPU 辨識${NC}"
         echo ""
         echo -ne "  ${C_WHITE}是否設定GPU 伺服器 辨識？(y/N): ${NC}"
-        read -r setup_remote
+        # 讀不到輸入時當成沒有人回答（預設：否）；以前 set -e 讓整個安裝程式在這裡以失敗結束（2026-10-05）
+        read -r setup_remote || setup_remote=""
         if [[ ! "$setup_remote" =~ ^[Yy]$ ]]; then
             echo -e "  ${C_DIM}跳過伺服器設定${NC}"
             return 0
@@ -2342,18 +2358,18 @@ else:
         # 收集 SSH 連線資訊
         echo ""
         echo -ne "  ${C_WHITE}SSH 伺服器 IP: ${NC}"
-        read -r rw_host
+        read -r rw_host || rw_host=""
         if [ -z "$rw_host" ]; then
             echo -e "  ${C_DIM}未輸入，跳過${NC}"
             return 0
         fi
 
         echo -ne "  ${C_WHITE}SSH Port [22]: ${NC}"
-        read -r rw_ssh_port
+        read -r rw_ssh_port || rw_ssh_port=""
         rw_ssh_port=${rw_ssh_port:-22}
 
         echo -ne "  ${C_WHITE}SSH 使用者: ${NC}"
-        read -r rw_user
+        read -r rw_user || rw_user=""
         if [ -z "$rw_user" ]; then
             echo -e "  ${C_DIM}未輸入使用者，跳過${NC}"
             return 0
@@ -2367,13 +2383,13 @@ else:
             rw_key="$HOME/.ssh/id_rsa"
         fi
         echo -ne "  ${C_WHITE}SSH Key 路徑 [${rw_key:-留空用密碼}]: ${NC}"
-        read -r rw_key_input
+        read -r rw_key_input || rw_key_input=""
         if [ -n "$rw_key_input" ]; then
             rw_key="$rw_key_input"
         fi
 
         echo -ne "  ${C_WHITE}Whisper 服務 Port [8978]: ${NC}"
-        read -r rw_port
+        read -r rw_port || rw_port=""
         rw_port=${rw_port:-8978}
     fi
 

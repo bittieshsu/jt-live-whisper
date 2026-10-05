@@ -203,7 +203,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.26.12"
+SERVER_VERSION = "2.26.13"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -245,7 +245,9 @@ def _diar_estimate_speakers(embeddings, refinement_opts, laplacian_type,
         ev, _vec = _u.compute_sorted_eigenvectors(lap, descend=False)
         n = int(_np.sum(_np.asarray(ev) < _DIAR_EIGENVALUE_TAU))
         return int(max(lo, min(hi, n)))
-    except Exception:
+    except Exception as e:
+        # 以前不說：改用函式庫的 eigengap，系統性偏少（中文長會議會塌成 2 人），使用者看不出原因（2026-10-05）
+        print(f"  [講者辨識] 人數估計失敗（{type(e).__name__}: {e}），改用函式庫內建的估計，人數可能偏少", flush=True)
         return None
 
 
@@ -555,7 +557,9 @@ def _nan_vad_windows(audio, samplerate=16000):
         regions = get_speech_timestamps(
             audio, VadOptions(min_silence_duration_ms=_NAN_VAD_SILENCE_MS),
             sampling_rate=samplerate)
-    except Exception:
+    except Exception as e:
+        # 改用固定 28 秒切段：邊界會切斷字、靜音段也會送去辨識（可能出現幻覺），要讓使用者知道（2026-10-05）
+        print(f"  [台語] 語音活動偵測（VAD）無法使用（{type(e).__name__}: {e}），改用固定 28 秒切段，斷句可能較差", flush=True)
         regions = []
 
     if not regions:
@@ -947,7 +951,9 @@ def _diarize_legacy(wav_path, segments, num_speakers=None):
         import librosa
         wav, _ = librosa.load(wav_path, sr=sr, mono=True)
         _per_segment_trim = True
-    except Exception:
+    except Exception as e:
+        # 舊做法整檔修剪靜音，時間軸會錯位（v2.20.0 修掉的問題：檔尾偏移近 6 分鐘），不可以不說（2026-10-05）
+        print(f"  [講者辨識] 讀取音檔失敗（{type(e).__name__}: {e}），改用舊的讀法；講者與時間可能對不準", flush=True)
         wav = preprocess_wav(wav_path)      # 退而求其次，維持舊行為
         _per_segment_trim = False
 
@@ -1130,7 +1136,7 @@ _FW_AV_PATCHED = False
 def _fw_av_compat():
     """PyAV 19（2026-10）拿掉了 av.open 的 metadata_errors 參數，faster-whisper（到 1.2.1 都是）讀音檔時還在傳，
     而它對 av 的版本沒設上限 → 新安裝的機器每一段辨識都是「open() got an unexpected keyword argument
-    'metadata_errors'」（Windows 11 使用者回報）。av 不認得這個參數時，換上一個把它濾掉的 av.open；
+    'metadata_errors'」（Windows 10 使用者回報）。av 不認得這個參數時，換上一個把它濾掉的 av.open；
     認得（av 18 以前）或沒裝 av 時什麼都不做。只檢查一次，載入 faster-whisper 之後呼叫。
     translate_meeting.py 與 remote_whisper_server.py 各一份，逐字相同（tools/test_av_compat.py 比對）"""
     global _FW_AV_PATCHED

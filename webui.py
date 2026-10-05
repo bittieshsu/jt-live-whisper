@@ -86,6 +86,28 @@ BASE_DIR = Path(__file__).parent
 TRANSLATE_SCRIPT = BASE_DIR / "translate_meeting.py"
 CONFIG_FILE = BASE_DIR / "config.json"
 
+
+def _write_config(cfg):
+    """寫 config.json：先寫暫存檔再換上，寫到一半當掉不會留下壞掉的設定檔（壞掉的話主程式會用預設值執行）；
+    保留原本的權限（裡面有密碼與 token）（2026-10-05）"""
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix=".config.", suffix=".tmp", dir=str(CONFIG_FILE.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(cfg, ensure_ascii=False, indent=4))
+        if CONFIG_FILE.exists():
+            try:
+                shutil.copymode(str(CONFIG_FILE), tmp)
+            except OSError:
+                pass
+        os.replace(tmp, str(CONFIG_FILE))
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
 # 預先匯入 translate_meeting，避免首次 /api/config 才 lazy import 造成冷啟動延遲
 try:
     from translate_meeting import (
@@ -898,7 +920,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.12",
+        "last": last, "version": "2.26.13",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -973,7 +995,7 @@ async def api_save_passwords(request: Request, body: dict = {}):
         # 只寫雜湊，並把舊版留下的明文欄位一起清掉
         cfg["webui_passwords"] = {"read_sha256": _webui_passwords["read"],
                                   "admin_sha256": _webui_passwords["admin"]}
-        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
+        _write_config(cfg)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return {"ok": True}
@@ -1002,7 +1024,7 @@ async def api_save_keyword(request: Request):
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
         cfg["keyword_alert"] = body
-        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
+        _write_config(cfg)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return {"ok": True}
@@ -1031,7 +1053,7 @@ async def api_save_overlay(request: Request):
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
         cfg["subtitle_overlay"] = body
-        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
+        _write_config(cfg)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return {"ok": True}
@@ -1112,7 +1134,7 @@ async def api_save_forward(request: Request):
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
         cfg["subtitle_forward"] = body
-        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
+        _write_config(cfg)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)})
     return {"ok": True}
@@ -1482,7 +1504,7 @@ async def api_start(request: Request, body: dict = {}):
             so = cfg.get("subtitle_overlay", {})
             so["enabled"] = body["subtitle_overlay"]
             cfg["subtitle_overlay"] = so
-        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
+        _write_config(cfg)
     except Exception:
         pass
     return {"status": "started", "pid": pid, "args": args}

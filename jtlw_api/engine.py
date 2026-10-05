@@ -562,9 +562,16 @@ class Engine:
         lang = None if job.get("_language", "auto") == "auto" else job["_language"].split("-")[0]
         rw = self.settings.remote_whisper
         if rw and rw.get("host"):
+            # 沒指定語言時先本機偵測一次，伺服器端不接受 "auto"。偵測失敗時不可以猜（以前一律當英文，
+            # 中文會議就照英文辨識、沒有任何訊息）：改用本機辨識、不指定語言，讓辨識模型自己判斷（2026-10-05）
             try:
-                # 沒指定語言時先本機偵測一次，伺服器端不接受 "auto"
                 detect_lang = lang or self._detect_language(wav_path)
+            except Exception as e:
+                job.setdefault("warnings", []).append(
+                    {"code": "asr_fallback_local",
+                     "message": f"語言偵測失敗，改用本機辨識並由辨識模型自己判斷語言: {type(e).__name__}: {e}"[:200]})
+                return self._local_asr(job, wav_path, model, None)
+            try:
                 segs, _dur, _pt, _dev = tm._remote_whisper_transcribe(
                     rw, wav_path, model, detect_lang, on_event=self._gpu_event_handler(job))
                 job["_use_remote_asr"] = True
@@ -607,18 +614,17 @@ class Engine:
                  "language": "nan-Hant"} for s in segs]
 
     def _detect_language(self, wav_path):
-        """用最小的模型偵測語言（只讀前 30 秒），失敗時回退英文"""
-        try:
-            from faster_whisper import WhisperModel
-            tm._fw_av_compat()   # av 19 起沒有 metadata_errors：不補的話這裡每次都失敗，下面的 except 會一律退回英文
-            m = WhisperModel("base", **tm._fw_device_kwargs())
-            _segs, info = m.transcribe(wav_path, vad_filter=True, without_timestamps=True)
-            lang = getattr(info, "language", None) or "en"
-            del m
-            tm._release_gpu_resources()
-            return lang
-        except Exception:
-            return "en"
+        """用最小的模型偵測語言（只讀前 30 秒）。失敗時丟出例外由呼叫端處理（以前一律回 "en"）"""
+        from faster_whisper import WhisperModel
+        tm._fw_av_compat()
+        m = tm._FwModel("base", **tm._fw_device_kwargs())
+        _segs, info = m.transcribe(wav_path, vad_filter=True, without_timestamps=True)
+        lang = getattr(info, "language", None)
+        del m
+        tm._release_gpu_resources()
+        if not lang:
+            raise RuntimeError("辨識模型沒有回報語言")
+        return lang
 
     def _local_asr(self, job, wav_path, model, lang):
         from faster_whisper import WhisperModel
@@ -627,7 +633,7 @@ class Engine:
         # 本機是 GPU 伺服器不能用時的退路，只有 CPU，慢 5.5 倍就是好幾個小時
         kw = dict(tm._FW_OFFLINE_KW)
         try:
-            m = WhisperModel(model, **tm._fw_device_kwargs())
+            m = tm._FwModel(model, **tm._fw_device_kwargs())
             seg_iter, info = m.transcribe(wav_path, language=lang, **kw)
             out = []
             for s in seg_iter:

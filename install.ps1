@@ -440,7 +440,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.12 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.13 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -1011,10 +1011,10 @@ if ($GPU_AVAILABLE) {
     # cuDNN（faster-whisper CUDA 加速需要）
     $cudnnPkg = if ($TORCH_CUDA_TAG -eq "cu118") { "nvidia-cudnn-cu11" } else { "nvidia-cudnn-cu12" }
     $null = pip_install $cudnnPkg "cuDNN (CUDA 深度學習加速)" @()
-    # CUDA 13+：自動安裝 CUDA 12.x cuBLAS（CTranslate2/faster-whisper 需要 cublas64_12.dll）
-    if ($CUDA_13_PLUS) {
-        $null = pip_install "nvidia-cublas-cu12" "cuBLAS 12.x（CUDA 13+ 相容層）" @()
-    }
+    # CTranslate2（faster-whisper）用顯示卡時要 CUDA 12 的 cublas64_12.dll，不分驅動是 CUDA 12 或 13 都要裝
+    # （2026-10-05 前只在 CUDA 13 以上才裝；CUDA 12 的驅動也不含 cuBLAS）。CUDA 版 PyTorch 的 torch\lib
+    # 通常也有一份，主程式會優先用那份，這份是備用
+    $null = pip_install "nvidia-cublas-cu12" "cuBLAS 12（CTranslate2 用顯示卡辨識需要）" @()
 } else {
     $null = pip_install "torch" "PyTorch (CPU)" @("--index-url", "https://download.pytorch.org/whl/cpu")
 }
@@ -1122,6 +1122,66 @@ if ($installFailed.Count -gt 0) {
     check_warn "以下套件安裝失敗："
     foreach ($f in $installFailed) { info "  - $f" }
     Write-Host ""
+}
+
+# ─── 套件載入檢查（2026-10-05）──────────────────────────────────
+# 裝得起來不代表載得起來：Windows 11 的「智慧型應用程式控制」或公司的應用程式控制原則會擋下套件裡的 .pyd／.dll
+# （使用者回報：scipy 被擋，降噪一啟用整個程式就結束），有 NVIDIA 顯示卡的電腦還要載得到 CUDA 函式庫
+# （使用者回報：每一段都是 cublas64_12.dll not found）。在這裡實際載入一遍，有問題安裝時就講清楚。
+# 檢查程式只用 ASCII（Windows PowerShell 5.1 經管線送給外部程式時不是 UTF-8）
+section "套件載入檢查"
+$IMPORT_CHECK_PY = @'
+import importlib, sys
+for m in sys.argv[1:]:
+    try:
+        importlib.import_module(m)
+        print("OK\t" + m)
+    except Exception as e:
+        print("FAIL\t" + m + "\t" + (str(e).strip().splitlines() or [type(e).__name__])[-1][:300])
+'@
+$importLabels = [ordered]@{
+    "numpy" = "numpy"; "scipy.signal" = "scipy（降噪、講者辨識）"; "ctranslate2" = "ctranslate2（語音辨識）"
+    "faster_whisper" = "faster-whisper（語音辨識）"; "av" = "PyAV（讀取音檔）"; "sentencepiece" = "sentencepiece（翻譯）"
+    "sounddevice" = "sounddevice（音訊擷取）"; "pyaudiowpatch" = "PyAudioWPatch（系統音訊擷取）"
+    "noisereduce" = "noisereduce（降噪）"; "torch" = "PyTorch"; "resemblyzer" = "resemblyzer（講者辨識）"
+}
+$checkFile = Join-Path $env:TEMP "jtlw_import_check.py"
+[IO.File]::WriteAllText($checkFile, $IMPORT_CHECK_PY, (New-Object System.Text.UTF8Encoding($false)))
+$importOut = & $VENV_PYTHON $checkFile @($importLabels.Keys) 2>$null
+Remove-Item $checkFile -ErrorAction SilentlyContinue
+$appControlBlocked = $false
+foreach ($line in $importOut) {
+    $p = "$line".Split("`t")
+    if ($p.Count -lt 2 -or -not $importLabels.Contains($p[1])) { continue }
+    if ($p[0] -eq "OK") { check_ok $importLabels[$p[1]] }
+    else {
+        check_fail "$($importLabels[$p[1]]) 無法載入：$($p[2])"
+        if ("$($p[2])" -match '應用程式控制原則|Application Control policy|应用程序控制策略') { $appControlBlocked = $true }
+    }
+}
+if ($appControlBlocked) {
+    Write-Host ""
+    check_notice "Windows 的應用程式控制擋下了 Python 套件裡的程式檔（Windows 11 的「智慧型應用程式控制」，或公司電腦的應用程式控制原則）"
+    info "  這是 Windows 的安全設定，本工具無法繞過："
+    info "  ・公司電腦：請 IT 把安裝資料夾 $SCRIPT_DIR 加入允許清單"
+    info "  ・個人電腦：到「Windows 安全性 → 應用程式與瀏覽器控制 → 智慧型應用程式控制設定」查看；若是「開啟」，可以改成「關閉」（請先了解關閉後的影響）"
+    info "  處理好之後重新執行 .\install.ps1"
+    Write-Host ""
+}
+# 有 NVIDIA 顯示卡時：本機辨識實際會不會用顯示卡（主程式找得到 CUDA 函式庫才會用，找不到就說明並改用 CPU）
+if ($GPU_AVAILABLE) {
+    Push-Location $SCRIPT_DIR
+    $gpuOut = & $VENV_PYTHON -c "import translate_meeting as tm; print('CUDA_' + ('OK' if tm._fw_local_cuda_ok() else 'NO'))" 2>$null
+    Pop-Location
+    if ("$gpuOut" -match 'CUDA_OK') {
+        check_ok "本機辨識會使用顯示卡（CUDA）"
+    } else {
+        check_notice "本機辨識無法使用顯示卡，會改用 CPU（較慢）"
+        foreach ($line in $gpuOut) {
+            $t = ("$line" -replace "\x1b\[[0-9;]*m", "").Trim()
+            if ($t -and $t -notmatch '^CUDA_') { info "  $t" }
+        }
+    }
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -1608,7 +1668,14 @@ foreach ($fwM in $fwModelsToDownload) {
     # 檢查是否已存在
     $fwFound = & $VENV_PYTHON -c "
 import os
-for d in [os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')]:
+dirs = []
+try:
+    from huggingface_hub.constants import HF_HUB_CACHE   # 有設 HF_HOME／HF_HUB_CACHE 時模型在那裡（2026-10-05）
+    dirs.append(HF_HUB_CACHE)
+except Exception: pass
+default = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')
+if default not in dirs: dirs.append(default)
+for d in dirs:
     for prefix in ['Systran', 'mobiuslabsgmbh', 'deepdml']:
         if os.path.isdir(os.path.join(d, 'models--' + prefix + '--faster-whisper-$fwName')): print('found'); exit()
 print('notfound')
@@ -1641,7 +1708,14 @@ except:
 "@ 2>$null | Out-Null
         $fwDlCheck = & $VENV_PYTHON -c "
 import os
-for d in [os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')]:
+dirs = []
+try:
+    from huggingface_hub.constants import HF_HUB_CACHE   # 有設 HF_HOME／HF_HUB_CACHE 時模型在那裡（2026-10-05）
+    dirs.append(HF_HUB_CACHE)
+except Exception: pass
+default = os.path.join(os.path.expanduser('~'), '.cache', 'huggingface', 'hub')
+if default not in dirs: dirs.append(default)
+for d in dirs:
     for prefix in ['Systran', 'mobiuslabsgmbh', 'deepdml']:
         if os.path.isdir(os.path.join(d, 'models--' + prefix + '--faster-whisper-$fwName')): print('found'); exit()
 print('notfound')
@@ -2365,7 +2439,13 @@ print(f'{pt},{ct2},{ow}')`""
         # 需要修復
         Write-Host ""
         check_detect "偵測到問題:${repairItems}"
-        $doRepair = Read-Host "  是否修復伺服器環境？(Y/n)"
+        # 沒有人可以回答時（自動化派送、輸入被導向）當成「否」：預設是「是」，無人值守時不可以去動 GPU 伺服器（2026-10-05）
+        if ([Console]::IsInputRedirected) {
+            info "沒有人可以回答，略過伺服器修復（要修復請在終端機重新執行 .\install.ps1）"
+            $doRepair = 'n'
+        } else {
+            $doRepair = Read-Host "  是否修復伺服器環境？(Y/n)"
+        }
         if ($doRepair -eq 'n' -or $doRepair -eq 'N') {
             info "跳過修復"
         } else {

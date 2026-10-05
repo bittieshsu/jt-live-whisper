@@ -81,6 +81,36 @@ _exit_if_venv_python_changed(
     + "：會重建 venv、重新安裝套件")
 
 
+# ── Windows 的應用程式控制擋下套件的程式檔（2026-10-05，Windows 11 使用者回報）──────────────
+# 「DLL load failed while importing _upfirdn_apply: 應用程式控制原則已封鎖此檔案」：Windows 11 的智慧型應用程式控制
+# 或公司的應用程式控制原則擋下了 Python 套件裡的 .pyd／.dll。這是 Windows 的安全設定，程式不能也不該繞過，
+# 但要講清楚是什麼、怎麼處理，不能只留一串 traceback。
+_APP_CONTROL_MARKERS = ("應用程式控制原則", "application control policy", "应用程序控制策略")
+
+
+def _dll_block_hint(e):
+    """這個錯誤是不是 Windows 應用程式控制擋下的；是的話回傳說明，不是回傳空字串"""
+    text = f"{e}"
+    if not any(m in text.lower() for m in _APP_CONTROL_MARKERS):
+        return ""
+    folder = os.path.dirname(os.path.abspath(__file__))
+    return ("[說明] Windows 的應用程式控制擋下了 Python 套件裡的程式檔（Windows 11 的「智慧型應用程式控制」，"
+            "或公司電腦設定的應用程式控制原則）。這是 Windows 的安全設定，本工具無法繞過：\n"
+            f"  ・公司電腦：請 IT 把安裝資料夾 {folder} 加入允許清單\n"
+            "  ・個人電腦：到「Windows 安全性 → 應用程式與瀏覽器控制 → 智慧型應用程式控制設定」查看；"
+            "若是「開啟」，可以改成「關閉」（請先了解關閉後的影響）")
+
+
+def _excepthook_with_hint(etype, value, tb):
+    sys.__excepthook__(etype, value, tb)
+    hint = _dll_block_hint(value)
+    if hint:
+        sys.stderr.write("\n" + hint + "\n")
+
+
+sys.excepthook = _excepthook_with_hint
+
+
 def _on_ctrl_break(signum, frame):
     """CTRL_BREAK（WebUI 的停止）交給目前的 Ctrl+C 處理：各模式自己的收尾，沒有的話就是 KeyboardInterrupt"""
     handler = signal.getsignal(signal.SIGINT)
@@ -171,6 +201,131 @@ import json
 import http.client
 import urllib.error
 import urllib.request
+
+
+# ── Windows＋NVIDIA：讓 CTranslate2 找得到 CUDA 函式庫（2026-10-05）─────────────
+# CTranslate2（faster-whisper）用顯示卡時要在執行當下載入 CUDA 12 的 cuBLAS 與 cuDNN 9 的子程式庫，
+# 這些**不在顯示卡驅動裡**。CUDA 版 PyTorch 在 torch\lib 自帶一整組、pip 的 nvidia-cublas-cu12／
+# nvidia-cudnn-cu12 放在 nvidia\*\bin，但兩者都不在 Windows 找 DLL 的路徑上 → 每一段都是
+# 「Library cublas64_12.dll is not found or cannot be loaded」（Windows 10＋RTX 3060 使用者回報）。
+# 這裡在載入 ctranslate2 之前把找到的資料夾加進搜尋路徑；cuDNN 的主檔與子程式庫要同一版，
+# 主檔先從子程式庫所在的資料夾載入（ctranslate2 自帶一份主檔，不先載入就會跟別處的子程式庫混用）。
+# 需要哪些檔從 ctranslate2 自己的 DLL 讀出來，不寫死 CUDA 版本。
+_WIN_CUDA = {"checked": False, "dirs": {}, "missing": [], "handles": [], "loaded": False}
+
+
+def _win_cuda_candidates():
+    """可能放著 cuBLAS／cuDNN 的資料夾，依優先順序：CUDA 版 PyTorch 自帶的整組、pip 的 nvidia-*、CUDA Toolkit"""
+    import glob
+    import site
+    import sysconfig
+    sps = []
+    for p in [sysconfig.get_paths().get("purelib"), sysconfig.get_paths().get("platlib")] + \
+            list(getattr(site, "getsitepackages", lambda: [])()):
+        if p and os.path.isdir(p) and p not in sps:
+            sps.append(p)
+    out = [os.path.join(sp, "torch", "lib") for sp in sps]
+    for sp in sps:
+        out += sorted(glob.glob(os.path.join(sp, "nvidia", "*", "bin")))
+    for k, v in sorted(os.environ.items()):
+        if v and (k.upper() == "CUDA_PATH" or k.upper().startswith("CUDA_PATH_V")):
+            out.append(os.path.join(v, "bin"))
+    seen = []
+    for d in out:
+        if os.path.isdir(d) and d not in seen:
+            seen.append(d)
+    return seen
+
+
+def _ct2_cuda_dll_names():
+    """ctranslate2 執行時要載入的 cuBLAS／cuDNN 檔名（從它的 DLL 讀出來）與它自帶的 DLL；找不到套件時回傳 ([], set())"""
+    import importlib.util
+    spec = importlib.util.find_spec("ctranslate2")
+    if not spec or not spec.submodule_search_locations:
+        return [], set()
+    d = list(spec.submodule_search_locations)[0]
+    dlls = [f for f in os.listdir(d) if f.lower().endswith(".dll")]
+    names = set()
+    for f in dlls:
+        with open(os.path.join(d, f), "rb") as fh:
+            names |= {m.decode().lower() for m in re.findall(rb"(?:cublas|cudnn)[A-Za-z_]*64_\d+\.dll", fh.read(), re.I)}
+    return sorted(names), {f.lower() for f in dlls}
+
+
+def _win_cuda_dll_setup():
+    """找齊 ctranslate2 要的 cuBLAS／cuDNN、加進搜尋路徑、先載入 cuDNN 主檔。只在 Windows 而且有 NVIDIA 驅動時做"""
+    if _WIN_CUDA["checked"]:
+        return
+    _WIN_CUDA["checked"] = True
+    if not IS_WINDOWS:
+        return
+    if not os.path.isfile(os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "nvcuda.dll")):
+        return                                           # 沒有 NVIDIA 驅動：用不到顯示卡，什麼都不做
+    try:
+        need, bundled = _ct2_cuda_dll_names()
+    except Exception:
+        return
+    cands = _win_cuda_candidates()
+    for group in ("cublas", "cudnn"):
+        names = [n for n in need if n.startswith(group)]
+        if not names:
+            continue
+        # 同一組要從同一個資料夾找齊（版本才一致）；ctranslate2 自帶的 cuDNN 主檔可以不在那裡
+        must = [n for n in names if not (group == "cudnn" and n in bundled and re.fullmatch(r"cudnn64_\d+\.dll", n))]
+        d = next((c for c in cands if all(os.path.isfile(os.path.join(c, n)) for n in must)), None)
+        if d is None:
+            _WIN_CUDA["missing"] += must
+            continue
+        already = any(v[0] == d for v in _WIN_CUDA["dirs"].values())   # cuBLAS 與 cuDNN 常在同一個資料夾
+        _WIN_CUDA["dirs"][group] = (d, names)
+        if already:
+            continue
+        if d.lower() not in os.environ.get("PATH", "").lower():
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+        try:
+            _WIN_CUDA["handles"].append(os.add_dll_directory(d))
+        except (AttributeError, OSError):
+            pass
+    shim = [n for n in need if re.fullmatch(r"cudnn64_\d+\.dll", n)]
+    if "cudnn" in _WIN_CUDA["dirs"] and shim:
+        d = _WIN_CUDA["dirs"]["cudnn"][0]
+        if os.path.isfile(os.path.join(d, shim[0])):
+            try:
+                import ctypes
+                ctypes.WinDLL(os.path.join(d, shim[0]))
+            except OSError:
+                pass
+
+
+def _win_cuda_libs_ok():
+    """要用顯示卡之前：ctranslate2 要的 CUDA 函式庫是否都載得到（先從找到的資料夾載入，之後 ctranslate2
+    用檔名載入時拿到的就是這幾個）。回傳 (是否可用, 缺少的檔名)"""
+    _win_cuda_dll_setup()
+    if not IS_WINDOWS:
+        return True, []
+    if _WIN_CUDA["missing"]:
+        return False, list(_WIN_CUDA["missing"])
+    if not _WIN_CUDA["loaded"]:
+        import ctypes
+        failed = []
+        order = {"cublaslt": 0, "cublas": 1, "cudnn_graph": 2, "cudnn64": 3}
+        for group, (d, names) in _WIN_CUDA["dirs"].items():
+            for n in sorted(names, key=lambda x: min((v for k, v in order.items() if x.startswith(k)), default=9)):
+                p = os.path.join(d, n)
+                if not os.path.isfile(p):
+                    continue
+                try:
+                    ctypes.WinDLL(p)
+                except OSError as e:
+                    failed.append(f"{n}（{e}）")
+        if failed:
+            _WIN_CUDA["missing"] = failed
+            return False, failed
+        _WIN_CUDA["loaded"] = True
+    return True, []
+
+
+_win_cuda_dll_setup()
 
 import ctranslate2
 import sentencepiece
@@ -1256,21 +1411,58 @@ OLLAMA_DEFAULT_PORT = 11434
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "config.json")
 
 
+_CONFIG_LOAD_ERROR = [None]       # 設定檔讀不懂的原因；有值時這個程序不寫回設定檔
+_CONFIG_SAVE_WARNED = [False]
+
+
 def load_config():
-    """讀取設定檔，回傳 dict"""
+    """讀取設定檔，回傳 dict。
+
+    讀不懂（手動編輯多一個逗號、寫到一半的檔案）時以前默默當成空設定：GPU 伺服器、LLM 主機都不生效，
+    之後任何一次互動選擇呼叫 save_config 還會把整個檔案覆寫成幾乎空白，設定永久遺失（2026-10-05）。
+    現在說明哪裡讀不懂、這次用預設值執行，而且不寫回這個檔案"""
     if os.path.isfile(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.loads(f.read())
-        except Exception:
-            pass
+                data = json.loads(f.read())
+            if not isinstance(data, dict):
+                raise ValueError("最外層不是 { ... } 物件")
+            return data
+        except Exception as e:
+            _CONFIG_LOAD_ERROR[0] = e
+            sys.stderr.write(
+                f"[錯誤] 設定檔讀不懂：{CONFIG_PATH}（{type(e).__name__}: {e}）\n"
+                "       這次先用預設設定執行（GPU 伺服器、LLM 主機等設定這次不會生效），也不會覆寫這個檔案。\n"
+                "       請修正這個檔案；或把它改名保留，再重新執行安裝程式產生新的。\n")
     return {}
 
 
 def save_config(cfg):
-    """儲存設定檔"""
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        f.write(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
+    """儲存設定檔：先寫暫存檔再換上（寫到一半當掉不會留下壞掉的檔案），保留原本的權限（裡面有密碼與 token）。
+    設定檔一開始就讀不懂時不寫：寫了就是用幾乎空白的設定蓋掉使用者原本的檔案"""
+    if _CONFIG_LOAD_ERROR[0] is not None:
+        if not _CONFIG_SAVE_WARNED[0]:
+            _CONFIG_SAVE_WARNED[0] = True
+            sys.stderr.write(f"[提示] 設定檔讀不懂，這次的選擇不會存檔（不覆寫 {CONFIG_PATH}）\n")
+        return
+    d = os.path.dirname(os.path.abspath(CONFIG_PATH))
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix=".config.", suffix=".tmp", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
+        if os.path.exists(CONFIG_PATH):
+            try:
+                shutil.copymode(CONFIG_PATH, tmp)
+            except OSError:
+                pass
+        os.replace(tmp, CONFIG_PATH)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 _config = load_config()
@@ -1965,7 +2157,7 @@ _FW_AV_PATCHED = False
 def _fw_av_compat():
     """PyAV 19（2026-10）拿掉了 av.open 的 metadata_errors 參數，faster-whisper（到 1.2.1 都是）讀音檔時還在傳，
     而它對 av 的版本沒設上限 → 新安裝的機器每一段辨識都是「open() got an unexpected keyword argument
-    'metadata_errors'」（Windows 11 使用者回報）。av 不認得這個參數時，換上一個把它濾掉的 av.open；
+    'metadata_errors'」（Windows 10 使用者回報）。av 不認得這個參數時，換上一個把它濾掉的 av.open；
     認得（av 18 以前）或沒裝 av 時什麼都不做。只檢查一次，載入 faster-whisper 之後呼叫。
     translate_meeting.py 與 remote_whisper_server.py 各一份，逐字相同（tools/test_av_compat.py 比對）"""
     global _FW_AV_PATCHED
@@ -1993,17 +2185,43 @@ def _fw_av_compat():
     av.open = _open
 
 
-@lru_cache(maxsize=1)
+_FW_CUDA_OFF = {"reason": None}         # 這個程序已改用 CPU 的原因：之後都不再試顯示卡
+_FW_CUDA_NOTICED = [False]
+_FW_CUDA_HAS_DEVICE = [None]
+
+
+def _fw_cuda_notice(reason, fix=""):
+    """顯示卡不能用、改用 CPU 時說一次原因與修法（以前每一段都印一次「本機辨識失敗」，看不出該怎麼辦）"""
+    if _FW_CUDA_NOTICED[0]:
+        return
+    _FW_CUDA_NOTICED[0] = True
+    print(f"\n  {C_WARN}[提示] 顯示卡（CUDA）不能用來辨識：{reason}。本機辨識改用 CPU（較慢）。{RESET}", flush=True)
+    if fix:
+        print(f"  {C_DIM}{fix}{RESET}", flush=True)
+
+
 def _fw_local_cuda_ok():
     """本機 CTranslate2（faster-whisper）能否使用 CUDA 加速。
-    Apple Silicon 的 CTranslate2 沒有 Metal 後端，一律走 CPU（ASR 另用 mlx）。"""
-    if _is_apple_silicon():
+    Apple Silicon 的 CTranslate2 沒有 Metal 後端，一律走 CPU（ASR 另用 mlx）。
+    Windows 另外要載得到 CUDA 函式庫（_win_cuda_libs_ok）：有顯示卡不代表有 cuBLAS／cuDNN"""
+    if _is_apple_silicon() or _FW_CUDA_OFF["reason"]:
         return False
-    try:
-        import ctranslate2
-        return bool(ctranslate2.get_supported_compute_types("cuda"))
-    except Exception:
+    if _FW_CUDA_HAS_DEVICE[0] is None:                 # 原本整個函式用 lru_cache；改成只記住「有沒有 CUDA」，
+        try:                                           # 停用的旗標每次都要看（執行中改用 CPU 之後要生效）
+            import ctranslate2
+            _FW_CUDA_HAS_DEVICE[0] = bool(ctranslate2.get_supported_compute_types("cuda"))
+        except Exception:
+            _FW_CUDA_HAS_DEVICE[0] = False
+    if not _FW_CUDA_HAS_DEVICE[0]:
         return False
+    ok, missing = _win_cuda_libs_ok()
+    if not ok:
+        _FW_CUDA_OFF["reason"] = "missing"
+        _fw_cuda_notice("找不到 " + "、".join(missing[:4]) + ("…" if len(missing) > 4 else ""),
+                        "要用顯示卡加速：在安裝資料夾重新執行 .\\install.ps1（會補裝 CUDA 版 PyTorch 與 "
+                        "nvidia-cublas-cu12、nvidia-cudnn-cu12，裡面有這些函式庫）")
+        return False
+    return True
 
 
 # mlx-community 有對應 repo 的模型（.en 系列不在其中，需退回 faster-whisper）
@@ -2027,10 +2245,137 @@ def _fw_device_kwargs():
     RTX 50 系列（Blackwell, sm_120）跑 int8 量化會噴
     `cuBLAS failed with status CUBLAS_STATUS_NOT_SUPPORTED`，
     故 CUDA 一律改用 float16（速度更快、準確度更好，VRAM 也夠）；
-    無 CUDA 時維持 device="auto" + int8（CPU 上 int8 才快）。"""
+    無 CUDA 時用 CPU + int8（CPU 上 int8 才快）。
+    顯示卡不支援 float16（compute capability 5.3 以下）時用 float32。
+    不用顯示卡時一定要寫 "cpu"：寫 "auto" 的話 ctranslate2 看得到顯示卡就會自己選回 CUDA，
+    缺 CUDA 函式庫的機器照樣每一段都失敗（2026-10-05）"""
     if _fw_local_cuda_ok():
-        return {"device": "cuda", "compute_type": "float16"}
-    return {"device": "auto", "compute_type": "int8"}
+        try:
+            import ctranslate2
+            types = ctranslate2.get_supported_compute_types("cuda")
+        except Exception:
+            types = set()
+        return {"device": "cuda", "compute_type": "float16" if "float16" in types else "float32"}
+    return {"device": "cpu", "compute_type": "int8"}
+
+
+def _make_denoiser(denoise):
+    """即時模式的降噪函式（audio, sr）→ audio。降噪是選用功能：載入失敗（例如 Windows 的應用程式控制擋下 scipy
+    的程式檔）時說明原因、這次不降噪、照常辨識，不可以讓整個程式結束（2026-10-05，以前直接 traceback 結束）"""
+    def _identity(audio, sr):
+        return audio
+    if not denoise:
+        return _identity
+    try:
+        from noisereduce import reduce_noise as _nr_reduce
+    except Exception as e:
+        print(f"  {C_WARN}[提示] 降噪無法啟用：{str(e).splitlines()[0][:200]}。這次不降噪，照常辨識。{RESET}", flush=True)
+        hint = _dll_block_hint(e)
+        if hint:
+            print(f"  {C_DIM}{hint}{RESET}", flush=True)
+        return _identity
+
+    def _denoise(audio, sr):
+        peak = np.max(np.abs(audio))
+        out = _nr_reduce(y=audio, sr=sr, stationary=True, prop_decrease=0.8)
+        peak_after = np.max(np.abs(out))
+        if peak_after > 1e-6:
+            out = out * (peak / peak_after)
+        return out
+    return _denoise
+
+
+def _fw_is_cuda_error(e):
+    """這個錯誤是不是顯示卡那一端的問題（函式庫載不到、顯示記憶體不足、這張卡不支援）"""
+    s = f"{type(e).__name__}: {e}".lower()
+    return any(k in s for k in ("cuda", "cublas", "cudnn", "out of memory", "not found or cannot be loaded",
+                                "no kernel image", "invalid device function", "nvrtc", "compute capability"))
+
+
+class _FwModel:
+    """faster-whisper 的 WhisperModel，顯示卡出錯時自動改用 CPU（2026-10-05）。
+
+    沒有 Windows＋NVIDIA 的測試機，函式庫以外的顯示卡問題（顯示記憶體不足、舊卡不支援、版本不合）也測不完，
+    所以在用的地方兜底：建立模型、或第一段辨識就因為顯示卡失敗時，說明一次原因、在 CPU 重建模型再做一次，
+    之後整個程序都用 CPU。不是顯示卡的錯誤照樣丟出去；第一段之後才失敗的也照樣丟出去（不會重複產生段落）。
+    transcribe 以外的方法（detect_language 等）同樣處理。"""
+    _END = object()
+
+    def __init__(self, model_path, **kw):
+        from faster_whisper import WhisperModel
+        _fw_av_compat()
+        self._cls, self._path, self._kw = WhisperModel, model_path, dict(kw)
+        self._lock = threading.Lock()
+        self._m = None
+        try:
+            self._m = WhisperModel(model_path, **self._kw)
+        except Exception as e:
+            if self._kw.get("device") != "cuda" or not _fw_is_cuda_error(e):
+                raise
+            self._to_cpu(e)
+
+    @property
+    def device(self):
+        return self._kw.get("device")
+
+    def _to_cpu(self, e):
+        with self._lock:
+            if self._kw.get("device") != "cuda" and self._m is not None:
+                return                                    # 別的執行緒已經換好了
+            msg = (str(e).strip().splitlines() or [type(e).__name__])[0][:160]
+            _FW_CUDA_OFF["reason"] = msg
+            if "out of memory" in msg.lower():
+                fix = "顯示記憶體不足：改用較小的模型（例如 -m small）就能繼續用顯示卡"
+            elif IS_WINDOWS:
+                fix = "在安裝資料夾重新執行 .\\install.ps1 可以補裝 CUDA 函式庫"
+            else:
+                fix = ""
+            _fw_cuda_notice(msg, fix)
+            self._m = None
+            try:
+                _release_gpu_resources()
+            except Exception:
+                pass
+            self._kw = _fw_device_kwargs()                # 已停用 CUDA → cpu／int8
+            self._m = self._cls(self._path, **self._kw)
+
+    def transcribe(self, *args, **kwargs):
+        if self._kw.get("device") != "cuda":
+            return self._m.transcribe(*args, **kwargs)
+        try:
+            segs, info = self._m.transcribe(*args, **kwargs)
+            it = iter(segs)
+            first = next(it, self._END)                   # 顯示卡的錯誤多半在第一段的推論才出現
+        except Exception as e:
+            if not _fw_is_cuda_error(e):
+                raise
+            self._to_cpu(e)
+            return self._m.transcribe(*args, **kwargs)
+
+        def _rest():
+            if first is not self._END:
+                yield first
+                yield from it
+        return _rest(), info
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        attr = getattr(self._m, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            if self._kw.get("device") != "cuda":
+                return getattr(self._m, name)(*args, **kwargs)
+            try:
+                return getattr(self._m, name)(*args, **kwargs)
+            except Exception as e:
+                if not _fw_is_cuda_error(e):
+                    raise
+                self._to_cpu(e)
+                return getattr(self._m, name)(*args, **kwargs)
+        return call
 
 
 @lru_cache(maxsize=1)
@@ -2162,7 +2507,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.12"
+APP_VERSION = "2.26.13"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2267,7 +2612,9 @@ def _nan_vad_windows(audio, samplerate=16000):
         regions = get_speech_timestamps(
             audio, VadOptions(min_silence_duration_ms=_NAN_VAD_SILENCE_MS),
             sampling_rate=samplerate)
-    except Exception:
+    except Exception as e:
+        # 改用固定 28 秒切段：邊界會切斷字、靜音段也會送去辨識（可能出現幻覺），要讓使用者知道（2026-10-05）
+        print(f"  [台語] 語音活動偵測（VAD）無法使用（{type(e).__name__}: {e}），改用固定 28 秒切段，斷句可能較差", flush=True)
         regions = []
 
     if not regions:
@@ -2395,7 +2742,9 @@ def _analyze_audio_loudness(wav_path, sample_seconds=120):
             "mean_dbfs": float(m_mean.group(1)),
             "max_dbfs": float(m_max.group(1)) if m_max else 0.0,
         }
-    except Exception:
+    except Exception as e:
+        # 以前不說：低音量錄音就不會增益、也不會切寬鬆模式，大量漏段卻看不出原因（2026-10-05）
+        print(f"  [音源分析] 失敗（{type(e).__name__}: {e}），以標準模式辨識；音量很低的錄音可能漏段", flush=True)
         return None
 
 
@@ -3201,7 +3550,9 @@ def _diar_estimate_speakers(embeddings, refinement_opts, laplacian_type,
         ev, _vec = _u.compute_sorted_eigenvectors(lap, descend=False)
         n = int(_np.sum(_np.asarray(ev) < _DIAR_EIGENVALUE_TAU))
         return int(max(lo, min(hi, n)))
-    except Exception:
+    except Exception as e:
+        # 以前不說：改用函式庫的 eigengap，系統性偏少（中文長會議會塌成 2 人），使用者看不出原因（2026-10-05）
+        print(f"  [講者辨識] 人數估計失敗（{type(e).__name__}: {e}），改用函式庫內建的估計，人數可能偏少", flush=True)
         return None
 
 
@@ -4467,8 +4818,36 @@ class OllamaTranslator:
             if len(self.context) > self.MAX_CONTEXT:
                 self.context.pop(0)
             return result
-        except Exception:
-            return ""
+        except Exception as e:
+            _note_translate_error(e)
+            return _TranslateFailed(f"{type(e).__name__}: {e}")
+
+
+class _TranslateFailed(str):
+    """翻譯「出錯」的結果：跟空字串一樣是假值（既有的 `if not result` 照舊），但呼叫端分得出它跟
+    「翻譯被過濾掉」（幻覺、亂碼，回傳一般的 ""）不同。以前兩者都是 ""，即時字幕看到就整筆略過，
+    LLM 伺服器卡住或逾時時連原文都不見、也沒有任何訊息（2026-10-05）"""
+    def __new__(cls, reason=""):
+        obj = super().__new__(cls, "")
+        obj.reason = reason
+        return obj
+
+
+_TRANSLATE_ERR = {"last": 0.0, "count": 0}
+
+
+def _note_translate_error(e):
+    """翻譯出錯時說明原因：第一次馬上說，之後同樣的狀況每 60 秒最多說一次（附這段期間失敗幾次）"""
+    _TRANSLATE_ERR["count"] += 1
+    now = time.monotonic()
+    if _TRANSLATE_ERR["last"] and now - _TRANSLATE_ERR["last"] < 60:
+        return
+    n = _TRANSLATE_ERR["count"]
+    _TRANSLATE_ERR["last"], _TRANSLATE_ERR["count"] = now, 0
+    msg = (str(e).strip().splitlines() or [""])[0][:160]
+    extra = f"（近 60 秒共 {n} 段）" if n > 1 else ""
+    print(f"\n  {C_WARN}[翻譯失敗] {type(e).__name__}: {msg}{extra}；原文照樣顯示，譯文標「（翻譯失敗）」。"
+          f"請檢查 LLM 伺服器（{OLLAMA_HOST}:{OLLAMA_PORT}）是否正常{RESET}", flush=True)
 
 
 class ArgosTranslator:
@@ -7064,7 +7443,9 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
                 _trans_next[0] += 1
             src_text, result, elapsed, asr_elapsed = entry
             if not result:
-                continue
+                if not isinstance(result, _TranslateFailed):
+                    continue                     # 被過濾掉的翻譯（幻覺、亂碼）：照舊整筆略過
+                result = "（翻譯失敗）"           # 出錯：原文照樣顯示（以前連原文都不見）
             src_color, src_label, dst_color, dst_label = _MODE_LABELS[mode]
             with print_lock:
                 # 原文 + 辨識耗時
@@ -7399,7 +7780,9 @@ def run_stream_moonshine(capture_id: int, translator, moonshine_model_name: str,
                 _trans_next[0] += 1
             src_text, result, elapsed, asr_elapsed = entry
             if not result:
-                continue
+                if not isinstance(result, _TranslateFailed):
+                    continue                     # 被過濾掉的翻譯（幻覺、亂碼）：照舊整筆略過
+                result = "（翻譯失敗）"           # 出錯：原文照樣顯示（以前連原文都不見）
             src_color, src_label, dst_color, dst_label = _MODE_LABELS[mode]
             with print_lock:
                 _clear_partial_line()  # 清除 [...] 部分文字
@@ -7949,18 +8332,7 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
         blocksize=int(sd_samplerate * 0.1))
 
     # ── 降噪 ──
-    if denoise:
-        from noisereduce import reduce_noise as _nr_reduce
-        def _denoise(audio, sr):
-            peak = np.max(np.abs(audio))
-            out = _nr_reduce(y=audio, sr=sr, stationary=True, prop_decrease=0.8)
-            peak_after = np.max(np.abs(out))
-            if peak_after > 1e-6:
-                out = out * (peak / peak_after)
-            return out
-    else:
-        def _denoise(audio, sr):
-            return audio
+    _denoise = _make_denoiser(denoise)
 
     # ── 提取 WAV bytes ──
     def extract_wav_bytes():
@@ -7997,7 +8369,9 @@ def run_stream_remote(capture_id: int, translator, model_name: str,
                 _trans_next[0] += 1
             src_text, result, elapsed, asr_elapsed = entry
             if not result:
-                continue
+                if not isinstance(result, _TranslateFailed):
+                    continue                     # 被過濾掉的翻譯（幻覺、亂碼）：照舊整筆略過
+                result = "（翻譯失敗）"           # 出錯：原文照樣顯示（以前連原文都不見）
             src_color, src_label, dst_color, dst_label = _MODE_LABELS[mode]
             with print_lock:
                 # 原文 + 辨識耗時
@@ -8421,7 +8795,7 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
             warnings.filterwarnings("ignore", category=FutureWarning)
-            fw_model = _call_with_ssl_retry(WhisperModel, _resolve_fw_model(model_name), **_fw_device_kwargs())
+            fw_model = _call_with_ssl_retry(_FwModel, _resolve_fw_model(model_name), **_fw_device_kwargs())
         _hf_logger.setLevel(_hf_log_level)
         if _fw_need_download:
             print(f"  {C_OK}模型下載完成（{time.monotonic() - t0:.1f}s）{RESET}")
@@ -8569,18 +8943,7 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
         blocksize=int(sd_samplerate * 0.1))
 
     # ── 降噪 ──
-    if denoise:
-        from noisereduce import reduce_noise as _nr_reduce
-        def _denoise(audio, sr):
-            peak = np.max(np.abs(audio))
-            out = _nr_reduce(y=audio, sr=sr, stationary=True, prop_decrease=0.8)
-            peak_after = np.max(np.abs(out))
-            if peak_after > 1e-6:
-                out = out * (peak / peak_after)
-            return out
-    else:
-        def _denoise(audio, sr):
-            return audio
+    _denoise = _make_denoiser(denoise)
 
     # ── 提取音訊並寫入暫存 WAV（原始取樣率，讓 faster-whisper 正確 resample）──
     import tempfile as _tempfile
@@ -8672,7 +9035,9 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
                 _trans_next[0] += 1
             src_text, result, elapsed, asr_elapsed = entry
             if not result:
-                continue
+                if not isinstance(result, _TranslateFailed):
+                    continue                     # 被過濾掉的翻譯（幻覺、亂碼）：照舊整筆略過
+                result = "（翻譯失敗）"           # 出錯：原文照樣顯示（以前連原文都不見）
             src_color, src_label, dst_color, dst_label = _MODE_LABELS[mode]
             with print_lock:
                 # 原文 + 辨識耗時
@@ -9217,7 +9582,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
             warnings.filterwarnings("ignore", category=FutureWarning)
-            fw_model = _call_with_ssl_retry(WhisperModel, _resolve_fw_model(model_name), **_fw_device_kwargs())
+            fw_model = _call_with_ssl_retry(_FwModel, _resolve_fw_model(model_name), **_fw_device_kwargs())
         _hf_logger.setLevel(_hf_log_level)
         if _fw_need_download:
             print(f"  {C_OK}模型下載完成（{time.monotonic() - t0:.1f}s）{RESET}")
@@ -9403,18 +9768,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
     mic_stream = None
 
     # ── 降噪 ──
-    if denoise:
-        from noisereduce import reduce_noise as _nr_reduce
-        def _denoise(audio, sr):
-            peak = np.max(np.abs(audio))
-            out = _nr_reduce(y=audio, sr=sr, stationary=True, prop_decrease=0.8)
-            peak_after = np.max(np.abs(out))
-            if peak_after > 1e-6:
-                out = out * (peak / peak_after)
-            return out
-    else:
-        def _denoise(audio, sr):
-            return audio
+    _denoise = _make_denoiser(denoise)
 
     # ── 暫存 WAV 目錄 ──
     import tempfile as _tempfile
@@ -9749,7 +10103,9 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                              "asr_time": round(asr_elapsed, 1), "timestamp": timestamp})
                 continue
             if not result:
-                continue
+                if not isinstance(result, _TranslateFailed):
+                    continue                     # 被過濾掉的翻譯：照舊略過
+                result = "（翻譯失敗）"           # 出錯：原文照樣顯示
             with print_lock:
                 # 原文 + 辨識耗時
                 _print_with_badge(f"{prefix_src}{src_color}[{src_label}] {src_text}{RESET}",
@@ -10550,8 +10906,14 @@ class _AudioRecorder:
         try:
             self._write_header()
             self._f.close()
-        except Exception:
-            pass
+        except Exception as e:
+            # 檔頭沒寫好就轉檔，轉完會刪掉 WAV（唯一完整的那份），MP3 可能少掉最後一段卻顯示轉檔完成（2026-10-05）
+            try:
+                self._f.close()
+            except Exception:
+                pass
+            print(f"\n  {C_WARN}[錄音] 收尾寫入失敗（{type(e).__name__}: {e}），保留 WAV、不轉檔：{self.path}{RESET}", flush=True)
+            return self.path
         if self._data_size == 0:          # 一開始磁碟空間就不夠、一個樣本都沒錄：不必轉檔
             return self.path
         self._convert()
@@ -12976,7 +13338,9 @@ def _diarize_segments_legacy(wav_path, segments, num_speakers=None, sbar=None):
         import librosa
         wav, _ = librosa.load(wav_path, sr=sr, mono=True)
         _per_segment_trim = True
-    except Exception:
+    except Exception as e:
+        # 舊做法整檔修剪靜音，時間軸會錯位（v2.20.0 修掉的問題：檔尾偏移近 6 分鐘），不可以不說（2026-10-05）
+        print(f"  [講者辨識] 讀取音檔失敗（{type(e).__name__}: {e}），改用舊的讀法；講者與時間可能對不準", flush=True)
         wav = preprocess_wav(wav_path)      # 退而求其次，維持舊行為
         _per_segment_trim = False
 
@@ -13399,7 +13763,7 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
         print(f"  {C_WHITE}載入模型    {model_size}（{_engine_label}）...{RESET}", end=" ", flush=True)
         model = None
         if not _nan_mlx:
-            model = _call_with_ssl_retry(WhisperModel, _resolve_fw_model(model_size),
+            model = _call_with_ssl_retry(_FwModel, _resolve_fw_model(model_size),
                                          **_fw_device_kwargs())
         print(f"{C_OK}✓{RESET}")
         print(f"  {C_WHITE}辨識中...{RESET}\n")
@@ -13885,7 +14249,7 @@ def process_bidi_audio_files(lb_path, mic_path, mode, translator_lb, translator_
                 return [], _loose
 
             print(f"  {C_WHITE}{label} 載入模型 {model_size}...{RESET}", end=" ", flush=True)
-            model = _call_with_ssl_retry(WhisperModel, _resolve_fw_model(model_size), **_fw_device_kwargs())
+            model = _call_with_ssl_retry(_FwModel, _resolve_fw_model(model_size), **_fw_device_kwargs())
             print(f"{C_OK}✓{RESET}")
 
             sbar = _SummaryStatusBar(model=model_size, task=f"{label} 辨識中", asr_location="本機").start()
