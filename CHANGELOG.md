@@ -1,5 +1,22 @@
 # Changelog
 
+### v2.26.15 (2026-10-06)
+
+**Windows：開即時字幕時跳出「SDL2.dll was not found」，而且程式卡住**
+- 安裝程式編譯完 whisper.cpp 之後，從來沒有把 `SDL2.dll` 放到 `whisper-stream.exe` 旁邊（新版 whisper.cpp 編譯時也不會自己放），
+  所以 `whisper-stream.exe` 根本無法執行。開即時字幕時程式會先用它列出音訊裝置，Windows 就跳出系統錯誤視窗，即時字幕一直等到有人按「確定」
+- `install.ps1`：編譯完把 `SDL2.dll` 放到 `whisper-stream.exe` 旁邊；已經編譯過的，重新執行 `.\install.ps1` 會補上
+- 主程式：`whisper-stream.exe` 旁邊（與 PATH）都找不到 `SDL2.dll` 時視為不能用，即時辨識改用 faster-whisper 並說明怎麼修；
+  執行 `whisper-stream.exe` 時不再讓 Windows 跳出錯誤視窗（缺任何 DLL 都直接失敗、改用其他方式，不會卡住）
+- 實測：全新安裝的 Windows 11 重跑 `install.ps1` 編出 whisper.cpp 後重現；修正後同一台不跳視窗、即時英翻中正常
+
+**Windows：照 README 安裝完，`.\start.ps1` 與 `.\install.ps1 -Upgrade` 被擋（「因為這個系統上已停用指令碼執行」）**
+- Windows 預設不允許執行 PowerShell 腳本。安裝指令用 `-ExecutionPolicy Bypass` 只對那一次有效，安裝完畫面上寫的啟動方式卻是 `.\start.ps1`
+- 安裝結束時判斷之後會不會被擋，會的話詢問是否允許執行本機腳本（RemoteSigned，只影響目前使用者，預設「是」）；
+  沒有人可以回答時不變更、說明怎麼設；群組原則鎖住時照實說明。仍會被擋時，畫面上的啟動與升級方式改寫成 `powershell -ExecutionPolicy Bypass -File ...`
+- 拿掉安裝程式開頭的執行原則檢查：它看的範圍在新電腦上永遠是「未設定」，從來沒有作用；反而在使用者明確設成 Restricted、用 Bypass 執行安裝時會誤擋
+- 桌面捷徑不受影響（本來就用 Bypass 啟動）
+
 ### v2.26.14 (2026-10-06)
 
 **Windows 第一次安裝後，即時字幕開不起來（「找不到 whisper-stream」）**

@@ -29,16 +29,10 @@ if (-not $PSVersionTable) {
     exit 1
 }
 
-# ─── 執行權限檢查 ────────────────────────────────────────────
-$execPolicy = Get-ExecutionPolicy -Scope CurrentUser
-if ($execPolicy -eq 'Restricted' -or $execPolicy -eq 'AllSigned') {
-    Write-Host ""
-    Write-Host "  [提醒] PowerShell 執行原則為 '$execPolicy'，可能無法執行腳本。" -ForegroundColor Yellow
-    Write-Host "  建議執行以下指令後重新啟動終端機：" -ForegroundColor Yellow
-    Write-Host "    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser" -ForegroundColor Cyan
-    Write-Host ""
-    exit 1
-}
+# ─── 執行權限 ────────────────────────────────────────────────
+# 這裡不檢查（v2.26.15 拿掉）：腳本既然已經在跑，執行原則就允許了這一次；以前看 -Scope CurrentUser，
+# 新電腦上是 Undefined 從不觸發，CurrentUser 明設 Restricted 而用 -ExecutionPolicy Bypass 執行的反而被擋下。
+# 之後的 .\start.ps1 會不會被擋，安裝最後由 ensure_script_execution 判斷並詢問
 
 # ─── 編碼設定 ─────────────────────────────────────────────────
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -370,6 +364,67 @@ function desktop_shortcut_is_current([string]$lnkPath) {
 }
 
 # $answer / $desktopDir / $programsDir 只給測試用：正常呼叫時問使用者、用目前使用者的桌面與「開始」功能表
+# ─── PowerShell 執行原則：裝完之後在一般 PowerShell 打 .\start.ps1 會不會被擋（v2.26.15）────
+# 安裝是用 -ExecutionPolicy Bypass 執行的（只對這個行程有效），之後打 .\start.ps1、.\install.ps1 -Upgrade 用的是
+# 其他範圍的設定；Windows 用戶端各範圍都沒設（Undefined）時實際是 Restricted → 被擋（2026-10-06 pc-002 照 README 新裝）。
+# 有人可以回答時問一次（預設是）；沒人可以回答時不改、只說明；群組原則鎖住的改不了、照實說
+function effective_policy_without_process {
+    foreach ($sc in 'MachinePolicy', 'UserPolicy', 'CurrentUser', 'LocalMachine') {
+        $p = "$(Get-ExecutionPolicy -Scope $sc)"
+        if ($p -ne 'Undefined') { return @($p, $sc) }
+    }
+    $client = $true
+    try { $client = ((Get-CimInstance Win32_OperatingSystem).ProductType -eq 1) } catch { }
+    if ($client) { return @('Restricted', 'Default') }
+    return @('RemoteSigned', 'Default')            # Windows Server 的預設
+}
+
+# 回傳 $true＝之後的 .\start.ps1 仍會被擋（安裝總結改寫成 powershell -ExecutionPolicy Bypass -File ...）
+function ensure_script_execution {
+    $pol, $sc = effective_policy_without_process
+    if ($pol -notin @('Restricted', 'AllSigned')) { return $false }
+    if ($sc -in @('MachinePolicy', 'UserPolicy')) {
+        check_notice "群組原則把 PowerShell 執行原則設成 $pol，無法直接執行 .\start.ps1"
+        return $true
+    }
+    if ([Console]::IsInputRedirected) {
+        check_notice "PowerShell 執行原則是 $pol，之後的 .\start.ps1 會被擋（沒有人可以回答，這次不變更）"
+        info "要允許的話執行一次：Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
+        return $true
+    }
+    Write-Host ""
+    check_notice "PowerShell 執行原則是 $pol：之後在 PowerShell 打 .\start.ps1、.\install.ps1 -Upgrade 會被擋"
+    info "可以允許執行本機腳本（RemoteSigned，只影響目前使用者；從網路下載、沒有簽章的腳本照樣擋）"
+    $ans = ("" + (Read-Host "  是否允許？(Y/n)")).Trim()
+    if ($ans -eq 'n' -or $ans -eq 'N') {
+        info "沒有變更；之後請用 powershell -ExecutionPolicy Bypass -File start.ps1"
+        return $true
+    }
+    try { Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop } catch { }
+    # 這個行程是 Bypass（範圍更優先），Set-ExecutionPolicy 會報「被更特定的範圍覆寫」，但設定已經寫入：以讀回的為準
+    if ("$(Get-ExecutionPolicy -Scope CurrentUser)" -eq 'RemoteSigned') {
+        Get-ChildItem -Path $SCRIPT_DIR -Filter *.ps1 -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+        check_ok "已允許執行本機腳本（目前使用者，RemoteSigned）"
+        return $false
+    }
+    check_notice "變更失敗；之後請用 powershell -ExecutionPolicy Bypass -File start.ps1"
+    return $true
+}
+
+# whisper-stream.exe 要找得到 SDL2.dll 才能執行。install.ps1 以前從沒把它複製到 exe 旁邊（新版 whisper.cpp 編譯時也不會），
+# 一執行 Windows 就跳「SDL2.dll was not found」對話框（2026-10-06 pc-002）。回傳 present / copied / missing
+function ensure_sdl2_dll([string]$exe, [string]$sdl2Dir) {
+    $dst = Join-Path (Split-Path $exe -Parent) "SDL2.dll"
+    if (Test-Path $dst) { return "present" }
+    if ($sdl2Dir) {
+        $src = Join-Path $sdl2Dir "lib\x64\SDL2.dll"
+        if (Test-Path $src) {
+            try { Copy-Item $src $dst -Force -ErrorAction Stop; return "copied" } catch { }
+        }
+    }
+    return "missing"
+}
+
 function offer_desktop_shortcut($answer = $null, $desktopDir = $null, $programsDir = $null) {
     $state = ""
     if (Test-Path $SHORTCUT_STATE_FILE) { $state = ((Get-Content $SHORTCUT_STATE_FILE -Raw) + "").Trim() }
@@ -440,7 +495,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.14 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.15 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -1504,6 +1559,10 @@ if ($true) {
         if ($existingExe) {
             $WHISPER_STREAM_EXE = $existingExe
             check_ok "whisper-stream 已編譯（${WHISPER_STREAM_EXE}）"
+            switch (ensure_sdl2_dll $WHISPER_STREAM_EXE $sdl2Dir) {
+                "copied"  { check_ok "已補上 SDL2.dll（先前缺少，whisper-stream 無法執行）" }
+                "missing" { check_notice "找不到 SDL2.dll，whisper-stream 無法執行；即時辨識會改用 faster-whisper" }
+            }
         } else {
             $cmakeArgs = @(
                 "-S", $WHISPER_CPP_DIR,
@@ -1583,6 +1642,9 @@ if ($true) {
                 if ($WHISPER_STREAM_EXE) {
                     check_ok "whisper.cpp 編譯完成（${buildDesc}）"
                     check_ok "whisper-stream: $WHISPER_STREAM_EXE"
+                    if ((ensure_sdl2_dll $WHISPER_STREAM_EXE $sdl2Dir) -eq "missing") {
+                        check_notice "找不到 SDL2.dll，whisper-stream 無法執行；即時辨識會改用 faster-whisper"
+                    }
                 } else {
                     check_fail "whisper.cpp 編譯完成但找不到 whisper-stream.exe"
                     info "請檢查 build 資料夾內容"
@@ -2915,9 +2977,15 @@ if ($GPU_AVAILABLE) {
     Write-Host "  ${C_DIM}建議搭配區域網路 LLM 伺服器使用（--llm-host）${NC}"
 }
 
+$SCRIPTS_BLOCKED = ensure_script_execution
 Write-Host ""
-Write-Host "  ${C_WHITE}啟動方式: ${C_OK}.\start.ps1${NC}"
-Write-Host "  ${C_WHITE}升級方式: ${C_OK}.\install.ps1 -Upgrade${NC}"
+if ($SCRIPTS_BLOCKED) {
+    Write-Host "  ${C_WHITE}啟動方式: ${C_OK}powershell -ExecutionPolicy Bypass -File start.ps1${NC}"
+    Write-Host "  ${C_WHITE}升級方式: ${C_OK}powershell -ExecutionPolicy Bypass -File install.ps1 -Upgrade${NC}"
+} else {
+    Write-Host "  ${C_WHITE}啟動方式: ${C_OK}.\start.ps1${NC}"
+    Write-Host "  ${C_WHITE}升級方式: ${C_OK}.\install.ps1 -Upgrade${NC}"
+}
 Write-Host ""
 Write-Host "  ${C_DIM}提示：若日後將此資料夾搬移到其他位置，請重新執行 .\install.ps1${NC}"
 Write-Host "  ${C_DIM}      安裝程式會自動偵測並修復因路徑變更而損壞的環境${NC}"

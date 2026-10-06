@@ -1,4 +1,4 @@
-# jt-live-whisper v2.26.14
+# jt-live-whisper v2.26.15
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -347,6 +347,8 @@ irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/instal
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
+
+> **Windows 的 PowerShell 預設不允許執行腳本**：上面用 `-ExecutionPolicy Bypass` 只對這一次有效。安裝結束時會問「是否允許執行本機腳本」（RemoteSigned，只影響目前使用者），**建議選「是」**，之後才能直接打 `.\start.ps1`、`.\install.ps1 -Upgrade`；選「否」的話改用 `powershell -ExecutionPolicy Bypass -File start.ps1`（v2.26.15 起）。
 
 安裝腳本會自動下載並設定所有地端 AI 模型和相依套件（Whisper 語音辨識模型、Moonshine 串流辨識模型、NLLB 離線翻譯模型、Argos 離線翻譯模型等）。安裝最後會詢問是否設定 GPU 語音辨識伺服器（選填），若有安裝 NVIDIA GPU 的 Ubuntu/Linux 主機（消費級 RTX 4090/5090 亦可，需已安裝 CUDA），可透過 SSH 自動在伺服器安裝 PyTorch、faster-whisper 等套件，大幅加速語音辨識。
 

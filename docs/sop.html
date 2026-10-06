@@ -109,6 +109,7 @@
       <a class="lv3" href="#q-可以用---input-處理影片檔嗎">Q: 可以用 --input 處理影片檔嗎？</a>
       <a class="lv3" href="#q-使用-lm-studio-janai-等-openai-相容伺服器時為什麼有些模型沒有列出">Q: 使用 LM Studio / jan.ai 等 OpenAI 相容伺服器時，為什麼有些模型沒有列出？</a>
       <a class="lv3" href="#q-windows-上-powershell-執行原則限制無法執行-ps1-腳本windows">Q: Windows 上 PowerShell 執行原則限制，無法執行 .ps1 腳本？（Windows）</a>
+      <a class="lv3" href="#q-windows-上跳出whisper-streamexe---system-errorsdl2dll-was-not-foundwindows">Q: Windows 上跳出「whisper-stream.exe - System Error：SDL2.dll was not found」？（Windows）</a>
       <a class="lv3" href="#q-windows-上終端機顯示亂碼或色彩不正常windows">Q: Windows 上終端機顯示亂碼或色彩不正常？（Windows）</a>
       <a class="lv3" href="#q-windows-上找不到-stereo-mixwindows">Q: Windows 上找不到 Stereo Mix？（Windows）</a>
       <a class="lv3" href="#q-windows-上開即時字幕出現找不到-whisper-streamwindows">Q: Windows 上開即時字幕出現「找不到 whisper-stream」？（Windows）</a>
@@ -132,7 +133,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.14 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.15 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -734,6 +735,9 @@ bash install.sh --server
 <p>執行安裝：</p>
 <pre><code class="language-powershell">powershell -ExecutionPolicy Bypass -File install.ps1
 </code></pre>
+<blockquote>
+<p><strong>Windows 的 PowerShell 預設不允許執行腳本</strong>：上面用 <code>-ExecutionPolicy Bypass</code> 只對這一次有效。安裝結束時會問「是否允許執行本機腳本」（RemoteSigned，只影響目前使用者），<strong>建議選「是」</strong>，之後才能直接打 <code>.\start.ps1</code>、<code>.\install.ps1 -Upgrade</code>；選「否」的話改用 <code>powershell -ExecutionPolicy Bypass -File start.ps1</code>（v2.26.15 起）。</p>
+</blockquote>
 <p>安裝腳本會自動檢查並安裝以下項目：</p>
 <blockquote>
 <p><strong>首次安裝預估時間：約 10～20 分鐘</strong>（視網路速度而定）。主要耗時項目：</p>
@@ -1322,7 +1326,8 @@ cd C:\jt-live-whisper
 </code></pre>
 <blockquote>
 <p><strong>Windows 使用者請注意：</strong> 以下範例以 macOS / Linux 指令為主。Windows 使用者請將 <code>./start.sh</code> 替換為 <code>.\start.ps1</code>，<code>./install.sh</code> 替換為 <code>.\install.ps1</code>，安裝目錄為 <code>C:\jt-live-whisper</code>。其餘參數完全相同。</p>
-<p>若出現「running scripts is disabled on this system」錯誤，請先執行以下指令（只需執行一次）：</p>
+<p>若出現「running scripts is disabled on this system」（因為這個系統上已停用指令碼執行）錯誤，請先執行以下指令（只需執行一次）；
+v2.26.15 起安裝程式結束時會詢問並代為設定：</p>
 <pre><code class="language-powershell">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 </code></pre>
 </blockquote>
@@ -3716,9 +3721,14 @@ sudo systemctl restart jtlw-api
 <h3 id="q-使用-lm-studio-janai-等-openai-相容伺服器時為什麼有些模型沒有列出">Q: 使用 LM Studio / jan.ai 等 OpenAI 相容伺服器時，為什麼有些模型沒有列出？</h3>
 <p>程式在列舉 OpenAI 相容伺服器的模型時，會自動過濾掉 <code>owned_by</code> 為 <code>remote</code> 的模型。這類模型通常是伺服器代理到其他後端（如 Ollama）的伺服器模型，當後端斷線時仍會殘留在模型清單中，選用後會導致翻譯失敗。如果需要使用伺服器模型，請直接連接該後端伺服器（例如直接指定 Ollama 的位址）。</p>
 <h3 id="q-windows-上-powershell-執行原則限制無法執行-ps1-腳本windows">Q: Windows 上 PowerShell 執行原則限制，無法執行 .ps1 腳本？（Windows）</h3>
-<p>開啟 PowerShell 執行以下指令，允許執行本機腳本：</p>
+<p>Windows 預設不允許執行 PowerShell 腳本（各範圍都沒設定時就是 Restricted），所以 <code>.\start.ps1</code>、<code>.\install.ps1 -Upgrade</code> 會出現「因為這個系統上已停用指令碼執行」。
+v2.26.15 起安裝程式結束時會詢問是否允許（選「是」就好）；之前裝的、或選了「否」的，開啟 PowerShell 執行一次：</p>
 <pre><code class="language-powershell">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 </code></pre>
+<p>不想變更設定的話，每次改用 <code>powershell -ExecutionPolicy Bypass -File start.ps1</code>。公司用群組原則鎖住執行原則時無法變更，也是用這個方式。桌面捷徑不受影響（捷徑本來就這樣啟動）。</p>
+<h3 id="q-windows-上跳出whisper-streamexe---system-errorsdl2dll-was-not-foundwindows">Q: Windows 上跳出「whisper-stream.exe - System Error：SDL2.dll was not found」？（Windows）</h3>
+<p>v2.26.14 以前的安裝程式編譯完 whisper.cpp 後，沒有把 <code>SDL2.dll</code> 放到 <code>whisper-stream.exe</code> 旁邊，開即時字幕時就跳出這個視窗，而且要按「確定」程式才會繼續。
+v2.26.15 起不會再跳視窗：缺 SDL2.dll 時即時辨識改用 faster-whisper；在安裝資料夾重新執行一次 <code>.\install.ps1</code> 會補上 SDL2.dll。</p>
 <h3 id="q-windows-上終端機顯示亂碼或色彩不正常windows">Q: Windows 上終端機顯示亂碼或色彩不正常？（Windows）</h3>
 <p>建議使用 <a href="https://apps.microsoft.com/detail/9n0dx20hk701">Windows Terminal</a>（Windows 11 內建，Windows 10 可從 Microsoft Store 安裝），不要使用舊版 cmd.exe。程式啟動時會自動啟用 Virtual Terminal Processing 以支援 ANSI 色彩碼。</p>
 <h3 id="q-windows-上找不到-stereo-mixwindows">Q: Windows 上找不到 Stereo Mix？（Windows）</h3>

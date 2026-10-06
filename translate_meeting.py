@@ -2507,7 +2507,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.14"
+APP_VERSION = "2.26.15"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3894,12 +3894,42 @@ APP_NAME = f"jt-live-whisper v{APP_VERSION} - 100% 全地端 AI 語音工具箱"
 APP_AUTHOR = "by Jason Cheng (Jason Tools)"
 
 
+def _win_whisper_stream_problem():
+    """Windows 的 whisper-stream 不能用的原因（能用回傳 None；非 Windows 一律 None）。
+    - 沒有 whisper.cpp：第一次安裝一定如此，C++ 編譯器是安裝當下才裝的，要重開終端機才生效
+      （2026-10-06 Win11 實機照 README 新裝後，即時字幕直接「找不到 whisper-stream」結束，v2.26.14 修）
+    - 有 whisper-stream.exe 但找不到 SDL2.dll：install.ps1 從來沒把它複製到 exe 旁邊（v2.26.15 起會），
+      一執行 Windows 就跳「SDL2.dll was not found」對話框，即時字幕卡到有人按確定（2026-10-06 pc-002）
+    Windows 擷取系統音訊走 WASAPI，SDL2 本來就讀不到，faster-whisper 才是主要路徑；whisper-stream 能用時行為不變"""
+    if not IS_WINDOWS:
+        return None
+    if not os.path.isfile(WHISPER_STREAM):
+        return "沒有 whisper.cpp"
+    dirs = [os.path.dirname(WHISPER_STREAM)] + [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    if not any(os.path.isfile(os.path.join(d, "SDL2.dll")) for d in dirs):
+        return f"whisper.cpp 缺 SDL2.dll（重新執行 {_INSTALL_CMD} 可修復）"
+    return None
+
+
 def _win_without_whisper_stream():
-    """Windows 沒有 whisper.cpp（whisper-stream.exe）：即時辨識一律走 Python 端 faster-whisper。
-    第一次安裝一定會遇到：C++ 編譯器是安裝當下才裝的，要重開終端機才生效，whisper.cpp 這一輪編不出來
-    （2026-10-06 Win11 實機照 README 新裝後，即時字幕直接「找不到 whisper-stream」結束）。
-    Windows 擷取系統音訊走 WASAPI，SDL2 本來就讀不到，faster-whisper 才是主要路徑；有 whisper.cpp 時行為不變"""
-    return IS_WINDOWS and not os.path.isfile(WHISPER_STREAM)
+    """Windows 的 whisper-stream 不能用（不存在或缺 SDL2.dll）：即時辨識一律走 Python 端 faster-whisper"""
+    return _win_whisper_stream_problem() is not None
+
+
+def _no_windows_error_dialogs():
+    """Windows：接下來啟動的子行程缺 DLL 等載入錯誤時不跳系統對話框（子行程繼承錯誤模式），直接失敗返回。
+    否則對話框擋在使用者桌面，程式一直等到有人按確定（2026-10-06 whisper-stream 缺 SDL2.dll）。
+    回傳還原用的函式：old = _no_windows_error_dialogs(); try: Popen(...) finally: old()"""
+    if not IS_WINDOWS:
+        return lambda: None
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        prev = k.SetErrorMode(0)
+        k.SetErrorMode(prev | 0x0001 | 0x0002 | 0x8000)   # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
+        return lambda: k.SetErrorMode(prev)
+    except Exception:
+        return lambda: None
 
 
 def check_dependencies(asr_engine="whisper", translate_engine=None):
@@ -3908,7 +3938,7 @@ def check_dependencies(asr_engine="whisper", translate_engine=None):
     if asr_engine == "whisper" and _win_without_whisper_stream():
         import importlib.util
         if importlib.util.find_spec("faster_whisper") is None:
-            errors.append(f"找不到 whisper-stream（{WHISPER_STREAM}），也沒有安裝 faster-whisper，"
+            errors.append(f"whisper-stream 不能用（{_win_whisper_stream_problem()}），也沒有安裝 faster-whisper，"
                           f"請執行 {_INSTALL_CMD} 安裝")
     elif asr_engine == "whisper" and not IS_LINUX and not os.path.isfile(WHISPER_STREAM):
         errors.append(f"找不到 whisper-stream: {WHISPER_STREAM}")
@@ -4171,15 +4201,19 @@ def select_scene():
 
 def _enumerate_sdl_devices(model_path):
     """列舉 SDL2 音訊捕捉裝置（透過 whisper-stream），回傳 [(id, name), ...]"""
-    if not os.path.isfile(WHISPER_STREAM):
-        return []                   # 沒有編譯 whisper.cpp：沒有 SDL2 裝置可列（以前直接丟 FileNotFoundError）
-    proc = subprocess.Popen(
-        [WHISPER_STREAM, "-m", model_path, "-c", "999", "--length", "1000"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace",
-        **_SUBPROCESS_FLAGS,
-    )
+    if not os.path.isfile(WHISPER_STREAM) or _win_without_whisper_stream():
+        return []                   # whisper-stream 不存在或缺 SDL2.dll：沒有 SDL2 裝置可列（以前丟 FileNotFoundError／跳對話框卡住）
+    _restore = _no_windows_error_dialogs()
+    try:
+        proc = subprocess.Popen(
+            [WHISPER_STREAM, "-m", model_path, "-c", "999", "--length", "1000"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            **_SUBPROCESS_FLAGS,
+        )
+    finally:
+        _restore()
 
     devices = []
     deadline = time.monotonic() + 30
@@ -7313,12 +7347,16 @@ def run_stream(capture_id: int, translator, model_name: str, model_path: str,
 
     cmd.extend(["-f", output_file])
 
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        **_SUBPROCESS_FLAGS,
-    )
+    _restore = _no_windows_error_dialogs()      # 缺 DLL 時直接失敗，不跳對話框卡住
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            **_SUBPROCESS_FLAGS,
+        )
+    finally:
+        _restore()
 
     # 啟動錄音串流（在 subprocess 啟動後）
     if rec_stream:
@@ -18342,7 +18380,7 @@ def main():
             # Linux 不編譯 whisper.cpp，本機即時辨識一律走 Python 端
             _cli_use_local_fw = _is_nan_mode(mode) or IS_LINUX or _win_without_whisper_stream()
             if _win_without_whisper_stream():
-                print(f"{C_DIM}  沒有 whisper.cpp，即時辨識使用 faster-whisper 本機辨識{RESET}")
+                print(f"{C_DIM}  {_win_whisper_stream_problem()}，即時辨識使用 faster-whisper 本機辨識{RESET}")
             if args.device is not None:
                 capture_id = args.device
                 if _is_sys_audio_device(capture_id):
@@ -18660,8 +18698,8 @@ def main():
                 print(f"\n{C_DIM}  Linux 本機辨識使用 faster-whisper"
                       f"{'（CUDA）' if _fw_local_cuda_ok() else '（CPU）'}{RESET}")
             if IS_WINDOWS and asr_engine == "whisper" and _win_without_whisper_stream():
-                _use_local_fw = True  # 沒有 whisper.cpp（第一次安裝一定如此）：一律 faster-whisper
-                print(f"\n{C_DIM}  沒有 whisper.cpp，即時辨識使用 faster-whisper 本機辨識{RESET}")
+                _use_local_fw = True  # whisper-stream 不能用（沒有 whisper.cpp、缺 SDL2.dll）：一律 faster-whisper
+                print(f"\n{C_DIM}  {_win_whisper_stream_problem()}，即時辨識使用 faster-whisper 本機辨識{RESET}")
             elif IS_WINDOWS and asr_engine == "whisper" and _find_wasapi_loopback():
                 _, _probe_path = resolve_model("large-v3-turbo")
                 _sdl_devs = _enumerate_sdl_devices(_probe_path)

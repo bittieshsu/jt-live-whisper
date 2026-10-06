@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.26.14 (by Jason Cheng)
+即時英翻中字幕系統 v2.26.15 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -453,6 +453,8 @@ irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/instal
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
+> **Windows 的 PowerShell 預設不允許執行腳本**：上面用 `-ExecutionPolicy Bypass` 只對這一次有效。安裝結束時會問「是否允許執行本機腳本」（RemoteSigned，只影響目前使用者），**建議選「是」**，之後才能直接打 `.\start.ps1`、`.\install.ps1 -Upgrade`；選「否」的話改用 `powershell -ExecutionPolicy Bypass -File start.ps1`（v2.26.15 起）。
+
 安裝腳本會自動檢查並安裝以下項目：
 
 > **首次安裝預估時間：約 10～20 分鐘**（視網路速度而定）。主要耗時項目：
@@ -813,7 +815,8 @@ cd C:\jt-live-whisper
 
 > **Windows 使用者請注意：** 以下範例以 macOS / Linux 指令為主。Windows 使用者請將 `./start.sh` 替換為 `.\start.ps1`，`./install.sh` 替換為 `.\install.ps1`，安裝目錄為 `C:\jt-live-whisper`。其餘參數完全相同。
 >
-> 若出現「running scripts is disabled on this system」錯誤，請先執行以下指令（只需執行一次）：
+> 若出現「running scripts is disabled on this system」（因為這個系統上已停用指令碼執行）錯誤，請先執行以下指令（只需執行一次）；
+> v2.26.15 起安裝程式結束時會詢問並代為設定：
 > ```powershell
 > Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
@@ -2649,10 +2652,16 @@ pyannote.audio 是目前最知名的講者辨識框架，但使用上有以下�
 程式在列舉 OpenAI 相容伺服器的模型時，會自動過濾掉 `owned_by` 為 `remote` 的模型。這類模型通常是伺服器代理到其他後端（如 Ollama）的伺服器模型，當後端斷線時仍會殘留在模型清單中，選用後會導致翻譯失敗。如果需要使用伺服器模型，請直接連接該後端伺服器（例如直接指定 Ollama 的位址）。
 
 ### Q: Windows 上 PowerShell 執行原則限制，無法執行 .ps1 腳本？（Windows）
-開啟 PowerShell 執行以下指令，允許執行本機腳本：
+Windows 預設不允許執行 PowerShell 腳本（各範圍都沒設定時就是 Restricted），所以 `.\start.ps1`、`.\install.ps1 -Upgrade` 會出現「因為這個系統上已停用指令碼執行」。
+v2.26.15 起安裝程式結束時會詢問是否允許（選「是」就好）；之前裝的、或選了「否」的，開啟 PowerShell 執行一次：
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
+不想變更設定的話，每次改用 `powershell -ExecutionPolicy Bypass -File start.ps1`。公司用群組原則鎖住執行原則時無法變更，也是用這個方式。桌面捷徑不受影響（捷徑本來就這樣啟動）。
+
+### Q: Windows 上跳出「whisper-stream.exe - System Error：SDL2.dll was not found」？（Windows）
+v2.26.14 以前的安裝程式編譯完 whisper.cpp 後，沒有把 `SDL2.dll` 放到 `whisper-stream.exe` 旁邊，開即時字幕時就跳出這個視窗，而且要按「確定」程式才會繼續。
+v2.26.15 起不會再跳視窗：缺 SDL2.dll 時即時辨識改用 faster-whisper；在安裝資料夾重新執行一次 `.\install.ps1` 會補上 SDL2.dll。
 
 ### Q: Windows 上終端機顯示亂碼或色彩不正常？（Windows）
 建議使用 [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701)（Windows 11 內建，Windows 10 可從 Microsoft Store 安裝），不要使用舊版 cmd.exe。程式啟動時會自動啟用 Virtual Terminal Processing 以支援 ANSI 色彩碼。
