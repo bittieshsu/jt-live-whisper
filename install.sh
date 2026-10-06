@@ -214,7 +214,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.13 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.14 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -798,6 +798,18 @@ venv_problem() {
     return 1
 }
 
+# 套件載入檢查：$1=python、$2=模組名稱（逗號分隔＝任一個載入得了就算有）。
+# python-multipart 0.0.13 起模組改名 python_multipart，舊名 multipart 只剩相容層（已標淘汰）；
+# 只認舊名的話，等它拿掉相容層，今天新裝的機器會一直被判成缺少（pip 又回「已經裝了」），只認新名則舊版判錯
+_py_import_ok() {
+    local py="$1" m
+    local IFS=','
+    for m in $2; do
+        "$py" -c "import $m" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
 # ─── Python venv ─────────────────────────────────
 check_venv() {
     section "Python 虛擬環境"
@@ -903,7 +915,7 @@ check_venv() {
     if ! python3 -c "import websockets" &>/dev/null 2>&1; then
         missing_pkgs+=("websockets")
     fi
-    if ! python3 -c "import multipart" &>/dev/null 2>&1; then
+    if ! _py_import_ok python3 python_multipart,multipart; then
         missing_pkgs+=("python-multipart")
     fi
     if ! python3 -c "import PyQt6" &>/dev/null 2>&1; then

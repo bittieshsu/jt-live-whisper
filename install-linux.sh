@@ -228,7 +228,7 @@ check_linux_venv() {
         "fastapi|fastapi|fastapi（WebUI 伺服器）"
         "uvicorn|uvicorn|uvicorn（WebUI ASGI 伺服器）"
         "websockets|websockets|websockets（WebUI 即時通訊）"
-        "multipart|python-multipart|python-multipart（WebUI 檔案上傳）"
+        "python_multipart,multipart|python-multipart|python-multipart（WebUI 檔案上傳）"
         "huggingface_hub|huggingface_hub|huggingface_hub（模型下載）"
     )
     if [ "$LINUX_MODE" = "desktop" ]; then
@@ -242,7 +242,7 @@ check_linux_venv() {
     for item in "${pkgs[@]}"; do
         mod="${item%%|*}"; item="${item#*|}"
         pkg="${item%%|*}"; label="${item#*|}"
-        if python3 -c "import $mod" >/dev/null 2>&1; then
+        if _py_import_ok python3 "$mod"; then
             check_ok "${label}（已安裝）"
             continue
         fi
@@ -251,7 +251,7 @@ check_linux_venv() {
             pip install --quiet --disable-pip-version-check --only-binary=:all: llvmlite numba >/dev/null 2>&1 || true
         fi
         if run_spinner "$label ..." pip install --disable-pip-version-check "$pkg" \
-                && python3 -c "import $mod" >/dev/null 2>&1; then
+                && _py_import_ok python3 "$mod"; then
             echo ""
             check_ok "$label"
         else
@@ -619,8 +619,8 @@ PY
     if command -v systemctl >/dev/null 2>&1 && _api_unit_is_ours; then
         section "REST API 服務"
         local amod
-        for amod in "jsonschema|jsonschema" "multipart|python-multipart"; do
-            if "$VENV_DIR/bin/python3" -c "import ${amod%%|*}" >/dev/null 2>&1; then
+        for amod in "jsonschema|jsonschema" "python_multipart,multipart|python-multipart"; do
+            if _py_import_ok "$VENV_DIR/bin/python3" "${amod%%|*}"; then
                 check_ok "${amod#*|}"
             else
                 _dr_fail "${amod#*|} 無法載入（請執行 ./install.sh --server）"

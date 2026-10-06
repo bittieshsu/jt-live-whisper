@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.26.13 (by Jason Cheng)
+即時英翻中字幕系統 v2.26.14 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -147,7 +147,7 @@ jt-live-whisper/
   logs/                    記錄檔、摘要檔、HTML 逐字稿（自動建立）
   recordings/              暫存音訊轉檔（自動建立）
   api_data/                REST API 的作業紀錄、上傳暫存、憑證（啟用 API 後自動建立）
-  whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 下載預編譯版本）
+  whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 自動編譯且為選用）
   venv/                    Python 虛擬環境
 ```
 
@@ -456,7 +456,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 安裝腳本會自動檢查並安裝以下項目：
 
 > **首次安裝預估時間：約 10～20 分鐘**（視網路速度而定）。主要耗時項目：
-> - whisper.cpp 編譯：約 3～5 分鐘（macOS 需從原始碼編譯；Windows 下載預編譯版本，較快）
+> - whisper.cpp 編譯：約 3～5 分鐘（macOS、Windows 都從原始碼編譯；Windows 第一次還要先裝 Visual Studio C++ 編譯器，約 2～6 GB）
 > - whisper 模型下載：約 3～10 分鐘（large-v3-turbo 約 809MB）
 > - Argos 翻譯模型下載與安裝：約 2～3 分鐘
 >
@@ -487,7 +487,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 |---|---|
 | [Python 3.12+](https://www.python.org/downloads/) | 從 python.org 下載安裝（安裝時勾選「Add to PATH」） |
 | ffmpeg | 音訊轉檔工具（`winget install ffmpeg` 或從 [ffmpeg.org](https://ffmpeg.org/download.html) 下載） |
-| whisper.cpp | 即時語音辨識引擎（自動下載預編譯版本） |
+| whisper.cpp | 即時語音辨識引擎（選用；自動安裝 CMake 與 Visual Studio C++ 編譯器後從原始碼編譯，沒有時即時辨識改用 faster-whisper） |
 | whisper 模型 | 語音辨識模型（預設下載 large-v3-turbo） |
 | Python venv | 虛擬環境 + ctranslate2、sentencepiece、sounddevice、numpy、faster-whisper、resemblyzer、spectralcluster |
 | Moonshine ASR | 英文串流語音辨識引擎 + medium 模型 (~245MB) |
@@ -515,7 +515,9 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 > **Linux 不需要：** whisper.cpp、BlackHole、虛擬音效卡。Linux 的即時辨識一律使用 faster-whisper，系統音訊從 PipeWire / PulseAudio 的 monitor 來源擷取。從 Mac 複製過來的 `config.json` 若含有 `/Users/...` 的 SSH Key 路徑，安裝程式會自動改成 `~/.ssh/` 底下的同名檔案。
 
-> **Windows 不需要：** Homebrew、cmake、sdl2、BlackHole。Windows 的 whisper.cpp 使用預編譯版本，不需要從原始碼編譯。音訊擷取使用 WASAPI Loopback，不需要虛擬音訊驅動。
+> **Windows 不需要：** Homebrew、BlackHole。音訊擷取使用 WASAPI Loopback，不需要虛擬音訊驅動。
+>
+> **Windows 的 whisper.cpp 是選用的**：安裝程式會自動安裝 CMake、Visual Studio C++ 編譯器並從原始碼編譯。編譯器是安裝當下才裝的，要**重新開啟 PowerShell 後再執行一次 `.\install.ps1`** 才會編譯；沒有 whisper.cpp 時即時辨識改用 faster-whisper（Python 端），功能照常（v2.26.14 起；先前會出現「找不到 whisper-stream」而無法開始）。
 
 **GPU 語音辨識伺服器（選填）：**
 
@@ -2658,6 +2660,11 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ### Q: Windows 上找不到 Stereo Mix？（Windows）
 部分音效驅動不提供 Stereo Mix，可嘗試更新音效驅動程式。大多數現代 Windows 系統可透過 WASAPI Loopback 模式運作，不一定需要 Stereo Mix。程式會自動偵測可用的 loopback 裝置。
 
+### Q: Windows 上開即時字幕出現「找不到 whisper-stream」？（Windows）
+v2.26.13 以前，Windows 沒有編譯 whisper.cpp 時即時字幕無法開始。第一次安裝一定會遇到：Visual Studio C++ 編譯器是安裝當下才裝的，要重開終端機才生效，所以 whisper.cpp 這一輪編不出來（安裝畫面會說「C++ 編譯器安裝完成，但要重新開啟終端機」）。
+v2.26.14 起沒有 whisper.cpp 時即時辨識改用 faster-whisper，可以直接使用；升級：在安裝資料夾執行 `.\install.ps1 -Upgrade`。
+想要 whisper.cpp 的話，重新開啟 PowerShell 後再執行一次 `.\install.ps1`。
+
 ### Q: Windows 上有 NVIDIA 顯示卡，卻出現「cublas64_12.dll is not found」或「顯示卡（CUDA）不能用來辨識」？（Windows）
 本機辨識（faster-whisper）用顯示卡時需要 CUDA 12 的 cuBLAS 與 cuDNN 9，這些**不包含在顯示卡驅動裡**。
 v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝的 `nvidia-cublas-cu12`／`nvidia-cudnn-cu12`、CUDA Toolkit 找；
@@ -2693,7 +2700,7 @@ v2.26.13 起，`.\install.ps1` 最後會實際載入每個套件，被擋下的�
 | `subtitle_overlay.py` | 懸浮字幕覆蓋視窗（PyQt6，啟用時由主程式自動啟動） |
 | `remote_whisper_server.py` | GPU 伺服器程式（FastAPI，由 install.sh 自動部署到伺服器） |
 | `~/jt-whisper-server/venv-qwen/`（GPU 伺服器上） | Qwen3-ASR 的獨立環境（選配，手動建立，見「Qwen3-ASR（實驗）」的 GPU 伺服器安裝）；記錄在 `/tmp/jt-qwen-worker-<埠號>.log` |
-| `whisper.cpp/` | Whisper 語音辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用） |
+| `whisper.cpp/` | Whisper 語音辨識引擎（macOS 自動編譯，Windows 自動編譯且為選用，Linux 不使用） |
 | `venv/` | Python 虛擬環境（自動建立） |
 | `config.json` | 使用者設定檔（自動產生，含 LLM 伺服器位址、GPU 伺服器設定、錄音格式等） |
 | `{模式}_逐字稿_*.txt` | 翻譯/轉錄記錄檔（自動產生），模式：英翻中/中翻英/日翻中/中翻日/英文/中文/日文/英中雙向/日中雙向 |

@@ -2507,7 +2507,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.13"
+APP_VERSION = "2.26.14"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3894,10 +3894,23 @@ APP_NAME = f"jt-live-whisper v{APP_VERSION} - 100% 全地端 AI 語音工具箱"
 APP_AUTHOR = "by Jason Cheng (Jason Tools)"
 
 
+def _win_without_whisper_stream():
+    """Windows 沒有 whisper.cpp（whisper-stream.exe）：即時辨識一律走 Python 端 faster-whisper。
+    第一次安裝一定會遇到：C++ 編譯器是安裝當下才裝的，要重開終端機才生效，whisper.cpp 這一輪編不出來
+    （2026-10-06 Win11 實機照 README 新裝後，即時字幕直接「找不到 whisper-stream」結束）。
+    Windows 擷取系統音訊走 WASAPI，SDL2 本來就讀不到，faster-whisper 才是主要路徑；有 whisper.cpp 時行為不變"""
+    return IS_WINDOWS and not os.path.isfile(WHISPER_STREAM)
+
+
 def check_dependencies(asr_engine="whisper", translate_engine=None):
     """檢查所有必要檔案是否存在"""
     errors = []
-    if asr_engine == "whisper" and not IS_LINUX and not os.path.isfile(WHISPER_STREAM):
+    if asr_engine == "whisper" and _win_without_whisper_stream():
+        import importlib.util
+        if importlib.util.find_spec("faster_whisper") is None:
+            errors.append(f"找不到 whisper-stream（{WHISPER_STREAM}），也沒有安裝 faster-whisper，"
+                          f"請執行 {_INSTALL_CMD} 安裝")
+    elif asr_engine == "whisper" and not IS_LINUX and not os.path.isfile(WHISPER_STREAM):
         errors.append(f"找不到 whisper-stream: {WHISPER_STREAM}")
     if asr_engine == "moonshine" and not _MOONSHINE_AVAILABLE:
         errors.append("moonshine-voice 未安裝，請執行: pip install moonshine-voice sounddevice numpy")
@@ -4158,6 +4171,8 @@ def select_scene():
 
 def _enumerate_sdl_devices(model_path):
     """列舉 SDL2 音訊捕捉裝置（透過 whisper-stream），回傳 [(id, name), ...]"""
+    if not os.path.isfile(WHISPER_STREAM):
+        return []                   # 沒有編譯 whisper.cpp：沒有 SDL2 裝置可列（以前直接丟 FileNotFoundError）
     proc = subprocess.Popen(
         [WHISPER_STREAM, "-m", model_path, "-c", "999", "--length", "1000"],
         stdout=subprocess.PIPE,
@@ -18325,11 +18340,15 @@ def main():
             # WASAPI Loopback 與 ScreenCaptureKit 都不是 SDL2 裝置，whisper-stream 讀不到
             # 台語只有 Breeze-ASR-26，whisper.cpp 沒有對應的 ggml 模型，一律走 Python 端
             # Linux 不編譯 whisper.cpp，本機即時辨識一律走 Python 端
-            _cli_use_local_fw = _is_nan_mode(mode) or IS_LINUX
+            _cli_use_local_fw = _is_nan_mode(mode) or IS_LINUX or _win_without_whisper_stream()
+            if _win_without_whisper_stream():
+                print(f"{C_DIM}  沒有 whisper.cpp，即時辨識使用 faster-whisper 本機辨識{RESET}")
             if args.device is not None:
                 capture_id = args.device
                 if _is_sys_audio_device(capture_id):
                     _cli_use_local_fw = True
+            elif _win_without_whisper_stream():
+                capture_id = auto_select_device_sd()   # WASAPI Loopback 優先（不經 whisper-stream 列 SDL2 裝置）
             elif IS_MACOS and _sck_available():
                 capture_id = auto_select_device_sd()
                 _cli_use_local_fw = True
@@ -18640,7 +18659,10 @@ def main():
                 _use_local_fw = True  # Linux：PipeWire / PulseAudio + faster-whisper
                 print(f"\n{C_DIM}  Linux 本機辨識使用 faster-whisper"
                       f"{'（CUDA）' if _fw_local_cuda_ok() else '（CPU）'}{RESET}")
-            if IS_WINDOWS and asr_engine == "whisper" and _find_wasapi_loopback():
+            if IS_WINDOWS and asr_engine == "whisper" and _win_without_whisper_stream():
+                _use_local_fw = True  # 沒有 whisper.cpp（第一次安裝一定如此）：一律 faster-whisper
+                print(f"\n{C_DIM}  沒有 whisper.cpp，即時辨識使用 faster-whisper 本機辨識{RESET}")
+            elif IS_WINDOWS and asr_engine == "whisper" and _find_wasapi_loopback():
                 _, _probe_path = resolve_model("large-v3-turbo")
                 _sdl_devs = _enumerate_sdl_devices(_probe_path)
                 if not _sdl_devs:

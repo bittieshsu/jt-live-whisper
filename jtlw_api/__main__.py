@@ -15,11 +15,16 @@ import sys
 # 缺套件時講清楚缺什麼、怎麼補（v2.25.1 起公開：照手冊安裝的機器若沒跑伺服器模式，
 # 或是舊版升上來還沒補裝，直接 import 會噴一長串 ImportError，看不出該做什麼）
 _missing = []
-for _mod, _pkg in (("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("jsonschema", "jsonschema"),
-                   ("multipart", "python-multipart")):
-    try:
-        __import__(_mod)
-    except ImportError:
+# python-multipart：0.0.13 起模組是 python_multipart，舊版只有 multipart（新版的 multipart 只剩已標淘汰的相容層）
+for _mods, _pkg in ((("fastapi",), "fastapi"), (("uvicorn",), "uvicorn"), (("jsonschema",), "jsonschema"),
+                    (("python_multipart", "multipart"), "python-multipart")):
+    for _mod in _mods:
+        try:
+            __import__(_mod)
+            break
+        except ImportError:
+            pass
+    else:
         _missing.append(_pkg)
 if _missing:
     _pip = r"venv\Scripts\pip" if os.name == "nt" else "venv/bin/pip"

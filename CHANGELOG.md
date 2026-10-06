@@ -1,5 +1,22 @@
 # Changelog
 
+### v2.26.14 (2026-10-06)
+
+**Windows 第一次安裝後，即時字幕開不起來（「找不到 whisper-stream」）**
+- 在全新的 Windows 11 照 README 從零安裝時發現：Visual Studio C++ 編譯器是安裝當下才裝的，要重開終端機才生效，
+  所以第一次安裝一定編不出 whisper.cpp；接著開即時字幕（命令列、互動選單、WebUI 都一樣），程式在選辨識引擎之前就因為找不到 whisper-stream 結束
+- Windows 擷取系統音訊走 WASAPI，whisper.cpp 本來就讀不到，主要是用 faster-whisper 辨識。現在沒有 whisper.cpp 時一律改用 faster-whisper，
+  開始時說明一行；有 whisper.cpp 的機器行為不變。faster-whisper 也沒有時才說明要重新執行安裝程式
+- 實測：全新安裝的 Windows 11（沒有 whisper.cpp），喇叭播放英文會議錄音，即時英翻中正常（WASAPI 擷取、faster-whisper small、Argos 翻譯）
+- 安裝程式與手冊說明 whisper.cpp 在 Windows 是選用的；手冊更正：Windows 的 whisper.cpp 是從原始碼編譯（會自動安裝 CMake 與 C++ 編譯器），不是下載預編譯版本
+
+**全新安裝的其他小問題（Python 3.14、最新的 pip 與套件）**
+- `install.ps1`：pip 已是最新版時（新版 Python 自帶的都是），建立虛擬環境後會印出「The property 'name' cannot be found on this object」。
+  只是多一行錯誤訊息、不影響安裝，現在不會再出現
+- `install.ps1`：「請重新開啟終端機後再執行」的指令多了一條反斜線（`.\\install.ps1`）
+- python-multipart 新版的模組名稱改成 `python_multipart`，舊名 `multipart` 已標為淘汰。WebUI、REST API、安裝程式檢查這個套件時新舊名稱都認，
+  避免日後舊名拿掉時，新裝的機器一直被判成缺少
+
 ### v2.26.13 (2026-10-05)
 
 **Windows＋NVIDIA 顯示卡：本機辨識每一段都是「cublas64_12.dll is not found」（Windows 10＋RTX 3060 使用者回報）**

@@ -440,7 +440,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.13 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.14 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -993,7 +993,17 @@ $VENV_PYTHON = Join-Path $VENV_DIR "Scripts\python.exe"
 $VENV_PIP    = Join-Path $VENV_DIR "Scripts\pip.exe"
 
 # 升級 pip（僅首次建立 venv 時）
-$pipOutdated = & $VENV_PYTHON -m pip list --outdated --format=json 2>$null | ConvertFrom-Json | Where-Object { $_.name -eq "pip" }
+# 不可寫成 ConvertFrom-Json | Where-Object { $_.name ... }：PowerShell 5.1 把整個陣列當一個物件丟進管線，
+# pip 已是最新（新版 Python 自帶的都是）時清單是空的 []，StrictMode 下存取 .name 就印出錯誤（2026-10-06 Win11 新裝）
+$pipOutdated = $false
+$pipJson = (& $VENV_PYTHON -m pip list --outdated --format=json 2>$null) -join ""
+if ($pipJson) {
+    try {
+        foreach ($pkg in (ConvertFrom-Json $pipJson)) {
+            if ($pkg.PSObject.Properties["name"] -and $pkg.name -eq "pip") { $pipOutdated = $true }
+        }
+    } catch { }
+}
 if ($pipOutdated) {
     info "升級 pip..."
     & $VENV_PYTHON -m pip install --upgrade pip --quiet 2>$null
@@ -1371,8 +1381,9 @@ if ($true) {
             if ($hasMSVC) {
                 check_ok "Visual Studio C++ 編譯器安裝完成"
             } else {
-                check_notice "C++ 編譯器安裝完成，但需要重新開啟終端機"
-                info "請重新開啟終端機後再執行 .\\install.ps1"
+                check_notice "C++ 編譯器安裝完成，但要重新開啟終端機才能編譯 whisper.cpp"
+                info "whisper.cpp 是選用的：沒有它時即時辨識改用 faster-whisper，功能照常"
+                info "要編譯的話，重新開啟終端機後再執行 .\install.ps1"
                 $canBuild = $false
             }
         } else {
@@ -1642,8 +1653,8 @@ if ($true) {
             }
         }
     } else {
-        check_skip "缺少編譯工具，跳過 whisper.cpp"
-        info "仍可使用：離線模式、Moonshine 即時辨識、GPU 伺服器 即時辨識"
+        check_skip "缺少編譯工具，跳過 whisper.cpp（選用）"
+        info "即時辨識改用 faster-whisper；離線模式、Moonshine、GPU 伺服器都不受影響"
     }
 }
 
@@ -2880,7 +2891,12 @@ foreach ($feat in $features) {
 }
 
 $wsIcon = if ($WHISPER_STREAM_EXE) { "${C_OK}■${NC}" } else { "${C_DIM}□${NC}" }
-Write-Host "  ${wsIcon} Whisper 本機即時辨識  ${C_DIM}whisper.cpp${NC}"
+if ($WHISPER_STREAM_EXE) {
+    Write-Host "  ${wsIcon} Whisper 本機即時辨識  ${C_DIM}whisper.cpp${NC}"
+} else {
+    # 沒有 whisper.cpp 時即時辨識照樣能用（改用 faster-whisper，v2.26.14），不要讓人以為少了即時字幕
+    Write-Host "  ${C_OK}■${NC} Whisper 本機即時辨識  ${C_DIM}faster-whisper（whisper.cpp 未編譯，選用）${NC}"
+}
 
 # GPU 伺服器
 $rwCfgFinal = read_config

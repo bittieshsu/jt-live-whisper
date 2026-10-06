@@ -1,4 +1,4 @@
-# jt-live-whisper v2.26.13
+# jt-live-whisper v2.26.14
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -259,7 +259,7 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 | 元件 | 大小 | 說明 |
 |------|------|------|
 | Python venv + 套件 | ~1.1 GB | ctranslate2, faster-whisper, resemblyzer, spectralcluster 等 |
-| whisper.cpp | ~60 MB | macOS: 原始碼編譯；Windows: 預編譯版本；Linux: 不需要（改用 faster-whisper） |
+| whisper.cpp | ~60 MB | macOS: 原始碼編譯；Windows: 原始碼編譯（選用，沒有時即時辨識改用 faster-whisper）；Linux: 不需要（改用 faster-whisper） |
 | Whisper GGML 模型 | 1.5~6.4 GB | 預設 large-v3-turbo (1.5GB)；全部 5 個模型共 6.4 GB |
 | Moonshine 模型 | ~245 MB | 英文即時辨識（選用） |
 | NLLB 600M 翻譯模型 | ~600 MB | 離線翻譯（中日韓英互譯） |
@@ -728,7 +728,7 @@ jt-live-whisper/
   logs/                    轉錄記錄檔、AI 摘要檔、HTML 逐字稿（自動建立）
   recordings/              暫存音訊轉檔（自動建立）
   api_data/                REST API 的作業紀錄、上傳暫存、憑證（啟用 API 後自動建立）
-  whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用）
+  whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 自動編譯且為選用，Linux 不使用）
   venv/                    Python 虛擬環境（安裝時自動建立）
 ```
 

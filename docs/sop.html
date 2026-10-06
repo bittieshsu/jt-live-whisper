@@ -111,6 +111,7 @@
       <a class="lv3" href="#q-windows-上-powershell-執行原則限制無法執行-ps1-腳本windows">Q: Windows 上 PowerShell 執行原則限制，無法執行 .ps1 腳本？（Windows）</a>
       <a class="lv3" href="#q-windows-上終端機顯示亂碼或色彩不正常windows">Q: Windows 上終端機顯示亂碼或色彩不正常？（Windows）</a>
       <a class="lv3" href="#q-windows-上找不到-stereo-mixwindows">Q: Windows 上找不到 Stereo Mix？（Windows）</a>
+      <a class="lv3" href="#q-windows-上開即時字幕出現找不到-whisper-streamwindows">Q: Windows 上開即時字幕出現「找不到 whisper-stream」？（Windows）</a>
       <a class="lv3" href="#q-windows-上有-nvidia-顯示卡卻出現cublas64_12dll-is-not-found或顯示卡cuda不能用來辨識windows">Q: Windows 上有 NVIDIA 顯示卡，卻出現「cublas64_12.dll is not found」或「顯示卡（CUDA）不能用來辨識」？（Windows）</a>
       <a class="lv3" href="#q-windows-上出現應用程式控制原則已封鎖此檔案an-application-control-policy-has-blocked-this-filewindows">Q: Windows 上出現「應用程式控制原則已封鎖此檔案」（An Application Control policy has blocked this file）？（Windows）</a>
       <a class="lv3" href="#q-linux-上懸浮字幕沒有出現linux">Q: Linux 上懸浮字幕沒有出現？（Linux）</a>
@@ -131,7 +132,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.13 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.26.14 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -399,7 +400,7 @@ translate_meeting.py                            remote_whisper_server.py (FastAP
   logs/                    記錄檔、摘要檔、HTML 逐字稿（自動建立）
   recordings/              暫存音訊轉檔（自動建立）
   api_data/                REST API 的作業紀錄、上傳暫存、憑證（啟用 API 後自動建立）
-  whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 下載預編譯版本）
+  whisper.cpp/             whisper.cpp 即時辨識引擎（macOS 自動編譯，Windows 自動編譯且為選用）
   venv/                    Python 虛擬環境
 </code></pre>
 <hr>
@@ -737,7 +738,7 @@ bash install.sh --server
 <blockquote>
 <p><strong>首次安裝預估時間：約 10～20 分鐘</strong>（視網路速度而定）。主要耗時項目：</p>
 <ul>
-<li>whisper.cpp 編譯：約 3～5 分鐘（macOS 需從原始碼編譯；Windows 下載預編譯版本，較快）</li>
+<li>whisper.cpp 編譯：約 3～5 分鐘（macOS、Windows 都從原始碼編譯；Windows 第一次還要先裝 Visual Studio C++ 編譯器，約 2～6 GB）</li>
 <li>whisper 模型下載：約 3～10 分鐘（large-v3-turbo 約 809MB）</li>
 <li>Argos 翻譯模型下載與安裝：約 2～3 分鐘</li>
 </ul>
@@ -826,7 +827,7 @@ bash install.sh --server
 </tr>
 <tr>
 <td>whisper.cpp</td>
-<td>即時語音辨識引擎（自動下載預編譯版本）</td>
+<td>即時語音辨識引擎（選用；自動安裝 CMake 與 Visual Studio C++ 編譯器後從原始碼編譯，沒有時即時辨識改用 faster-whisper）</td>
 </tr>
 <tr>
 <td>whisper 模型</td>
@@ -906,7 +907,8 @@ bash install.sh --server
 <p><strong>Linux 不需要：</strong> whisper.cpp、BlackHole、虛擬音效卡。Linux 的即時辨識一律使用 faster-whisper，系統音訊從 PipeWire / PulseAudio 的 monitor 來源擷取。從 Mac 複製過來的 <code>config.json</code> 若含有 <code>/Users/...</code> 的 SSH Key 路徑，安裝程式會自動改成 <code>~/.ssh/</code> 底下的同名檔案。</p>
 </blockquote>
 <blockquote>
-<p><strong>Windows 不需要：</strong> Homebrew、cmake、sdl2、BlackHole。Windows 的 whisper.cpp 使用預編譯版本，不需要從原始碼編譯。音訊擷取使用 WASAPI Loopback，不需要虛擬音訊驅動。</p>
+<p><strong>Windows 不需要：</strong> Homebrew、BlackHole。音訊擷取使用 WASAPI Loopback，不需要虛擬音訊驅動。</p>
+<p><strong>Windows 的 whisper.cpp 是選用的</strong>：安裝程式會自動安裝 CMake、Visual Studio C++ 編譯器並從原始碼編譯。編譯器是安裝當下才裝的，要<strong>重新開啟 PowerShell 後再執行一次 <code>.\install.ps1</code></strong> 才會編譯；沒有 whisper.cpp 時即時辨識改用 faster-whisper（Python 端），功能照常（v2.26.14 起；先前會出現「找不到 whisper-stream」而無法開始）。</p>
 </blockquote>
 <p><strong>GPU 語音辨識伺服器（選填）：</strong></p>
 <p>安裝最後會詢問是否設定 GPU 語音辨識伺服器。若有安裝 NVIDIA GPU 的 Ubuntu/Linux 主機（消費級 RTX 4090/5090 亦可，需已安裝 CUDA），安裝腳本會透過 SSH 自動在伺服器安裝以下套件，大幅加速語音辨識和講者辨識：</p>
@@ -3721,6 +3723,10 @@ sudo systemctl restart jtlw-api
 <p>建議使用 <a href="https://apps.microsoft.com/detail/9n0dx20hk701">Windows Terminal</a>（Windows 11 內建，Windows 10 可從 Microsoft Store 安裝），不要使用舊版 cmd.exe。程式啟動時會自動啟用 Virtual Terminal Processing 以支援 ANSI 色彩碼。</p>
 <h3 id="q-windows-上找不到-stereo-mixwindows">Q: Windows 上找不到 Stereo Mix？（Windows）</h3>
 <p>部分音效驅動不提供 Stereo Mix，可嘗試更新音效驅動程式。大多數現代 Windows 系統可透過 WASAPI Loopback 模式運作，不一定需要 Stereo Mix。程式會自動偵測可用的 loopback 裝置。</p>
+<h3 id="q-windows-上開即時字幕出現找不到-whisper-streamwindows">Q: Windows 上開即時字幕出現「找不到 whisper-stream」？（Windows）</h3>
+<p>v2.26.13 以前，Windows 沒有編譯 whisper.cpp 時即時字幕無法開始。第一次安裝一定會遇到：Visual Studio C++ 編譯器是安裝當下才裝的，要重開終端機才生效，所以 whisper.cpp 這一輪編不出來（安裝畫面會說「C++ 編譯器安裝完成，但要重新開啟終端機」）。
+v2.26.14 起沒有 whisper.cpp 時即時辨識改用 faster-whisper，可以直接使用；升級：在安裝資料夾執行 <code>.\install.ps1 -Upgrade</code>。
+想要 whisper.cpp 的話，重新開啟 PowerShell 後再執行一次 <code>.\install.ps1</code>。</p>
 <h3 id="q-windows-上有-nvidia-顯示卡卻出現cublas64_12dll-is-not-found或顯示卡cuda不能用來辨識windows">Q: Windows 上有 NVIDIA 顯示卡，卻出現「cublas64_12.dll is not found」或「顯示卡（CUDA）不能用來辨識」？（Windows）</h3>
 <p>本機辨識（faster-whisper）用顯示卡時需要 CUDA 12 的 cuBLAS 與 cuDNN 9，這些<strong>不包含在顯示卡驅動裡</strong>。
 v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝的 <code>nvidia-cublas-cu12</code>／<code>nvidia-cudnn-cu12</code>、CUDA Toolkit 找；
@@ -3785,7 +3791,7 @@ v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝�
 </tr>
 <tr>
 <td><code>whisper.cpp/</code></td>
-<td>Whisper 語音辨識引擎（macOS 自動編譯，Windows 下載預編譯版本，Linux 不使用）</td>
+<td>Whisper 語音辨識引擎（macOS 自動編譯，Windows 自動編譯且為選用，Linux 不使用）</td>
 </tr>
 <tr>
 <td><code>venv/</code></td>

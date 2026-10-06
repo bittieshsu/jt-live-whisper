@@ -71,10 +71,17 @@ except ImportError:
     print("  pip install fastapi uvicorn websockets")
     sys.exit(1)
 
-# python-multipart 是 FastAPI 檔案上傳必要套件，舊版安裝可能缺少
-try:
-    import multipart  # noqa: F401
-except ImportError:
+# python-multipart 是 FastAPI 檔案上傳必要套件，舊版安裝可能缺少。
+# 0.0.13 起模組名稱是 python_multipart，舊名 multipart 只剩已標淘汰的相容層：新名優先、舊版才用舊名
+_multipart_ok = False
+for _mp_name in ("python_multipart", "multipart"):
+    try:
+        __import__(_mp_name)
+        _multipart_ok = True
+        break
+    except ImportError:
+        pass
+if not _multipart_ok:
     print("[提示] 正在安裝 python-multipart（檔案上傳需要）...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "python-multipart"])
     print("[完成] python-multipart 已安裝")
@@ -920,7 +927,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.13",
+        "last": last, "version": "2.26.14",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
