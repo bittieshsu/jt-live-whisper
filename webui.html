@@ -179,6 +179,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
 #bInfo:not(:empty)::before{content:'';width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
 .disc-msg{text-align:center;padding:20px 24px;color:var(--text);font-size:14px;border:1px solid var(--border);border-radius:var(--radius);margin:16px auto;max-width:420px;background:var(--bg3);line-height:1.8}
 .disc-msg .disc-title{font-weight:600;margin-bottom:8px;font-size:15px}
+.disc-msg .disc-detail{white-space:pre-wrap;text-align:left;font-size:13px;line-height:1.6;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 12px;margin:4px 0 10px;max-width:640px;word-break:break-word}
 .disc-files{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:10px;text-align:left}
 .disc-file{display:flex;align-items:center;gap:5px;padding:5px 10px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);color:var(--text);font-size:12px;text-decoration:none;transition:border-color .2s,background .2s;cursor:pointer;white-space:nowrap}
 .disc-file:hover{border-color:var(--accent);background:rgba(13,110,253,.08)}
@@ -829,7 +830,7 @@ function _showLiveIn(live){
   document.body.classList.add('has-live');
   requestAnimationFrame(()=>requestAnimationFrame(()=>live.classList.add('shown')));
   const isBidi=['en_zh','ja_zh','ko_zh'].includes(curCfg.mode);$('pLive').classList.toggle('bidi',isBidi);
-  msgsEl.innerHTML='';cnt=0;_discShown=false;_discEl=null;_outputFiles=[];_outputDirs=[];_recFiles={};$('sCount').textContent='0 句';
+  msgsEl.innerHTML='';cnt=0;_discShown=false;_discEl=null;_discDetail='';_outputFiles=[];_outputDirs=[];_recFiles={};$('sCount').textContent='0 句';
   // 新場次一定不是暫停（上一場停在暫停中時，以前畫面會留著「繼續」而程式其實在錄，v2.26.3）
   _paused=false;$('pauseBtn').innerHTML='暫停 <kbd>P</kbd>';$('pauseBtn').style.background='var(--orange)';
   $('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('hSource').textContent=curCfg.isFile?'離線處理':'即時模式';$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
@@ -897,7 +898,7 @@ async function openOutputFolder(){
 }
 // 結束卡片只有一張（v2.26.4）：以前「停止」與「程式結束」各出一張，純錄音也寫「辨識已停止」。
 // 停止的事件先到就先出卡片，程式結束的事件（帶結束碼）到了再更新它；檔案清單晚到也會補上
-let _discEl=null,_discTitle='';
+let _discEl=null,_discTitle='',_discDetail='';
 function _stopTitle(){return curCfg.mode==='record'?'錄音已停止':'辨識已停止'}
 function showDisconnected(msg,replace){
   if(_discEl&&!replace)return;
@@ -912,6 +913,7 @@ const _audioExt=['mp3','wav','ogg','flac','m4a'];
 function _renderDisc(){
   const d=_discEl;if(!d)return;
   let h='<div class="disc-title">'+esc(_discTitle)+'</div>';
+  if(_discDetail)h+='<div class="disc-detail">'+esc(_discDetail)+'</div>';
   if(_outputFiles.length){
     h+='<div class="disc-files">';
     // 排序：摘要在前，逐字稿在後；同類內 html > txt > srt > vtt
@@ -976,7 +978,7 @@ function _renderMsg(ev){dot.classList.add('on');if(cnt===0)$('bInfo').textConten
   if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight})}
 /* WS */
 function conn(){const p=location.protocol==='https:'?'wss:':'ws:';const _wsUrl=p+'//'+location.host+'/ws'+(_authToken?'?token='+encodeURIComponent(_authToken):'');ws=new WebSocket(_wsUrl);ws.onopen=()=>{if(rTimer){clearInterval(rTimer);rTimer=null}};
-  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;dot.classList.remove('on');showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
+  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;dot.classList.remove('on');_discDetail=ev.detail||'';showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
   ws.onclose=()=>{dot.classList.remove('on');if($('pLive').classList.contains('on')&&!_discShown){_discShown=true;showDisconnected('與伺服器的連線已中斷')}if(!rTimer)rTimer=setInterval(()=>{if(!ws||ws.readyState===WebSocket.CLOSED)conn()},3000)};ws.onerror=()=>ws.close()}
 // Tooltips
 const _tips={

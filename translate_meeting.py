@@ -1365,7 +1365,11 @@ def _pulse_label():
 
 
 def _pulse_missing_hint():
-    """Linux 找不到系統音訊來源時的排查說明"""
+    """Linux 找不到系統音訊來源時的排查說明。沒有桌面工作階段（伺服器、PVE LXC、SSH）時直接講清楚：
+    這種環境本來就沒有音訊，叫人裝 pulseaudio-utils 或檢查 pactl 都沒用（2026-10-08 使用者在 PVE LXC 開即時模式）"""
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return ("這台沒有桌面工作階段（伺服器、容器或 SSH 連線），沒有系統音訊可以擷取。"
+                "即時字幕要在開會用的電腦（有喇叭與麥克風）上執行；這台請改用「讀入音訊檔案」離線處理")
     if not _pulse_capture_tool():
         return "請安裝 pulseaudio-utils（sudo apt install pulseaudio-utils）以擷取系統音訊"
     return ("找不到 PipeWire / PulseAudio 的 monitor 來源；"
@@ -2508,7 +2512,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.17"
+APP_VERSION = "2.26.18"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -4473,11 +4477,12 @@ def list_audio_devices_sd():
                   f"授權後即可免設定多重輸出裝置（./start.sh --sck-permission）{RESET}")
 
     # Linux: 優先用 PipeWire / PulseAudio 的 monitor（零設定）
+    _no_audio_hint = None
     if IS_LINUX:
         if _pulse_available():
             print(f"  {C_OK}ASR 裝置: {_pulse_label()}{RESET}")
             return PULSE_LOOPBACK_ID
-        print(f"  {C_DIM}[提示] {_pulse_missing_hint()}{RESET}")
+        _no_audio_hint = _pulse_missing_hint()
 
     devices = sd.query_devices()
     input_devices = []
@@ -4486,8 +4491,13 @@ def list_audio_devices_sd():
             input_devices.append((i, dev["name"], dev["max_input_channels"], int(dev["default_samplerate"])))
 
     if not input_devices:
+        # 錯誤與原因一起印到 stderr：WebUI 的「啟動失敗」卡片只收得到 stderr（原因以前印在 stdout，畫面上看不到）
         print("[錯誤] 找不到任何音訊輸入裝置！", file=sys.stderr)
+        if _no_audio_hint:
+            print(f"[提示] {_no_audio_hint}", file=sys.stderr)
         sys.exit(1)
+    if _no_audio_hint:
+        print(f"  {C_DIM}[提示] {_no_audio_hint}{RESET}")
 
     # 自動選 Loopback 裝置
     for dev_id, dev_name, _, _ in input_devices:
@@ -4552,11 +4562,12 @@ def auto_select_device_sd():
                   f"授權後即可免設定多重輸出裝置（./start.sh --sck-permission）{RESET}")
 
     # Linux: 優先用 PipeWire / PulseAudio 的 monitor
+    _no_audio_hint = None
     if IS_LINUX:
         if _pulse_available():
             print(f"{C_OK}自動選擇音訊裝置: {_pulse_label()}{RESET}")
             return PULSE_LOOPBACK_ID
-        print(f"{C_DIM}[提示] {_pulse_missing_hint()}{RESET}")
+        _no_audio_hint = _pulse_missing_hint()
 
     devices = sd.query_devices()
     for i, dev in enumerate(devices):
@@ -4567,9 +4578,15 @@ def auto_select_device_sd():
     default = sd.default.device[0]
     if default is not None and default >= 0:
         dev = devices[default]
+        if _no_audio_hint:
+            print(f"{C_DIM}[提示] {_no_audio_hint}{RESET}")
         print(f"{C_HIGHLIGHT}未偵測到 {_LOOPBACK_LABEL}，使用系統預設輸入: [{default}] {dev['name']}{RESET}")
         return default
+    # 錯誤與原因一起印到 stderr：WebUI 的「啟動失敗」卡片只收得到 stderr（原因以前印在 stdout，畫面上看不到；
+    # 2026-10-08 使用者在 PVE LXC 開即時模式，只看到「啟動失敗」）
     print("[錯誤] 找不到任何音訊輸入裝置！", file=sys.stderr)
+    if _no_audio_hint:
+        print(f"[提示] {_no_audio_hint}", file=sys.stderr)
     sys.exit(1)
 
 

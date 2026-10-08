@@ -11,6 +11,7 @@
 import argparse
 import asyncio
 import json
+import collections
 import re
 import os
 import shutil
@@ -612,6 +613,40 @@ def _stop_proc():
         pass
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
+
+
+def _pump_stderr(p):
+    """子程式的錯誤輸出照樣寫到 WebUI 自己的錯誤輸出（終端機／systemd 日誌），同時留下最後幾行，
+    結束時隨 disconnected 事件送到畫面。以前畫面只寫「請檢查終端機訊息」，伺服器版根本沒有終端機，
+    日誌裡的中文還被 journalctl 顯示成 <E9><8C><AF>…（2026-10-08 使用者回報：PVE LXC 裡開即時模式失敗，「沒看到有錯誤噴出」）。
+    一定要讀到 EOF：不讀的話管線塞滿，子程式寫錯誤輸出時會卡住"""
+    out = getattr(sys.stderr, "buffer", None)
+    try:
+        for raw in iter(p.stderr.readline, b""):
+            try:
+                if out is not None:
+                    out.write(raw); out.flush()
+                else:
+                    sys.stderr.write(raw.decode("utf-8", "replace")); sys.stderr.flush()
+            except Exception:
+                pass
+            line = _ANSI_RE.sub("", raw.decode("utf-8", "replace")).strip()
+            if line:
+                p._err_tail.append(line)
+    except Exception:
+        pass
+
+
+def _error_detail(lines):
+    """畫面上要顯示的錯誤原因：有「[錯誤]」就從第一個「[錯誤]」開始，否則取最後幾行（例如 Traceback 的最後一行）"""
+    lines = [l for l in lines if l]
+    for i, l in enumerate(lines):
+        if l.startswith("[錯誤]"):
+            return "\n".join(lines[i:i + 8])
+    return "\n".join(lines[-6:])
+
+
 def _start_proc(args: list):
     global _proc
     _stop_proc()
@@ -629,8 +664,12 @@ def _start_proc(args: list):
             _popen_kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             _popen_kw["start_new_session"] = True
+        _popen_kw["stderr"] = subprocess.PIPE
         _proc = subprocess.Popen(cmd, **_popen_kw)
         _proc._start_time = time.monotonic()
+        _proc._err_tail = collections.deque(maxlen=40)
+        _proc._err_pump = threading.Thread(target=_pump_stderr, args=(_proc,), daemon=True)
+        _proc._err_pump.start()
         # 背景持續送 y 回答所有 input() 提問（確認開始、錄音、場景等）
         def _auto_yes():
             try:
@@ -656,18 +695,24 @@ def _start_proc(args: list):
                 rc = -1
             elapsed = time.monotonic() - start_t
             user_stop = getattr(p, "_user_stop", False)
+            pump = getattr(p, "_err_pump", None)
+            if pump:
+                pump.join(timeout=2)            # 讓最後幾行錯誤輸出收齊
+            detail = _error_detail(getattr(p, "_err_tail", ())) if rc != 0 and not user_stop else ""
             if rc != 0 and elapsed < 5 and not user_stop:
-                msg = f"啟動失敗（錯誤碼 {rc}），請檢查終端機訊息"
+                msg = f"啟動失敗（錯誤碼 {rc}）"
             elif rc != 0:
                 msg = f"程式異常結束（錯誤碼 {rc}）"
             else:
                 msg = "已停止" if user_stop else "處理已完成"
+            if rc != 0 and not user_stop and not detail:
+                detail = "詳細訊息在 WebUI 的執行紀錄（伺服器版：journalctl -u jt-live-whisper-webui）"
             print(f"\n  主程式已結束（exit code {rc}），WebUI 等待下一次操作（瀏覽器中按「回到設定」重新開始）")
             print(f"  按 Ctrl+C 可結束 WebUI 伺服器")
             if _event_queue:
                 try:
                     _event_queue.put_nowait(json.dumps({"type": "disconnected",
-                        "message": msg, "rc": rc, "user_stop": user_stop}))
+                        "message": msg, "rc": rc, "user_stop": user_stop, "detail": detail}))
                 except Exception:
                     pass
         threading.Thread(target=_monitor, daemon=True).start()
@@ -929,7 +974,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.17",
+        "last": last, "version": "2.26.18",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
