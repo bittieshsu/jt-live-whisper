@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.26.16 (by Jason Cheng)
+即時英翻中字幕系統 v2.26.17 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -2666,6 +2666,8 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ### Q: Windows 上跳出「whisper-stream.exe - System Error：SDL2.dll was not found」？（Windows）
 v2.26.14 以前的安裝程式編譯完 whisper.cpp 後，沒有把 `SDL2.dll` 放到 `whisper-stream.exe` 旁邊，開即時字幕時就跳出這個視窗，而且要按「確定」程式才會繼續。
 v2.26.15 起不會再跳視窗：缺 SDL2.dll 時即時辨識改用 faster-whisper；在安裝資料夾重新執行一次 `.\install.ps1` 會補上 SDL2.dll。
+v2.26.15、v2.26.16 補上 SDL2.dll 之後，裝置選「自動偵測」的即時字幕會改成辨識**麥克風**（找不到「立體聲混音」時拿第一個錄音裝置），請升級到 v2.26.17：
+Windows 的系統音訊一律走 WASAPI＋faster-whisper，只有錄音裝置裡真的有「立體聲混音」（Stereo Mix）而且有對應的 ggml 模型時才用 whisper.cpp。
 
 ### Q: Windows 上終端機顯示亂碼或色彩不正常？（Windows）
 建議使用 [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701)（Windows 11 內建，Windows 10 可從 Microsoft Store 安裝），不要使用舊版 cmd.exe。程式啟動時會自動啟用 Virtual Terminal Processing 以支援 ANSI 色彩碼。

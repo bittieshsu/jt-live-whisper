@@ -642,7 +642,8 @@ def _is_loopback_device(name):
     n = name.lower()
     if IS_WINDOWS:
         return ("loopback" in n or "stereo mix" in n
-                or "what u hear" in n or "wave out" in n)
+                or "what u hear" in n or "wave out" in n
+                or "立體聲混音" in n or "立体声混音" in n)     # 中文版 Windows 的 Stereo Mix
     if IS_LINUX:
         return "monitor" in n or "loopback" in n
     return "blackhole" in n
@@ -2507,7 +2508,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.16"
+APP_VERSION = "2.26.17"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -4197,6 +4198,31 @@ def select_scene():
     name, length, step, desc = SCENE_PRESETS[idx]
     print(f"  {C_OK}→ {name}{RESET} {C_DIM}({desc}){RESET}\n")
     return length, step
+
+
+def _ggml_model_file(name):
+    """whisper.cpp（ggml）模型檔的路徑；沒有下載回傳 None（不像 resolve_model 會直接結束）"""
+    for n, filename, _desc in WHISPER_MODELS:
+        if n == name:
+            p = os.path.join(MODELS_DIR, filename)
+            return p if os.path.isfile(p) else None
+    return None
+
+
+def _win_sdl_loopback_device():
+    """Windows：whisper-stream（SDL2）擷取得到系統音訊嗎？SDL2 讀不到 WASAPI Loopback，
+    只有「立體聲混音」這類裝置才行。有就回傳 (id, 名稱)，沒有回傳 None（不會結束程式）。
+    以前只要列得出任何 SDL2 裝置（一定有麥克風）就改走 whisper-stream，找不到 Loopback 時拿第一個裝置＝麥克風，
+    即時字幕辨識的是自己的麥克風而不是會議的聲音（2026-10-08 pc-002：v2.26.15 補上 SDL2.dll、whisper-stream 第一次真的跑起來才發現）"""
+    if _win_without_whisper_stream():
+        return None
+    probe = next((f for f in (_ggml_model_file(n) for n, _f, _d in WHISPER_MODELS) if f), None)
+    if not probe:
+        return None
+    for dev_id, dev_name in _enumerate_sdl_devices(probe):
+        if _is_loopback_device(dev_name):
+            return dev_id, dev_name
+    return None
 
 
 def _enumerate_sdl_devices(model_path):
@@ -18068,9 +18094,10 @@ def main():
             print(f"\n\n{C_TITLE}{BOLD}▎ sounddevice 音訊裝置{RESET}")
             list_audio_devices_sd()
         # whisper-stream 裝置
-        model_path_exists = os.path.isfile(WHISPER_STREAM)
+        _probe = next((f for f in (_ggml_model_file(n) for n, _f, _d in WHISPER_MODELS) if f), None)
+        model_path_exists = os.path.isfile(WHISPER_STREAM) and not _win_without_whisper_stream() and bool(_probe)
         if model_path_exists:
-            _, model_path = resolve_model("large-v3-turbo")
+            model_path = _probe
             print(f"\n\n{C_TITLE}{BOLD}▎ whisper-stream SDL2 音訊裝置{RESET}")
             list_audio_devices(model_path)
         sys.exit(0)
@@ -18419,13 +18446,14 @@ def main():
                 capture_id = auto_select_device_sd()
                 _cli_use_local_fw = True
             elif IS_WINDOWS and _find_wasapi_loopback():
-                _, _probe_path = resolve_model("large-v3-turbo")
-                _sdl_devs = _enumerate_sdl_devices(_probe_path)
-                if not _sdl_devs:
+                # 系統音訊走 WASAPI＋faster-whisper；只有 SDL2 有「立體聲混音」而且有這個模型的 ggml 檔時才走 whisper-stream
+                _sdl_lb = _win_sdl_loopback_device()
+                if _sdl_lb and _ggml_model_file(model_name):
+                    capture_id = _sdl_lb[0]
+                    print(f"{C_OK}自動選擇音訊裝置: [{_sdl_lb[0]}] {_sdl_lb[1]}{RESET}")
+                else:
                     _cli_use_local_fw = True
                     capture_id = auto_select_device_sd()
-                else:
-                    capture_id = auto_select_device(_probe_path)
 
             if _cli_use_local_fw:
                 model_path = None  # faster-whisper 自動從 HuggingFace 下載
@@ -18725,10 +18753,9 @@ def main():
                 _use_local_fw = True  # whisper-stream 不能用（沒有 whisper.cpp、缺 SDL2.dll）：一律 faster-whisper
                 print(f"\n{C_DIM}  {_win_whisper_stream_problem()}，即時辨識使用 faster-whisper 本機辨識{RESET}")
             elif IS_WINDOWS and asr_engine == "whisper" and _find_wasapi_loopback():
-                _, _probe_path = resolve_model("large-v3-turbo")
-                _sdl_devs = _enumerate_sdl_devices(_probe_path)
-                if not _sdl_devs:
-                    _use_local_fw = True  # 改用 WASAPI + faster-whisper
+                # SDL2 沒有「立體聲混音」這類裝置時 whisper-stream 只錄得到麥克風 → 改用 WASAPI＋faster-whisper
+                if not _win_sdl_loopback_device():
+                    _use_local_fw = True
                     print(f"\n{C_DIM}  SDL2 無法擷取系統音訊，將改用 WASAPI + faster-whisper 本機辨識{RESET}")
 
             check_dependencies(asr_engine)

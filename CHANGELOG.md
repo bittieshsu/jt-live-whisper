@@ -1,5 +1,16 @@
 # Changelog
 
+### v2.26.17 (2026-10-08)
+
+**Windows：補上 SDL2.dll 之後，即時字幕辨識的是麥克風而不是會議的聲音**
+- v2.26.15 讓安裝程式補上 SDL2.dll 之後，whisper.cpp 的 whisper-stream 第一次真的能執行，接著露出另一個一直藏著的問題：
+  裝置選「自動偵測」時，只要列得出任何 whisper.cpp（SDL2）錄音裝置就改用 whisper-stream，可是 SDL2 讀不到 Windows 的系統音訊（WASAPI），
+  找不到「立體聲混音」時就拿第一個裝置，也就是麥克風；選的辨識模型沒有 whisper.cpp 格式的檔案時還會直接結束
+- 現在 Windows 的系統音訊一律走 WASAPI＋faster-whisper（跟沒有 whisper.cpp 時一樣，也是一直以來主要的路徑）；
+  只有錄音裝置裡真的有「立體聲混音」（Stereo Mix）、而且有那個模型的 whisper.cpp 檔案時才用 whisper-stream。中文版 Windows 的「立體聲混音」也認得
+- 影響範圍：Windows 上用 v2.26.15、v2.26.16 的安裝程式完整重新安裝過（補上了 SDL2.dll）、裝置選自動偵測的使用者
+- 實測：同一台 Windows 11（whisper-stream 能執行、只有麥克風）播放英文會議錄音，修正前選到麥克風並因缺模型結束，修正後選到 WASAPI Loopback、字幕正常
+
 ### v2.26.16 (2026-10-08)
 
 **WebUI：從別台電腦按「測試連線」一律顯示「需要管理密碼」（使用者回報）**
