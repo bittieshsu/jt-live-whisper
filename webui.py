@@ -133,6 +133,7 @@ try:
         _pulse_available as _tm_pulse_available,
         _pulse_label as _tm_pulse_label,
         _detect_llm_server as _tm_detect_llm_server,
+        _parse_llm_host as _tm_parse_llm_host,
         _BUILTIN_TRANSLATE_MODELS as _TM_TRANSLATE_MODELS,
         DEFAULT_TRANSLATE_MODEL as _TM_DEFAULT_TRANSLATE_MODEL,
     SUMMARY_DEFAULT_MODEL as _TM_SUMMARY_DEFAULT_MODEL,
@@ -144,6 +145,7 @@ try:
     _KO_INPUT_MODES as _TM_KO_MODES,
 )
 except Exception:
+    _tm_parse_llm_host = None
     _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
                             ("qwen2.5:14b", "品質好，較省記憶體（約需 9GB）")]
     _TM_DEFAULT_TRANSLATE_MODEL = "gemma4:26b"
@@ -927,7 +929,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.15",
+        "last": last, "version": "2.26.16",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -1371,6 +1373,12 @@ async def api_test_llm(request: Request, body: dict = {}):
     host = body.get("host", "").strip()
     if not host:
         return JSONResponse({"ok": False, "error": "未填入主機位址"})
+    if _tm_parse_llm_host:
+        # 格式不對時講清楚哪裡不對（以前 http:// 開頭或連接埠超出範圍都只回籠統的「無法連線」）
+        _h, _p, _perr = _tm_parse_llm_host(host)
+        if _perr:
+            return JSONResponse({"ok": False, "error": _perr})
+        host = f"{_h}:{_p}"
     import urllib.request
     import urllib.error
     # 嘗試 Ollama /api/tags 和 OpenAI /v1/models
@@ -1477,6 +1485,11 @@ async def api_start(request: Request, body: dict = {}):
     err = _check_auth(request, "admin")
     if err:
         return JSONResponse({"status": "error", "error": err}, status_code=403)
+    if (body.get("llm_host") or "").strip() and _tm_parse_llm_host:
+        _h, _p, _perr = _tm_parse_llm_host(body["llm_host"])
+        if _perr:
+            return JSONResponse({"status": "error", "error": f"LLM 主機：{_perr}"}, status_code=400)
+        body["llm_host"] = f"{_h}:{_p}"
     args = _build_args(body)
     pid = await asyncio.to_thread(_start_proc, args)
     # 儲存前次使用的設定到 config.json

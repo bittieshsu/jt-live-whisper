@@ -701,7 +701,7 @@ $('iSumRounds').addEventListener('change',onSummarizeChg);
 
 let _allFiles=[];
 async function loadFiles(){
-  const r=await fetch('/api/files'),d=await r.json();_allFiles=d.files||[];_selectedFiles=[];$('fileFilter').value='';renderFiles()
+  const r=await fetch('/api/files',{headers:_authHeaders()}),d=await r.json();_allFiles=d.files||[];_selectedFiles=[];$('fileFilter').value='';renderFiles()
 }
 function renderFiles(filter){
   const fl=$('fileList');fl.innerHTML='';const kw=(filter||'').toLowerCase();
@@ -778,8 +778,8 @@ function engChg(){
 let _sumDescs={};let _sumDefault="";
 function _sumLabel(m){const d=_sumDescs[m];return d?m+' — '+d:m}
 function _updateSumModels(models){const prev=cselVal($('iSumModel'));const items=[{value:'',label:'預設（'+(_sumDefault||'')+'）',tag:''}];models.sort((a,b)=>a.localeCompare(b)).forEach(m=>items.push({value:m,label:_sumLabel(m),tag:m===prev?'前次使用':''}));cselSetItems($('iSumModel'),items);if(prev)cselSetValue($('iSumModel'),prev)}
-async function fetchLlmModels(h){try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok&&d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_updateSumModels(d.models)}}catch(e){}}
-async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').innerHTML='<span style="color:var(--text-dim)">測試中...</span>';$('testBtn').disabled=true;_llmQueried=false;try{const r=await fetch('/api/test-llm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok){$('testResult').innerHTML='<span class="test-ok">連線成功（'+d.server_type+'，'+d.models.length+' 個模型）</span>';if(d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_llmQueried=true;_updateSumModels(d.models)}}else{$('testResult').innerHTML='<span class="test-err">'+esc(d.error)+'</span>'}}catch(e){$('testResult').innerHTML='<span class="test-err">'+esc(e.message)+'</span>'}$('testBtn').disabled=false}
+async function fetchLlmModels(h){try{const r=await fetch('/api/test-llm',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok&&d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_updateSumModels(d.models)}}catch(e){}}
+async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').innerHTML='<span style="color:var(--text-dim)">測試中...</span>';$('testBtn').disabled=true;_llmQueried=false;try{const r=await fetch('/api/test-llm',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok){$('testResult').innerHTML='<span class="test-ok">連線成功（'+d.server_type+'，'+d.models.length+' 個模型）</span>';if(d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_llmQueried=true;_updateSumModels(d.models)}}else{$('testResult').innerHTML='<span class="test-err">'+esc(d.error)+'</span>'}}catch(e){$('testResult').innerHTML='<span class="test-err">'+esc(e.message)+'</span>'}$('testBtn').disabled=false}
 /* Start/Stop */
 async function go(){
   const mode=cselVal($('iMode')),isFile=cselVal($('iSource'))==='file';
@@ -797,7 +797,7 @@ async function go(){
   try{const b={mode,model:cselVal($('iModel')),scene:cselVal($('iScene')),engine:cselVal($('iEngine')),llm_model:cselVal($('iLlmModel')),llm_host:$('iLlmHost').value,topic:$('iTopic').value,record:$('iRec').checked,mic:$('iMic').checked,denoise:$('iDenoise').checked,local_asr:cselVal($('iAsrLoc'))==='local',device:cselVal($('iDevice'))||null,mic_device:cselVal($('iMicDev'))||null,rec_source:mode==='record'?(cselVal($('iRecSrc'))||'both'):null,subtitle_overlay:$('iOvEnable')&&$('iOvEnable').checked,fwd_enabled:$('iFwdEnable')&&$('iFwdEnable').checked,kw_enabled:$('iKwEnable')&&$('iKwEnable').checked};
   if(isFile&&_selectedFiles.length){b.input_files=_selectedFiles;if($('iDiarize').checked){b.diarize=true;const ns=parseInt($('iNumSpk').value)||0;if(ns>0)b.num_speakers=ns}if($('iSummarize').checked){b.summarize=true;const sm=cselVal($('iSumModel'));if(sm)b.summary_model=sm;const sr=parseInt($('iSumRounds').value)||1;if(sr>1)b.summary_rounds=sr}if(!$('iGenSrt').checked)b.no_srt=true;if(!$('iGenVtt').checked)b.no_vtt=true}
   const r=await fetch('/api/start',{method:'POST',headers:_authHeaders(),body:JSON.stringify(b)});const d=await r.json();
-  if(d.status==='started'){_lastStartBody=JSON.parse(JSON.stringify(b));_curDeviceId=b.device;_curMicDeviceId=b.mic_device;const _dn=el=>$(el).querySelector('.csel-display').textContent.replace(/^\[-?\d+\]\s*/,'').trim();if(b.device)_autoLb=_dn('iDevice');if(b.mic_device)_autoMic=_dn('iMicDev');showLive();$('hMode').textContent=curCfg.modeLabel}}catch(e){showToast('啟動失敗: '+e.message,'err')}
+  if(d.status==='started'){_lastStartBody=JSON.parse(JSON.stringify(b));_curDeviceId=b.device;_curMicDeviceId=b.mic_device;const _dn=el=>$(el).querySelector('.csel-display').textContent.replace(/^\[-?\d+\]\s*/,'').trim();if(b.device)_autoLb=_dn('iDevice');if(b.mic_device)_autoMic=_dn('iMicDev');showLive();$('hMode').textContent=curCfg.modeLabel}else{showToast('無法開始：'+(d.error||('HTTP '+r.status)),'err')}}catch(e){showToast('啟動失敗: '+e.message,'err')}
   $('goBtn').disabled=false;$('goBtn').textContent='開始';
 }
 let _stopConfirm=false;

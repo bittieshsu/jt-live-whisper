@@ -2507,7 +2507,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.15"
+APP_VERSION = "2.26.16"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -6352,22 +6352,10 @@ def select_translator(init_host=None, init_port=None, mode="en2zh"):
             print(f"{C_HIGHLIGHT}未偵測到{RESET}")
         # 問使用者要不要輸入位址
         print(f"  {C_WHITE}輸入 LLM 伺服器位址，或按 Enter 使用離線翻譯：{RESET}", end=" ")
-        try:
-            ip_input = input().strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            sys.exit(0)
-
+        _h, _p = _ask_llm_host()
+        ip_input = bool(_h)
         if ip_input:
-            if ":" in ip_input:
-                parts = ip_input.rsplit(":", 1)
-                host = parts[0]
-                try:
-                    port = int(parts[1])
-                except ValueError:
-                    port = OLLAMA_PORT
-            else:
-                host = ip_input
+            host, port = _h, _p
             print(f"  {C_DIM}正在偵測 LLM 伺服器 ({host}:{port})...{RESET}", end=" ", flush=True)
             server_type, available_models = _check_llm_server(host, port)
             if not server_type:
@@ -6810,17 +6798,9 @@ def _input_interactive_menu(args):
                 print(f"{C_DIM}{'─' * 60}{RESET}")
                 print(f"{C_WHITE}輸入 LLM 伺服器位址（host:port），或按 Enter 使用離線翻譯：{RESET}", end=" ")
 
-            addr_input = input().strip()
-            if addr_input:
-                if ":" in addr_input:
-                    parts = addr_input.rsplit(":", 1)
-                    ollama_host = parts[0]
-                    try:
-                        ollama_port = int(parts[1])
-                    except ValueError:
-                        ollama_port = OLLAMA_PORT
-                else:
-                    ollama_host = addr_input
+            _h, _p = _ask_llm_host()
+            if _h:
+                ollama_host, ollama_port = _h, _p
             ollama_asked = True
 
             # 偵測伺服器類型
@@ -7041,17 +7021,9 @@ def _input_interactive_menu(args):
                 print(f"{C_DIM}{'─' * 60}{RESET}")
                 print(f"{C_WHITE}按 Enter 使用目前設定，或輸入新位址（host:port）：{RESET}", end=" ")
 
-                addr_input = input().strip()
-                if addr_input:
-                    if ":" in addr_input:
-                        parts = addr_input.rsplit(":", 1)
-                        ollama_host = parts[0]
-                        try:
-                            ollama_port = int(parts[1])
-                        except ValueError:
-                            ollama_port = OLLAMA_PORT
-                    else:
-                        ollama_host = addr_input
+                _h, _p = _ask_llm_host()
+                if _h:
+                    ollama_host, ollama_port = _h, _p
 
                 # 偵測伺服器類型
                 print(f"  {C_DIM}正在偵測 LLM 伺服器...{RESET}", end=" ", flush=True)
@@ -17037,19 +17009,71 @@ def resolve_model(model_name):
     sys.exit(1)
 
 
+def _parse_llm_host(text, default_port=None):
+    """LLM 伺服器位址「主機」「主機:連接埠」「http://主機:連接埠/路徑」→ (host, port, None)；格式不對 → (None, None, 說明)。
+    命令列、互動選單、WebUI 都用這一支（以前四個地方各自 rsplit，連接埠打錯就默默改用 11434，
+    `http://` 開頭會組成 http://http://…；2026-10-08 有人填 http://10.1.1.35:111434，只得到籠統的「無法連線」）"""
+    if default_port is None:
+        default_port = OLLAMA_PORT
+    s = (text or "").strip()
+    if not s:
+        return None, None, "未填入主機位址"
+    if s.lower().startswith("https://"):
+        return None, None, "目前只支援 http，請填「主機:連接埠」（例如 192.168.1.40:11434）"
+    if s.lower().startswith("http://"):
+        s = s[7:]
+    s = s.split("/", 1)[0]                       # 貼上 OpenAI 相容的網址（…/v1）時去掉路徑
+    host, port_txt = s, None
+    if s.startswith("["):                        # IPv6：[::1]:11434
+        end = s.find("]")
+        if end < 0:
+            return None, None, f"主機位址「{text.strip()}」格式不正確"
+        host, rest = s[:end + 1], s[end + 1:]
+        if rest:
+            if not rest.startswith(":"):
+                return None, None, f"主機位址「{text.strip()}」格式不正確"
+            port_txt = rest[1:]
+    elif s.count(":") == 1:
+        host, port_txt = s.split(":")
+    elif s.count(":") > 1:
+        return None, None, "IPv6 位址請用方括號，例如 [::1]:11434"
+    if not host or any(c in host for c in " \t@?#\\"):
+        return None, None, f"主機位址「{text.strip()}」格式不正確"
+    port = default_port
+    if port_txt is not None:
+        if not port_txt.isdigit():
+            return None, None, f"連接埠「{port_txt}」不是數字（例如 192.168.1.40:11434）"
+        port = int(port_txt)
+        if not 1 <= port <= 65535:
+            return None, None, f"連接埠 {port} 超出範圍（要 1～65535；Ollama 預設 11434）"
+    return host, port, None
+
+
+def _ask_llm_host():
+    """互動選單讀一個 LLM 位址：空白回傳 (None, None)；格式不對時說明原因、請使用者重打"""
+    while True:
+        try:
+            raw = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+        if not raw:
+            return None, None
+        host, port, err = _parse_llm_host(raw)
+        if not err:
+            return host, port
+        print(f"  {C_WARN}[格式不對] {err}{RESET}")
+        print(f"{C_WHITE}請重新輸入（主機:連接埠），或按 Enter 略過：{RESET}", end=" ")
+
+
 def _resolve_ollama_host(args):
-    """從 args 解析 LLM 伺服器 host/port，無設定時回傳 (None, port)"""
+    """從 args 解析 LLM 伺服器 host/port，無設定時回傳 (None, port)；--llm-host 格式不對時說明並結束"""
     host, port = OLLAMA_HOST, OLLAMA_PORT
     if args.ollama_host:
-        if ":" in args.ollama_host:
-            parts = args.ollama_host.rsplit(":", 1)
-            host = parts[0]
-            try:
-                port = int(parts[1])
-            except ValueError:
-                pass  # 保持預設 port
-        else:
-            host = args.ollama_host
+        host, port, err = _parse_llm_host(args.ollama_host)
+        if err:
+            print(f"[錯誤] --llm-host {args.ollama_host}：{err}", file=sys.stderr)
+            sys.exit(1)
     return host, port
 
 
