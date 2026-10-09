@@ -35,3 +35,8 @@ api_data/
 .vscode/
 .idea/
 .claude/
+
+# 文字轉語音（v2.27.0）：使用者匯入的聲音（含錄音，可識別個人）、朗讀暫存、安裝時下載的台灣念法資源（教育部辭典轉檔、g2pW）
+tts_voices/
+tts_tmp/
+tts_data/

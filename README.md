@@ -1,6 +1,6 @@
-# jt-live-whisper v2.26.18
+# jt-live-whisper v2.27.0
 
-**100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
+**100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要、台灣華語朗讀，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
 ### 🌐 專案網站：**[jasoncheng7115.github.io/jt-live-whisper](https://jasoncheng7115.github.io/jt-live-whisper/)**
 
@@ -30,7 +30,7 @@ Author: Jason Cheng (Jason Tools)
 某次參加原廠的線上技術課程，全程英文授課，聽得七零八落。為了補足自己英文聽力的不足，乾脆動手打造了這套工具來即時翻譯，結果功能越做越多，就變成現在這個樣子了 XD
 
 - **完全地端執行**：語音辨識、翻譯、講者辨識、摘要全部使用自有設備上的 AI 模型，無需雲端 API Key、不上傳任何資料至第三方
-- **隱私安全**：會議內容、語音資料全程留在自有設備，適合企業內部會議、機密討論
+- **隱私安全**：會議內容、語音資料全程留在自有設備，適合企業內部會議、機密討論。工具本身做到什麼、組織使用後還要做哪些事（個資法、GDPR、ISO/IEC 27001、42001）見 **[資料保護與合規](COMPLIANCE.md)**
 - **零月租成本**：不需要付費的雲端 API（ChatGPT、Claude、Gemini 等），所有採用的 AI 模型皆為自由開源
 - **不限應用程式**：採用系統音訊裝置層級擷取，理論上任何軟體的聲音輸出都能處理（Zoom、Teams、Meet、YouTube、Podcast 等）
 - **功能完整**：從即時轉錄翻譯、離線音訊處理、講者辨識到 AI 摘要，一套搞定
@@ -58,6 +58,9 @@ Author: Jason Cheng (Jason Tools)
 | 翻譯 (離線備援) | **Argos Translate** | 完全離線的輕量翻譯模型，僅支援英翻中 |
 | 講者辨識 | **resemblyzer** + **spectralcluster** | 聲紋特徵提取 + Google 頻譜分群演算法，可在本機或 GPU 伺服器執行 |
 | 講者辨識 | **Nemotron 3 Diarization** (NVIDIA，OpenMDW-1.1) | **v2.26.0 起預設使用**（transformers 5.18 以上，安裝程式自動安裝並下載模型 0.71 GB）；Intel Mac、超過 8 人時沿用上一列的方法 |
+| 語音合成 (TTS) | **VoxCPM2** (OpenBMB，Apache-2.0) | **v2.27.0 起**：把文字念成台灣華語；內建 8 個 AI 產生的聲音（不是真人錄音），也可以匯入自己的台灣華語錄音。GPU 伺服器或 Apple Silicon Mac（MLX 8bit） |
+| 語音合成 (TTS，選用) | **BreezyVoice** (MediaTek，Apache-2.0) | 台灣口音，但合成速度慢，不適合即時；只在 GPU 伺服器，安裝時問要不要加裝（預設否） |
+| 破音字判斷 | **g2pW**（Apache-2.0）＋教育部《重編國語辭典修訂本》 | 朗讀時判斷台灣念法（辭典資料安裝時下載，著作權屬教育部，CC BY-ND 3.0 TW） |
 
 所有模型皆在自有設備上推論（本機或區域網路內的 GPU 伺服器），**不需要任何第三方雲端 API**。
 
@@ -72,6 +75,13 @@ Author: Jason Cheng (Jason Tools)
 | **vLLM** | GPU 伺服器的離線辨識（實驗） | Qwen3-ASR 0.6B |
 | **mlx-audio** | Apple Silicon 本機離線辨識（實驗，v2.24.0） | Qwen3-ASR 0.6B（MLX 8bit） |
 | **transformers** | Windows / Linux 本機離線辨識（CUDA 或 CPU，實驗，v2.24.0）；三平台講者辨識（CUDA／Apple MPS／CPU，v2.26.0） | Qwen3-ASR 0.6B、Nemotron 3 Diarization |
+
+**語音合成的推論引擎**（v2.27.0）：
+
+| 引擎 | 用途 | 可跑的模型 |
+|------|------|-----------|
+| **PyTorch**（CUDA 13） | GPU 伺服器朗讀（VoxCPM2 比說話快一點；BreezyVoice 約 1.2～2.5 倍音訊長度） | VoxCPM2（bf16）、BreezyVoice |
+| **mlx-audio** | Apple Silicon Mac 本機朗讀（記憶體 16 GB 以上，大約跟說話一樣快） | VoxCPM2（MLX 8bit） |
 
 
 
@@ -180,6 +190,28 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 
 ![日中雙向離線逐字稿（HTML 聊天風格）](images/bidi-ja-zh-html.png)
 
+### 7. 文字轉語音：台灣華語朗讀（v2.27.0）
+WebUI「輸入來源」選「**文字內容朗讀**」：貼上文字或選文字檔，邊念邊顯示字幕（字幕模式、懸浮字幕都可以用）；選「**文字轉語音檔**」直接存成 MP3／WAV。命令列：`./start.sh --tts-file 講稿.txt`。
+在自己的 **GPU 伺服器** 或 **Apple Silicon Mac** 上合成，不使用作業系統內建的語音。
+
+- **合成模型**：預設 [OpenBMB VoxCPM2](https://huggingface.co/openbmb/VoxCPM2)（Apache-2.0），**選它當預設是為了速度與效能**：GPU 伺服器比說話快一點、Mac 本機大約跟說話一樣快，兩種機器都能跑，邊念邊播不會卡。
+  另外可選 [MediaTek BreezyVoice](https://huggingface.co/MediaTek-Research/BreezyVoice-300M)（Apache-2.0）：**台灣口音，但合成速度慢，不適合即時**（合成時間約音訊長度的 1.2～2.5 倍），只在 GPU 伺服器；安裝或升級時會問要不要加裝（預設否），適合轉成語音檔、不趕時間的時候
+- **台灣念法**：VoxCPM2 主要學的是大陸念法，我們花了不少功夫讓它念台灣話：
+  - **以台灣日常說法為準**：教育部《重編國語辭典修訂本》為基礎，破音字依上下文判斷（銀行、便宜、垃圾念ㄌㄜˋ ㄙㄜˋ、伺服器的「伺」念ㄙˋ）；
+    辭典的念法跟日常說法不同的改用日常說法（市場的「場」念ㄔㄤˇ、強制的「強」念ㄑㄧㄤˊ、參與、擷取、液化、亞洲、包括、角色）；拿不準的做成同一句兩種念法，由人試聽決定
+  - 用近 400 句台灣華語句子（新聞、生活對話）自動合成、再辨識回來逐字比對，並把將近 5,000 句裡指定的念法逐一檢查是不是台灣日常說法，找出念錯的地方一一修正（例：很差的「差」、阿嬤、一曝十寒、「一種生物」不再被切成「種生」）
+  - 模型不認得的罕用字（矽谷的「矽」、人名用字）一律標上注音；文字轉成模型最熟悉的寫法再送進去，念錯的地方少了約八成
+  - 管理者可以加自訂發音（預設「和」念ㄏㄢˋ），並預覽送進模型的文字
+- **英文與數字**：英文、日期、時間、IP、版本號、電話照原文念；千分位逗號、負數、金錢符號（NT$、$）先換成念得對的寫法
+- **聲音**：內建 8 個（女聲、男聲各 4 個：溫柔、主播、活潑、沉穩／低沉、清爽、主播、溫和），由 VoxCPM2 依文字描述產生，**不是真人錄音**，裝好就能念。
+  也可以匯入自己的：管理者匯入一段 10～20 秒的台灣華語錄音與逐字稿，**必須取得錄音者的書面同意**
+- 聲音依性別分組；語速 0.8～1.5 倍（音調不變）、段落停頓長短；暫停、停止（已念的照樣存檔）
+- 每一句顯示合成花的時間與播放等了多久；「從這段念」從任一句重念、結束後「重新朗讀」
+- 播放到這台電腦的喇叭（可選裝置），或在開著網頁的那台電腦的**瀏覽器**播放（伺服器、容器沒有喇叭也能用）；可同時存成 MP3／WAV
+- 本工具的摘要檔只念「重點摘要」；字幕檔不念時間軸。長文只預先合成接下來兩段
+
+![文字轉語音：台灣華語朗讀](images/tts-settings.png)
+
 &nbsp;
 
 &nbsp;
@@ -196,7 +228,7 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 - **會議主題感知翻譯**：可指定會議主題（如「ZFS 儲存管理」），讓 LLM 根據領域上下文精準翻譯專業術語
 - **自動偵測 LLM 伺服器**：支援 Ollama、LM Studio、Jan.ai、vLLM、LocalAI、llama.cpp、LiteLLM 等本地端 LLM 伺服器
 - **互動式選單 + CLI 模式**：新手友善的選單介面，進階用戶可用命令列參數直接啟動
-- **WebUI 瀏覽器介面**：`./start.sh --webui` 在瀏覽器中操作所有功能，支援即時字幕、離線處理、講者辨識、摘要，手機/平板也可使用
+- **WebUI 瀏覽器介面**：`./start.sh --webui` 在瀏覽器中操作所有功能，支援即時字幕、離線處理、講者辨識、摘要、台灣華語朗讀，手機/平板也可使用
 - **關鍵字即時通知**：設定關鍵字，即時辨識出現時自動發出通知。可用於追蹤會議重點、開會時提醒留意關鍵議題，或線上課程摸魚時讓系統在「請實作」「這個會考」時自動提醒。支援全螢幕警示特效、瀏覽器推播、音效提示（警示/柔和可選）、懸浮字幕閃爍，同一關鍵字冷卻機制避免重複通知
 - **字幕轉發**：即時字幕自動轉發到通訊平台（Telegram / Slack / Discord / Teams / LINE / Nextcloud Talk / 通用 API），可同時啟用多個平台、自訂發送間隔與內容（含時間/原文/譯文）。通用 API 支援 Body 範本（`{{text}}` 變數）搭配自訂 Headers
 - **懸浮字幕**（感謝 OSSLab 熊大提供建議）：桌面半透明字幕覆蓋視窗（PyQt6），可疊加於任何應用程式上方。字體依視窗大小自動縮放、可拖曳移動與調整大小、滑鼠穿透模式、字幕切換淡入淡出動畫。單語/雙語自動切換高度
@@ -269,6 +301,7 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 | **最小安裝** | **~3 GB** | venv + 1 個 Whisper 模型 + 基本套件 |
 | **推薦安裝** | **~8 GB** | 加上 HuggingFace 快取（離線處理音訊檔用） |
 | **完整安裝** | **~14 GB** | 全部 Whisper 模型 + HuggingFace 快取 + Moonshine |
+| 文字轉語音（Mac，選配） | ~4 GB | VoxCPM2 MLX 8bit 3.2 GB ＋ g2pW 0.6 GB（Apple Silicon、記憶體 16 GB 以上） |
 
 #### GPU 伺服器（選配）
 
@@ -280,6 +313,8 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 | openai-whisper | ~500 MB | CTranslate2 CUDA 不可用時才安裝 |
 | **最小安裝** | **~5 GB** | PyTorch + 1 個模型 |
 | **完整安裝** | **~12 GB** | PyTorch + 全部 5 個模型 + 講者辨識套件 |
+| 文字轉語音（選配） | ~11 GB | 獨立的 Python 環境 5.2 GB（CUDA 13 版 PyTorch）＋ VoxCPM2 4.7 GB ＋ g2pW 0.6 GB；安裝時要 20 GB 可用空間 |
+| BreezyVoice（選配） | ~8 GB | 獨立的 Python 環境 5.5 GB ＋ 模型 2.2 GB；安裝時要 16 GB 可用空間 |
 
 &nbsp;
 
@@ -348,7 +383,7 @@ irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/instal
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-> **Windows 的 PowerShell 預設不允許執行腳本**：上面用 `-ExecutionPolicy Bypass` 只對這一次有效。安裝結束時會問「是否允許執行本機腳本」（RemoteSigned，只影響目前使用者），**建議選「是」**，之後才能直接打 `.\start.ps1`、`.\install.ps1 -Upgrade`；選「否」的話改用 `powershell -ExecutionPolicy Bypass -File start.ps1`（v2.26.15 起）。
+> **Windows 的 PowerShell 預設不允許執行腳本**：上面用 `-ExecutionPolicy Bypass` 只對這一次有效。v2.27.0 起安裝程式（含 `-Upgrade`）在 Windows 預設狀態時會自動改成允許執行本機腳本（RemoteSigned，只影響目前使用者；從網路下載、沒有簽章的腳本照樣擋），之後就能直接打 `.\start.ps1`、`.\install.ps1 -Upgrade`。執行原則是你或公司刻意設過的不會自動改（有人在終端機前才問，預設否），那時改用 `powershell -ExecutionPolicy Bypass -File start.ps1`。
 
 安裝腳本會自動下載並設定所有地端 AI 模型和相依套件（Whisper 語音辨識模型、Moonshine 串流辨識模型、NLLB 離線翻譯模型、Argos 離線翻譯模型等）。安裝最後會詢問是否設定 GPU 語音辨識伺服器（選填），若有安裝 NVIDIA GPU 的 Ubuntu/Linux 主機（消費級 RTX 4090/5090 亦可，需已安裝 CUDA），可透過 SSH 自動在伺服器安裝 PyTorch、faster-whisper 等套件，大幅加速語音辨識。
 
@@ -765,6 +800,12 @@ WebUI 瀏覽器介面（./start.sh --webui）：
     → TCP localhost:19780 接收即時事件
     → WebSocket 推送到瀏覽器（即時字幕、進度、狀態）
     → 支援遠端觀看（密碼保護）、手機/平板
+
+文字轉語音（WebUI 輸入來源「文字內容朗讀／文字轉語音檔」、./start.sh --tts-file）：
+  文字 → 台灣念法（自訂發音 > 台灣日常念法 > 教育部辭典 > g2pW）
+    → VoxCPM2（GPU 伺服器 PyTorch / Apple Silicon MLX）或 BreezyVoice（GPU 伺服器，選用）＋ 內建或匯入的聲音
+      → 逐段播放（這台的喇叭／瀏覽器）＋ 字幕（WebUI、懸浮字幕、終端機）
+      → 同時存成 recordings/朗讀_*.mp3｜wav
 ```
 
 &nbsp;
@@ -864,6 +905,7 @@ cd C:\jt-live-whisper
 
 > Apple Silicon Mac 的統一記憶體架構讓 GPU 可直接存取系統記憶體，不需獨立顯示卡即可流暢執行 AI 推論。16GB 機型足以應付大多數使用場景。
 > 本機跑 Qwen3-ASR（實驗，v2.24.0）另需約 3.2 GB 記憶體、2.3 GB 磁碟；Intel Mac 不支援。
+> 本機朗讀（文字轉語音，v2.27.0）只在 Apple Silicon、記憶體 16 GB 以上提供：合成時另需約 7～10 GB 記憶體，磁碟約 4 GB（模型 3.2 GB、台灣念法資源 0.6 GB）；Intel Mac 不支援，改用 GPU 伺服器合成。
 
 ### Windows
 
@@ -877,6 +919,7 @@ cd C:\jt-live-whisper
 
 > **Windows + NVIDIA GPU 是最簡單的高效能方案**：不需要額外硬體或伺服器設定，安裝後直接使用 large-v3-turbo 模型，即時辨識和離線處理都有 CUDA 加速。最低建議 6 GB VRAM 的 NVIDIA 顯示卡。沒有獨顯的 Windows 電腦仍可使用，但速度會慢很多。
 > 本機跑 Qwen3-ASR（實驗，v2.24.0）：有 NVIDIA 顯示卡約需 5 GB 顯示記憶體；沒有獨顯時可以選（電腦記憶體需 12 GB 以上），但處理時間可能比錄音還長。
+> 朗讀（文字轉語音，v2.27.0）在 Windows／Linux 本機不提供（只有 CPU 太慢），由 GPU 伺服器合成，本機不另外佔空間。
 
 ### Linux
 
@@ -899,6 +942,7 @@ cd C:\jt-live-whisper
 | NVIDIA DGX Spark | 128 GB | ~10 秒 | 同時跑 Ollama LLM + Whisper 辨識，一機搞定 |
 
 > 要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡。
+> 要啟用文字轉語音（v2.27.0）時需再多約 9.5 GB 記憶體（第一次用到才啟動、閒置 30 分鐘自動釋放）、約 11 GB 磁碟（安裝時要 20 GB 可用空間）；顯示卡驅動要支援 CUDA 12.8 以上（DGX Spark 要 CUDA 13）。
 
 ### LLM 伺服器（選配，翻譯/摘要用）
 
@@ -919,7 +963,7 @@ cd C:\jt-live-whisper
 
 ## 免責聲明
 
-本工具按「現狀」（AS IS）提供，不附帶任何明示或暗示的保證。語音辨識、翻譯、講者辨識及摘要等功能的輸出結果僅供參考，不保證其準確性與完整性。使用者應自行驗證輸出結果，不應將未經人工審核的輸出直接用於法律文件、醫療紀錄、財務報告或其他需要高度準確性的場合。使用者應確保擁有合法錄音權利並遵守當地隱私法規。作者及貢獻者不對因使用本工具而產生的任何損害承擔責任。
+本工具按「現狀」（AS IS）提供，不附帶任何明示或暗示的保證。語音辨識、翻譯、講者辨識及摘要等功能的輸出結果僅供參考，不保證其準確性與完整性。使用者應自行驗證輸出結果，不應將未經人工審核的輸出直接用於法律文件、醫療紀錄、財務報告或其他需要高度準確性的場合。使用者應確保擁有合法錄音權利並遵守當地隱私法規（建議做法見[資料保護與合規](COMPLIANCE.md)）。作者及貢獻者不對因使用本工具而產生的任何損害承擔責任。
 
 &nbsp;
 
@@ -941,5 +985,9 @@ cd C:\jt-live-whisper
 
 講者辨識預設使用的 [NVIDIA Nemotron 3 Diarization](https://huggingface.co/nvidia/Nemotron-3-Diarization) 模型採 OpenMDW-1.1 授權，
 安裝時從 HuggingFace 下載（不需帳號），不隨本專案散布。
+
+文字轉語音使用的 [OpenBMB VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) 模型、選用的 [MediaTek BreezyVoice](https://github.com/mtkresearch/BreezyVoice)（程式與模型）與 [g2pW](https://github.com/GitYCC/g2pW) 採 Apache-2.0 授權，
+台灣念法使用中華民國教育部《重編國語辭典修訂本》（CC BY-ND 3.0 TW，經 [g0v 萌典](https://github.com/g0v/moedict-data) 取得），
+都在安裝時下載，不隨本專案散布。
 
 Copyright 2026 Jason Cheng (Jason Tools)

@@ -27,6 +27,7 @@
       <a class="nav-page" href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
       <a class="nav-page" href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a>
       <a class="nav-page" href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <a class="nav-page" href="compliance.html"><span class="zh">資料與合規</span><span class="en">Compliance</span></a>
       <span class="nav-sep" aria-hidden="true"></span>
       <a class="btn btn-ghost btn-sm" href="sop.html" aria-current="page"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
       <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
@@ -69,6 +70,7 @@
       <a class="lv3" href="#4-12---input-音訊檔離線處理">4-12. --input 音訊檔離線處理</a>
       <a class="lv3" href="#4-13-台語台灣閩南語辨識">4-13. 台語（台灣閩南語）辨識</a>
       <a class="lv3" href="#4-14---diarize-講者辨識">4-14. --diarize 講者辨識</a>
+      <a class="lv3" href="#4-15-文字轉語音台灣華語朗讀v2270-起">4-15. 文字轉語音：台灣華語朗讀（v2.27.0 起）</a>
       <a class="lv3" href="#伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</a>
       <a class="" href="#五rest-api給其他系統串接">五、REST API（給其他系統串接）</a>
       <a class="lv3" href="#已上線的整合jt-doc-tools">已上線的整合：jt-doc-tools</a>
@@ -135,7 +137,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.26.18 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.27.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -738,7 +740,7 @@ bash install.sh --server
 <pre><code class="language-powershell">powershell -ExecutionPolicy Bypass -File install.ps1
 </code></pre>
 <blockquote>
-<p><strong>Windows 的 PowerShell 預設不允許執行腳本</strong>：上面用 <code>-ExecutionPolicy Bypass</code> 只對這一次有效。安裝結束時會問「是否允許執行本機腳本」（RemoteSigned，只影響目前使用者），<strong>建議選「是」</strong>，之後才能直接打 <code>.\start.ps1</code>、<code>.\install.ps1 -Upgrade</code>；選「否」的話改用 <code>powershell -ExecutionPolicy Bypass -File start.ps1</code>（v2.26.15 起）。</p>
+<p><strong>Windows 的 PowerShell 預設不允許執行腳本</strong>：上面用 <code>-ExecutionPolicy Bypass</code> 只對這一次有效。v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態時會自動改成允許執行本機腳本（RemoteSigned，只影響目前使用者；從網路下載、沒有簽章的腳本照樣擋），之後就能直接打 <code>.\start.ps1</code>、<code>.\install.ps1 -Upgrade</code>。執行原則是你或公司刻意設過的不會自動改（有人在終端機前才問，預設否），那時改用 <code>powershell -ExecutionPolicy Bypass -File start.ps1</code>。</p>
 </blockquote>
 <p>安裝腳本會自動檢查並安裝以下項目：</p>
 <blockquote>
@@ -949,8 +951,8 @@ bash install.sh --server
 <p>未設定 GPU 伺服器時，所有語音辨識在本機執行，功能完全相同但速度較慢。</p>
 <p>安裝程式會自動處理 SSH 金鑰：若 <code>config.json</code> 中設定的 SSH Key 不存在，會自動產生 ed25519 金鑰並部署公鑰到伺服器，之後免密碼登入。重複執行安裝程式時，已安裝的套件會自動跳過，不會重複安裝。</p>
 <p>安裝前若偵測到 jt-live-whisper 相關程序正在執行，可選擇 K 強制結束程序後繼續安裝，避免檔案鎖定衝突（尤其 Windows）。</p>
-<p><strong>磁碟空間需求（本機）：</strong> 最小安裝約 3 GB（venv + 1 個 Whisper 模型 + 基本套件），推薦 8 GB 以上（含 HuggingFace 快取供離線處理用），完整安裝約 14 GB（全部模型 + Moonshine）。macOS 額外需要 Homebrew 套件約 140 MB（cmake + sdl2 + ffmpeg）。安裝腳本會在安裝前自動檢查可用空間。</p>
-<p><strong>磁碟空間需求（GPU 伺服器）：</strong> 最小安裝約 5 GB（PyTorch + 1 個模型），完整安裝約 12 GB（PyTorch + 全部 5 個模型 + 講者辨識套件）。</p>
+<p><strong>磁碟空間需求（本機）：</strong> 最小安裝約 3 GB（venv + 1 個 Whisper 模型 + 基本套件），推薦 8 GB 以上（含 HuggingFace 快取供離線處理用），完整安裝約 14 GB（全部模型 + Moonshine）。macOS 額外需要 Homebrew 套件約 140 MB（cmake + sdl2 + ffmpeg）。Apple Silicon Mac 啟用本機朗讀（文字轉語音）另需約 4 GB（模型 3.2 GB、台灣念法資源 0.6 GB）。安裝腳本會在安裝前自動檢查可用空間。</p>
+<p><strong>磁碟空間需求（GPU 伺服器）：</strong> 最小安裝約 5 GB（PyTorch + 1 個模型），完整安裝約 12 GB（PyTorch + 全部 5 個模型 + 講者辨識套件）。啟用文字轉語音另需約 11 GB（獨立的 Python 環境 5.2 GB、VoxCPM2 4.7 GB、g2pW 0.6 GB；安裝時要 20 GB 可用空間）。選用的 BreezyVoice 再加約 8 GB（Python 環境 5.5 GB、模型 2.2 GB；安裝時要 16 GB 可用空間）。</p>
 <h3 id="gpu-伺服器的排隊與開機自動啟動v2217-起">GPU 伺服器的排隊與開機自動啟動（v2.21.7 起）</h3>
 <p><strong>排隊：一次一件，先到先做。</strong> 以前多個用戶端同時送檔時，伺服器會全部同時跑：每一件都變慢，顯示記憶體也可能不夠。現在分成兩條線，各自一次只跑一件：</p>
 <table>
@@ -1329,7 +1331,7 @@ cd C:\jt-live-whisper
 <blockquote>
 <p><strong>Windows 使用者請注意：</strong> 以下範例以 macOS / Linux 指令為主。Windows 使用者請將 <code>./start.sh</code> 替換為 <code>.\start.ps1</code>，<code>./install.sh</code> 替換為 <code>.\install.ps1</code>，安裝目錄為 <code>C:\jt-live-whisper</code>。其餘參數完全相同。</p>
 <p>若出現「running scripts is disabled on this system」（因為這個系統上已停用指令碼執行）錯誤，請先執行以下指令（只需執行一次）；
-v2.26.15 起安裝程式結束時會詢問並代為設定：</p>
+v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態時會自動設定；之前的版本、或執行原則是刻意設過的，請自己執行：</p>
 <pre><code class="language-powershell">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 </code></pre>
 </blockquote>
@@ -1359,6 +1361,7 @@ v2.26.15 起安裝程式結束時會詢問並代為設定：</p>
 <li>錄音中顯示錄音檔大小與磁碟剩餘空間；「暫停」在三個平台都有作用（v2.26.3 起，先前 Windows 按了沒反應、純錄音按了也照錄）</li>
 <li>按「停止」後，有錄音的會先轉成 MP3 再結束：按鈕顯示「存檔中...」、底部顯示轉檔進度，一小時的錄音約要幾十秒，<strong>這段時間不要關閉終端機視窗</strong>。完成後畫面列出錄音檔（v2.26.4 起；先前 4 秒就強制結束，畫面寫「程式異常結束（錯誤碼 -15）」，資料夾裡留下同名的 WAV 與 MP3，兩個都是完整的同一段錄音）</li>
 <li>防呆驗證（未選檔案、LLM 未設定、重複啟動等）</li>
+<li><strong>結束 WebUI</strong>：在執行它的終端機按一次 Ctrl+C，畫面會顯示「正在停止 WebUI...」；有錄音或朗讀在進行時會先等它存完檔。急著結束就再按一次 Ctrl+C，WebUI 立刻結束，錄音或朗讀照樣在背景存完檔（v2.27.0 起；先前存檔中再按 Ctrl+C 會讓 WebUI 卡住、怎麼按都結束不了）</li>
 <li>淺色/深色主題切換</li>
 <li>字幕轉發：即時字幕自動轉發到通訊平台（見下方說明）</li>
 </ul>
@@ -2860,6 +2863,199 @@ v2.26.15 起安裝程式結束時會詢問並代為設定：</p>
 <li>GPU 伺服器執行需先透過安裝腳本（<code>install.sh</code>）在伺服器安裝 resemblyzer + spectralcluster；Nemotron 另需 transformers 5.18，安裝腳本檢查時會列入「修復伺服器環境」，同意後補裝</li>
 </ul>
 <hr>
+<h3 id="4-15-文字轉語音台灣華語朗讀v2270-起">4-15. 文字轉語音：台灣華語朗讀（v2.27.0 起）</h3>
+<p>把文字念成台灣華語：WebUI 的「輸入來源」選「<strong>文字內容朗讀</strong>」邊念邊顯示字幕，或選「<strong>文字轉語音檔</strong>」直接存成 MP3／WAV；命令列與互動選單也可以用。合成在自己的 GPU 伺服器或 Apple Silicon Mac 上進行，資料不經過雲端，也不使用作業系統內建的語音。</p>
+<p><strong>預設用 VoxCPM2，是為了速度與效能</strong>：GPU 伺服器比說話快一點、Mac 本機大約跟說話一樣快，兩種機器都能跑，邊念邊播不會卡；它主要學的是大陸念法，台灣念法由本工具箱補上（見「台灣念法與發音字典」）。
+另外可以選 <strong>BreezyVoice</strong>（MediaTek）：用台灣華語訓練、口音道地，<strong>但合成速度慢，不適合即時</strong>（合成時間約音訊長度的 1.2～2.5 倍），只在 GPU 伺服器提供。適合轉成語音檔、不趕時間的時候；拿來即時朗讀，每段之間會停下來等合成。</p>
+<h4 id="模型與推論引擎">模型與推論引擎</h4>
+<table>
+<thead>
+<tr>
+<th>AI 模型</th>
+<th>用途</th>
+<th>說明</th>
+<th>授權</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>OpenBMB VoxCPM2（<code>openbmb/VoxCPM2</code>）</td>
+<td>語音合成</td>
+<td>GPU 伺服器用，bf16，約 4.7 GB</td>
+<td>Apache-2.0</td>
+</tr>
+<tr>
+<td>VoxCPM2 8bit（<code>mlx-community/VoxCPM2-8bit</code>）</td>
+<td>語音合成</td>
+<td>Mac 本機用，約 3.2 GB</td>
+<td>Apache-2.0</td>
+</tr>
+<tr>
+<td>MediaTek BreezyVoice（<code>MediaTek-Research/BreezyVoice-300M</code>）</td>
+<td>語音合成（選用）</td>
+<td>台灣口音，但合成速度慢，不適合即時；只在 GPU 伺服器，約 2.2 GB</td>
+<td>Apache-2.0</td>
+</tr>
+<tr>
+<td>g2pW</td>
+<td>破音字判斷</td>
+<td>依上下文判斷台灣念法，約 600 MB</td>
+<td>Apache-2.0</td>
+</tr>
+</tbody></table>
+<table>
+<thead>
+<tr>
+<th>推論引擎</th>
+<th>跑在哪裡</th>
+<th>速度（合成耗時 ÷ 音訊長度）</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PyTorch（CUDA 13）</td>
+<td>GPU 伺服器（NVIDIA）</td>
+<td>VoxCPM2 約 0.9（比說話快一點）；BreezyVoice 約 1.2～2.5</td>
+</tr>
+<tr>
+<td>MLX（mlx-audio）</td>
+<td>Apple Silicon Mac，記憶體 16 GB 以上</td>
+<td>6 步約 1.1、10 步約 1.5</td>
+</tr>
+</tbody></table>
+<ul>
+<li>兩者都沒有的機器（Windows、Linux 只有 CPU、Intel Mac）不提供文字轉語音：CPU 太慢，畫面會說明原因</li>
+<li>設定頁「語音合成」的「合成位置」列出 GPU 伺服器與 Mac 本機，不能用的反灰並寫原因（例如 GPU 伺服器還沒裝文字轉語音）</li>
+</ul>
+<h4 id="安裝">安裝</h4>
+<p><strong>GPU 伺服器</strong>：執行 <code>./install.sh</code>（Windows 為 <code>.\install.ps1</code>）設定或檢查 GPU 伺服器時，會問「要在 GPU 伺服器安裝文字轉語音嗎？」（預設「否」；沒有人可以回答時不裝）。也可以直接在伺服器上執行：</p>
+<pre><code class="language-bash">cd ~/jt-whisper-server &amp;&amp; venv/bin/python3 server.py --tts-setup
+</code></pre>
+<p>它會建立獨立的 Python 環境 <code>~/jt-whisper-server/venv-tts</code>（CUDA 13 版 PyTorch，與辨識服務分開）、下載 VoxCPM2、g2pW 與教育部辭典，最後檢查顯示卡能不能用。裝完約佔 11 GB（Python 環境 5.2 GB，CUDA 13 版 PyTorch 自帶整組 CUDA 程式庫；模型 4.7 GB；g2pW 0.6 GB），安裝時要有 20 GB 可用空間。顯示卡驅動要支援 CUDA 12.8 以上；DGX Spark（GB10）要支援 CUDA 13（驅動 580 以上）。</p>
+<p><strong>BreezyVoice（選用）</strong>：安裝或升級時，設定好 GPU 伺服器之後會問「是否加裝 BreezyVoice？(y/N)」（預設「否」；沒有人可以回答時不問也不裝）。
+升級時回答「否」會記下來，之後升級不再問；想裝的話重新執行 <code>./install.sh</code>（Windows 為 <code>.\install.ps1</code>），或直接在伺服器上執行：</p>
+<pre><code class="language-bash">cd ~/jt-whisper-server &amp;&amp; venv/bin/python3 server.py --breezy-setup
+</code></pre>
+<p>它會建立獨立的 Python 環境 <code>~/jt-whisper-server/venv-breezy</code>、下載 BreezyVoice 的程式（固定版本，放在 <code>~/jt-whisper-server/breezyvoice/</code>）與模型，裝完約佔 8 GB（Python 環境 5.5 GB、模型 2.2 GB），安裝時要有 16 GB 可用空間。
+GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（重新執行安裝程式就會更新）。</p>
+<p><strong>Mac 本機</strong>（Apple Silicon、記憶體 16 GB 以上）：<code>./install.sh</code> 會問「是否在這台 Mac 啟用本機文字轉語音？」（預設「是」，按 Enter 就裝），下載 MLX 版模型與台灣念法資源（放在安裝資料夾的 <code>tts_data/</code>）。</p>
+<p><strong>檢查 GPU 伺服器時要密碼</strong>：這台電腦還沒有登入 GPU 伺服器的金鑰時，安裝程式會先說「這台電腦登入 root@… 需要密碼」再問（輸入時畫面不會顯示），輸入一次就把這台的金鑰加到伺服器，之後不用再輸入；沒有人可以輸入（自動化執行）時略過伺服器檢查（v2.27.0 起；以前密碼提示被「正在檢查伺服器環境」的轉圈蓋掉，看起來像卡住）。</p>
+<h4 id="聲音內建與匯入">聲音：內建與匯入</h4>
+<p><strong>內建 8 個聲音</strong>，裝好就能念：女聲（溫柔、主播、活潑、沉穩）、男聲（低沉、清爽、主播、溫和）。它們是 VoxCPM2 依文字描述（例如「年輕女性，聲音溫柔親切，台灣口音」）產生的，<strong>不是真人錄音</strong>，沒有肖像與授權的問題；沒有選聲音時用「女聲・溫柔」。內建聲音不能刪除、不能改分類，在「管理聲音」清單裡標「內建」。</p>
+<p>想要特定的人的聲音，可以匯入自己的參考錄音：合成出來的音色、口音、節奏全部來自你匯入的錄音，所以一定要用台灣華語的錄音。管理者在 WebUI「輸入來源」選「文字內容朗讀」→「語音合成」的「<strong>管理聲音</strong>」→「匯入聲音」：</p>
+<ol>
+<li>錄音檔：一個人、安靜沒有回音、平常的語速與語氣，10～20 秒最好（可接受 3～60 秒）；WAV、MP3、M4A、FLAC 都可以</li>
+<li>聲音名稱、分類（女聲／男聲／其他；只用來在聲音選單分組，之後可以在清單裡改。<strong>聲音本身由錄音決定</strong>，把女聲的錄音分類成男聲不會變成男聲）</li>
+<li>逐字稿：<strong>跟錄音內容一字不差</strong>（可以先用本工具箱辨識，再人工修正）</li>
+<li>錄音來源與同意：誰錄的、何時簽署同意書</li>
+<li>勾選「我已取得錄音者的書面同意」</li>
+</ol>
+<p>聲音屬於可以識別個人的資料：請先取得錄音者的書面同意（用途、範圍、期限、可要求停止與刪除、不得冒充本人），同意書內容請法務確認。第一個匯入的聲音自動成為預設；可以匯入多個，在清單裡「試聽」「設為預設」「刪除」。想要不同的說話方式（男聲、女聲、沉穩、輕快），就匯入不同人、不同語氣的錄音：音色與語氣都跟著參考錄音走。</p>
+<h4 id="朗讀webui">朗讀（WebUI）</h4>
+<ol>
+<li>「輸入來源」選「<strong>文字內容朗讀</strong>」（邊念邊顯示字幕）或「<strong>文字轉語音檔</strong>」（不播放，直接存檔）</li>
+<li>要念的文字：貼到文字框，或從清單選 <code>recordings/</code>、<code>logs/</code> 裡的文字檔（.txt、.md、.srt、.vtt），也可以把文字檔拖進來上傳。本工具的摘要檔只念「重點摘要」那一段；時間戳、條列符號、網址參數、字幕檔的時間軸不念。一次最多 100000 字</li>
+<li>「語音合成」：<ul>
+<li>合成模型：VoxCPM2（預設，速度快）或 BreezyVoice（標「台灣口音・較慢」，下方寫明「台灣口音，但合成速度慢，不適合即時」；只在 GPU 伺服器，沒有安裝時反灰並寫原因）</li>
+<li>合成位置：GPU 伺服器或 Mac 本機；選 BreezyVoice 時「本機」反灰</li>
+<li>聲音：依性別分組；「管理聲音」匯入、試聽、改性別、設為預設；「發音字典」改念法（見下一節）</li>
+<li>語速：慢（0.8 倍）、正常、稍快（1.2 倍）、快（1.5 倍），音調不變；存成的音訊檔也是這個速度</li>
+<li>段落停頓：短（0.2 秒）、一般（0.5 秒）、長（1 秒）</li>
+<li>Mac 本機才有「本機品質」：6 步較快（偶爾念錯數字）、10 步音質較好（慢約一半）</li>
+</ul>
+</li>
+<li>「朗讀輸出」：<ul>
+<li>播放裝置：系統預設、這台電腦的某個喇叭／耳機（接上新裝置後按「重新偵測」），或「<strong>瀏覽器</strong>」：從別台電腦開 WebUI、或執行 WebUI 的這台沒有喇叭（伺服器、容器）時選它，聲音在開著網頁的那台電腦播放</li>
+<li>「同時存成音訊檔」：MP3 或 WAV，存在 <code>recordings/朗讀_日期_時間.mp3</code></li>
+</ul>
+</li>
+<li>按「開始」：跟辨識一樣進入字幕畫面，<strong>每一段開始念的時候才顯示那一段</strong>（標「朗讀」；文字轉語音檔標「轉檔」）。字幕模式（按 T）、懸浮字幕（本機的「懸浮字幕」勾選啟用）都可以用，終端機也會印出每一段</li>
+<li>每一句字幕前面有兩個時間：<strong>合</strong>＝這一句合成花的秒數（比這一句本身短是綠色）、<strong>等</strong>＝播放等合成的秒數（第一句是按下開始後多久出聲；合成跟得上時不顯示）。終端機也會印出</li>
+<li>暫停（P）：聲音與字幕一起停；停止（S，按兩次）：已經合成的部分照樣存檔。念完或停止後，結束卡片上有音訊檔的下載連結（標「語音」）</li>
+<li><strong>重念</strong>：每一句字幕後面的「從這段念」從那一句念到最後（念到一半也可以按，會先停掉再從那一句開始）；結束卡片的「重新朗讀」（文字轉語音檔是「重新產生」）用同樣的文字與設定從頭再來一次</li>
+</ol>
+<p>長文依句子切段（每段最多約 80 字），朗讀時只預先合成到目前段落之後兩段；第一次朗讀時 GPU 伺服器要啟動合成程式，約等 30 秒。選「瀏覽器」播放時，朗讀中不要重新整理或關掉那個分頁：沒有分頁在播放時，約 90 秒後會停止朗讀並說明原因。</p>
+<blockquote>
+<p>升級到 v2.27.0 之後要<strong>重新啟動 WebUI</strong>（在執行它的終端機按 Ctrl+C 再啟動；伺服器版 <code>sudo systemctl restart jt-live-whisper-webui</code>）。只換了檔案、WebUI 還是舊版時，網頁最上方會出現提示。</p>
+</blockquote>
+<h4 id="朗讀命令列與互動選單">朗讀（命令列與互動選單）</h4>
+<p>互動選單（<code>./start.sh</code> 不帶參數）第一步「輸入來源」選 [3] 文字內容朗讀或 [4] 文字轉語音檔，接著選文字檔、聲音、語速與播放裝置。命令列：</p>
+<pre><code class="language-bash">./start.sh --tts-list                                         # 列出聲音與播放裝置
+./start.sh --tts-text &#39;今天下午三點半開會。&#39;                    # 用系統預設的喇叭念
+./start.sh --tts-file 講稿.txt --tts-rate 1.2 --tts-save mp3   # 念、同時存成 MP3
+./start.sh --tts-file 講稿.txt --tts-device none --tts-save wav  # 不播放，只存成 WAV
+</code></pre>
+<p>其他參數：<code>--tts-voice 聲音ID</code>、<code>--tts-pause short|normal|long</code>、<code>--tts-device 裝置ID</code>、<code>--tts-provider auto|remote|mlx</code>、<code>--tts-model voxcpm2|breezyvoice</code>（預設 voxcpm2；breezyvoice 只在 GPU 伺服器）、<code>--tts-steps 6|10</code>（Mac 本機）、<code>--tts-start N</code>（從第 N 段開始念）。設定（預設聲音、發音字典）讀 <code>config.json</code>。</p>
+<h4 id="台灣念法與發音字典">台灣念法與發音字典</h4>
+<p>VoxCPM2 預設會有部分大陸念法（例如垃圾念ㄌㄚ ㄐㄧ）。為了讓它念台灣話，我們做了這些事：</p>
+<ul>
+<li><strong>念法以台灣日常說法為準</strong>：教育部辭典為基礎，破音字依上下文判斷；辭典的念法跟日常說法不同的改用日常說法（市場的「場」、強制的「強」、簽署、擷取、液化、德黑蘭的「黑」）；拿不準的由人試聽決定</li>
+<li>用近 400 句台灣華語句子（新聞、生活對話）自動合成、再辨識回來逐字比對，並把將近 5,000 句裡指定的念法逐一檢查是不是台灣日常說法，找出念錯的原因一一修正</li>
+<li>模型不認得的罕用字一律標注音；文字轉成模型最熟悉的寫法再送進去，念錯的地方少了約八成</li>
+</ul>
+<p>送進模型前，程式先找出每個字的台灣念法，只有跟模型預設不同的字才指定讀音：</p>
+<ol>
+<li><strong>自訂發音</strong>（設定頁「發音字典」，管理者可改）：一行一個「詞 = 注音」，一個字一個注音、以空白分開，例如 <code>伺服器 = ㄙˋ ㄈㄨˊ ㄑㄧˋ</code>。預設只有一筆「和 = ㄏㄢˋ」；單字的自訂只用在辭典詞以外（「和平」「暖和」照辭典）</li>
+<li><strong>台灣日常念法</strong>：教育部辭典的念法跟台灣日常說法不同的，改用日常說法，例如：
+液（ㄧˋ）、亞（ㄧㄚˇ）、俄（ㄜˋ）、德黑蘭的黑（ㄏㄟ）、市場的場（ㄔㄤˇ）、包括的括（ㄍㄨㄚ）、成熟的熟（ㄕㄡˊ）、癌（ㄞˊ）、
+擷取的擷（ㄒㄧㄝˊ）、多麼的多（ㄉㄨㄛ）、無妨的妨（ㄈㄤˊ）、縱貫的縱（ㄗㄨㄥˋ）、簽署／部署的署（ㄕㄨˇ），
+以及角色（ㄐㄧㄠˇ）、強制（ㄑㄧㄤˊ）、牛仔（ㄗㄞˇ）、參與（ㄩˇ）、罪行（ㄒㄧㄥˊ）、記載（ㄗㄞˇ）等詞。
+拿不準的做成同一句兩種念法由人試聽決定，蝸牛、從容、優酪乳、剝皮、曝光、說服、寂寞、言行等照教育部</li>
+<li><strong>教育部《重編國語辭典修訂本》</strong>：以詞為單位找最長的詞；同一個詞有多個讀音時（大家、便宜、大夫）依上下文挑。
+由左往右找最長的詞會切錯，所以常用字（的、了、著、都、和、種、分、要、當、重等）在辭典詞裡的念法跟 g2pW 不同時，
+不採用那個詞、照 g2pW 看上下文（「扮演著重要」不會被切成「著重」、「一種生物」不會切出「種生」、「要不要」不會切出「不要」）</li>
+<li><strong>g2pW</strong>：辭典沒收的詞與單字依上下文判斷。g2pW 已知會判錯的幾個字另外修正：辭典以外的「蘋」念ㄆㄧㄥˊ（蘋概股）、
+很差的「差」念ㄔㄚˋ、兒化（那兒、鳥兒）念輕聲；異體字照辭典的字查（沈積＝沉積、什麽＝什麼）</li>
+<li>「一」「不」不指定（會變調）；台灣念法是輕聲的不強加；模型自己常念錯的字（命脈的脈、協會的協、阿嬤的嬤、一曝十寒的曝）一律指定</li>
+<li>模型詞彙裡沒有的字（約 8,200 個常用字以外，例如矽谷的矽、人名的昀、婞、蒨）一律指定讀音：這些字模型不認得，不指定一定念錯</li>
+</ol>
+<p>沒指定讀音的字會轉成簡體再送進模型：模型幾乎只學過簡體，繁體字比較容易念錯（自動偵測 188 句，疑似念錯由 119 處降到 26 處）；「著」依念法寫成「着」或「著」。
+「發音字典」裡的「預覽」會顯示送進模型的文字，<code>{ }</code> 裡是改用台灣念法的字（例如「倒垃圾」→「倒{le4}{se4}」）。</p>
+<h4 id="英文與數字">英文與數字</h4>
+<p>英文單字、縮寫、產品名（meeting、GPU、Kubernetes、iPhone 17 Pro）與大部分數字寫法模型自己念得對：日期（2026/10/09、10/9）、時間（3:30 念三點半）、IP、版本號、電話（逐位念）、小數、百分比、分數（1/3 念三分之一）、序數、單位（GB）。
+實測念錯的三種寫法，送進模型前會先換掉（預覽念法看得到）：</p>
+<table>
+<thead>
+<tr>
+<th>寫法</th>
+<th>換成</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>千分位逗號：1,250,000</td>
+<td>一百二十五萬（國字，台灣說法：兩千、一萬零五）</td>
+</tr>
+<tr>
+<td>負數：-5°C、-3.2%</td>
+<td>零下5度、負3.2%（電話、日期、3-5 天裡的「-」不當負號）</td>
+</tr>
+<tr>
+<td>金錢符號：NT$3,500、$1,999、€、£</td>
+<td>新台幣三千五百元、一千九百九十九美元、歐元、英鎊（<strong>「$」一律當美元</strong>，新台幣請寫 NT$）</td>
+</tr>
+</tbody></table>
+<p>教育部辭典裡全由數字字組成的詞（例如「五百」是古代職官名，念ㄨˇ ㄅㄛˊ）不拿來比對數字。長句切段不會切在 1,250,000、3:30、0.5 中間。</p>
+<p>教育部辭典資料在安裝時從 g0v 萌典專案（moedict-data）下載，轉成讀音對照後原始檔不留，著作權屬中華民國教育部（CC BY-ND 3.0 TW，出處寫在資源資料夾的 <code>NOTICE-moe.txt</code>）。</p>
+<h4 id="權限與限制">權限與限制</h4>
+<ul>
+<li>朗讀跟辨識共用「開始／停止」：同一個 WebUI 同一時間只做一件事。要開始朗讀，先停止正在進行的辨識</li>
+<li>開始朗讀、匯入／刪除聲音、改性別、預設聲音、發音字典只有管理者（或在本機開 WebUI）可以做；觀看密碼只能看字幕</li>
+<li>選「瀏覽器」播放時，聲音只在按「開始」的那個分頁播放；其他分頁、唯讀觀看的人只看得到字幕</li>
+<li>選這台電腦的喇叭播放、同時又有別的程式在擷取這台的系統音訊（另一個 jt-live-whisper、會議軟體錄影）時，念出來的聲音會被錄進去</li>
+<li>瀏覽器播放用的每段暫存音檔放在 <code>tts_tmp/</code>，念完就刪；程式中途被強制結束而留下的，超過 24 小時自動清掉</li>
+<li>Mac 本機預設 8bit＋擴散 6 步（大約跟說話一樣快），偶爾會念錯數字；「本機品質」可改成 10 步。GPU 伺服器一律 10 步</li>
+<li>即時字幕譯文自動播報還沒有做（下一版）</li>
+</ul>
+<h4 id="gpu-伺服器上的運作">GPU 伺服器上的運作</h4>
+<ul>
+<li>合成程式（<code>server.py --tts-worker</code>）第一次用到時才啟動（約 30 秒），閒置 30 分鐘自動關閉，把記憶體還給其他服務；一次合成一段</li>
+<li>啟動前檢查可用記憶體，不足 10 GB 時不啟動並說明原因，辨識服務不受影響。執行中約佔 9.5 GB（行程 3.6 GB＋顯示卡 5.8 GB；DGX Spark 的 CPU 與 GPU 共用記憶體）</li>
+<li>環境變數（寫在 <code>~/jt-whisper-server/server.env</code>）：<code>JT_TTS_IDLE</code>（閒置幾秒關閉，預設 1800）、<code>JT_TTS_MIN_MEM_GB</code>（預設 10）、<code>JT_TTS_PORT</code>（合成程式的埠號，預設辨識服務埠號＋12）</li>
+<li>匯入的參考錄音會依內容快取在伺服器的 <code>~/jt-whisper-server/tts/voices/</code></li>
+<li>BreezyVoice（選用）是另一個合成程式（<code>server.py --breezy-worker</code>，埠號＝辨識服務＋13，<code>JT_BREEZY_PORT</code>），一樣第一次用到才啟動（約 20 秒）、閒置 30 分鐘關閉；
+執行中約佔 7 GB（行程 4.7 GB＋顯示卡 2.1 GB），可用記憶體不足 8 GB（<code>JT_BREEZY_MIN_MEM_GB</code>）時不啟動。兩個模型各自一次合成一段，彼此不排隊</li>
+<li>BreezyVoice 的念法：挑哪些字加注音照 BreezyVoice 原本的規則（模型是這樣訓練的），念法用本工具箱的（台灣日常念法、教育部辭典、發音字典）；
+數字先轉成國字（版本號、IP 逐字念），不轉簡體（BreezyVoice 原本的流程先轉簡體會亂念）</li>
+</ul>
+<hr>
 <h3 id="伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</h3>
 <p><code>install.sh --server</code> 會把 WebUI 裝成 systemd 服務（<code>jt-live-whisper-webui</code>，
 預設埠 <strong>19781</strong>，綁 <code>0.0.0.0</code>）。但從<strong>別台電腦的瀏覽器</strong>連進去時有兩道限制：</p>
@@ -3731,7 +3927,7 @@ LLM 主機填「主機:連接埠」（例如 <code>192.168.1.40:11434</code>）�
 <p>程式在列舉 OpenAI 相容伺服器的模型時，會自動過濾掉 <code>owned_by</code> 為 <code>remote</code> 的模型。這類模型通常是伺服器代理到其他後端（如 Ollama）的伺服器模型，當後端斷線時仍會殘留在模型清單中，選用後會導致翻譯失敗。如果需要使用伺服器模型，請直接連接該後端伺服器（例如直接指定 Ollama 的位址）。</p>
 <h3 id="q-windows-上-powershell-執行原則限制無法執行-ps1-腳本windows">Q: Windows 上 PowerShell 執行原則限制，無法執行 .ps1 腳本？（Windows）</h3>
 <p>Windows 預設不允許執行 PowerShell 腳本（各範圍都沒設定時就是 Restricted），所以 <code>.\start.ps1</code>、<code>.\install.ps1 -Upgrade</code> 會出現「因為這個系統上已停用指令碼執行」。
-v2.26.15 起安裝程式結束時會詢問是否允許（選「是」就好）；之前裝的、或選了「否」的，開啟 PowerShell 執行一次：</p>
+v2.27.0 起安裝程式與 <code>-Upgrade</code> 在 Windows 預設狀態時會自動允許（升級上來的機器第二次 <code>-Upgrade</code> 才會處理：第一次跑的是舊的安裝程式）；執行原則是你或公司刻意設成 Restricted／AllSigned 的不會自動改。要自己允許的話，開啟 PowerShell 執行一次：</p>
 <pre><code class="language-powershell">Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 </code></pre>
 <p>不想變更設定的話，每次改用 <code>powershell -ExecutionPolicy Bypass -File start.ps1</code>。公司用群組原則鎖住執行原則時無法變更，也是用這個方式。桌面捷徑不受影響（捷徑本來就這樣啟動）。</p>
@@ -3877,6 +4073,7 @@ v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝�
 <p>Apple Silicon Mac 的統一記憶體架構讓 GPU 可直接存取系統記憶體，不需獨立顯示卡即可流暢執行 AI 推論。16 GB 機型足以應付大多數使用場景。</p>
 <blockquote>
 <p>本機跑 Qwen3-ASR（實驗，v2.24.0 起）另需約 3.2 GB 記憶體與 2.3 GB 磁碟（模型），M5 上 37 分鐘會議約 1 分半處理完；Intel Mac 不支援。</p>
+<p>本機朗讀（文字轉語音，v2.27.0）只在 Apple Silicon、記憶體 16 GB 以上提供：合成時另需約 7～10 GB 記憶體，磁碟約 4 GB（模型 3.2 GB、台灣念法資源 0.6 GB）；Intel Mac 不支援，改用 GPU 伺服器合成。</p>
 </blockquote>
 <h3 id="windows-建議配置">Windows 建議配置</h3>
 <p>Windows 搭配 NVIDIA GPU（CUDA）可大幅加速 faster-whisper 語音辨識，<strong>不需要另外架設 GPU 伺服器，單機就能享受 GPU 加速效能</strong>。安裝程式會自動偵測 NVIDIA GPU 並安裝 CUDA 版 PyTorch，無需手動設定。</p>
@@ -3927,6 +4124,7 @@ v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝�
 <blockquote>
 <p>本機跑 Qwen3-ASR（實驗，v2.24.0 起）：有 NVIDIA 顯示卡時約需 5 GB 顯示記憶體、3.4 GB 磁碟（模型）；
 沒有獨顯時可以選（電腦記憶體需 12 GB 以上），但<strong>處理時間可能比錄音還長</strong>（見「Qwen3-ASR（實驗）」的執行位置表）。</p>
+<p>朗讀（文字轉語音，v2.27.0）在 Windows／Linux 本機不提供（只有 CPU 太慢），由 GPU 伺服器合成，本機不另外佔空間。</p>
 </blockquote>
 <p><strong>CUDA 版本注意事項：</strong> faster-whisper 使用的 CTranslate2 引擎需要 CUDA 12.x 的程式庫（<code>cublas64_12.dll</code>）。若系統安裝的是 CUDA Toolkit 13.x，安裝腳本會自動偵測並安裝 <code>nvidia-cublas-cu12</code> 套件提供相容程式庫。若仍出現「Library cublas64_12.dll is not found」錯誤，可另外安裝 <a href="https://developer.nvidia.com/cuda-12-8-0-download-archive">CUDA Toolkit 12.8</a>（可與 13.x 並存）。</p>
 <h3 id="linux-建議配置">Linux 建議配置</h3>
@@ -3983,6 +4181,7 @@ v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝�
 <blockquote>
 <p>要啟用 Qwen3-ASR（實驗）時，伺服器需再多約 7~9 GB 顯示記憶體常駐（處理長錄音時約 9 GB），
 建議 16 GB 以上的顯示卡；另需約 10 GB 磁碟放它的獨立環境（<code>venv-qwen</code>）與模型約 4 GB。</p>
+<p>要啟用文字轉語音（v2.27.0）時需再多約 9.5 GB 記憶體（第一次用到才啟動、閒置 30 分鐘自動釋放）、約 11 GB 磁碟（安裝時要 20 GB 可用空間）；顯示卡驅動要支援 CUDA 12.8 以上（DGX Spark 要 CUDA 13）。</p>
 </blockquote>
 <h3 id="llm-伺服器建議選配翻譯摘要用">LLM 伺服器建議（選配，翻譯/摘要用）</h3>
 <table>
@@ -4078,6 +4277,7 @@ rm -rf ~/.cache/huggingface/hub/models--*--faster-whisper-*
     <div>
       <a href="index.html">首頁</a> ·
       <a href="usage.html">安裝與使用</a> ·
+      <a href="compliance.html">資料與合規</a> ·
       <a href="https://github.com/jasoncheng7115/jt-live-whisper/blob/main/SOP.md" target="_blank" rel="noopener">SOP.md 原始檔</a> ·
       <a href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
     </div>

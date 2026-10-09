@@ -2512,7 +2512,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.26.18"
+APP_VERSION = "2.27.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -11772,6 +11772,446 @@ def run_record_only(rec_device, topic=None, lb_device=None, mic_device=None, cha
         print()
 
 
+# ─── 文字轉語音：朗讀模式（v2.27.0）──────────────────────────────
+# 朗讀是主程式的一個模式（2026-10-09 使用者：「要整合進本來流程」）：WebUI 的「文字內容朗讀／文字轉語音檔」、
+# 命令列 --tts-file／--tts-text 都走這裡；字幕（終端機、WebUI 對話／字幕模式、懸浮字幕）用既有的 transcription 事件。
+# 播放三種：本機喇叭（sounddevice）、瀏覽器（WebUI 依序取每段音檔播放，播到哪段回報，字幕跟著那段出現）、不播放只存檔
+_TTS_POS_FLAG = os.path.join(SCRIPT_DIR, ".webui_tts_pos")   # webui.py 寫入「<朗讀編號> <瀏覽器正在播第幾段>」
+_TTS_BROWSER_STALL = 90          # 瀏覽器多久沒有播下一段就當成分頁關了（另加兩倍的段落長度）
+
+
+def _tts_output_devices():
+    """播放裝置清單（有輸出聲道的）。Windows 同一個裝置會依 MME／DirectSound／WASAPI 各列一次，只列系統預設輸出那一組"""
+    out = []
+    try:
+        import sounddevice as sd
+        default_out = sd.default.device[1]
+        ha = None
+        if default_out is not None and default_out >= 0:
+            try:
+                ha = sd.query_devices(default_out)["hostapi"]
+            except Exception:
+                ha = None
+        for i, d in enumerate(sd.query_devices()):
+            if d["max_output_channels"] > 0 and (ha is None or d["hostapi"] == ha):
+                out.append({"id": i, "name": d["name"], "default": i == default_out,
+                            "sr": int(d["default_samplerate"])})
+    except Exception:                       # 沒有音效卡（伺服器、容器）：清單是空的，WebUI 只剩「瀏覽器」
+        pass
+    return out
+
+
+def _tts_fail(msg):
+    """朗讀開始前的錯誤：印在錯誤輸出（WebUI「啟動失敗」卡片看得到），結束碼 1"""
+    print(f"[錯誤] {msg}", file=sys.stderr, flush=True)
+    sys.exit(1)
+
+
+def _tts_list():
+    try:
+        import jtlw_tts as T
+    except Exception as e:
+        _tts_fail(f"文字轉語音元件載入失敗（{type(e).__name__}: {e}）：請再執行一次升級")
+    default_vid = T.default_voice_id(load_config())
+    print(f"\n{C_TITLE}{BOLD}▎ 聲音{RESET}")
+    vs = T.list_voices()
+    if not vs:
+        print(f"  {C_DIM}還沒有聲音：在 WebUI 的「文字內容朗讀」按「管理聲音」匯入一段台灣華語錄音{RESET}")
+    for v in vs:
+        mark = f"  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}" if v["id"] == default_vid else ""
+        if v.get("builtin"):
+            mark = f"  {C_DIM}內建{RESET}" + mark
+        g = T.GENDERS.get(v.get("gender") or "", "")
+        print(f"  {v['id']}  {v['name']}{'（' + g + '）' if g else ''}  {C_DIM}{v.get('duration')} 秒，來源：{v.get('source')}{RESET}{mark}")
+    print(f"\n{C_TITLE}{BOLD}▎ 播放裝置{RESET}")
+    devs = _tts_output_devices()
+    if not devs:
+        print(f"  {C_DIM}找不到播放裝置（伺服器、容器沒有音效卡）：用 --tts-device none --tts-save mp3 轉成音訊檔{RESET}")
+    for d in devs:
+        print(f"  [{d['id']}] {d['name']}" + (f"  {C_HIGHLIGHT}{REVERSE} 系統預設 {RESET}" if d["default"] else ""))
+    print()
+
+
+def _tts_play(stream, pcm, sr, pause_ev):
+    """每次寫 0.1 秒：暫停、停止（Ctrl+C）都能立刻生效"""
+    block = max(2, int(sr * 0.1)) * 2
+    for off in range(0, len(pcm), block):
+        while pause_ev.is_set():
+            time.sleep(0.1)
+        stream.write(pcm[off:off + block])
+
+
+def _tts_open_stream(dev, sr):
+    """開播放裝置。裝置不支援模型的取樣率時改用裝置預設的（之後每段重新取樣）。回傳 (stream, 實際取樣率)"""
+    import sounddevice as sd
+    try:
+        st = sd.RawOutputStream(samplerate=sr, channels=1, dtype="int16", device=dev)
+        st.start()
+        return st, sr
+    except Exception:
+        info = sd.query_devices(dev if dev is not None else sd.default.device[1])
+        osr = int(info["default_samplerate"])
+        st = sd.RawOutputStream(samplerate=osr, channels=1, dtype="int16", device=dev)
+        st.start()
+        return st, osr
+
+
+def _tts_browser_pos(job):
+    try:
+        with open(_TTS_POS_FLAG, encoding="utf-8") as f:
+            j, seq = f.read().split()[:2]
+        return int(seq) if j == job else -1
+    except (OSError, ValueError):
+        return -1
+
+
+def _tts_wait_browser(job, target, sess, pause_ev, stall):
+    """等瀏覽器播到第 target 段（播完全部時 target＝段數）。瀏覽器沒有在播（分頁關了）超過 stall 秒就停"""
+    last, since = -2, time.monotonic()
+    while True:
+        pos = _tts_browser_pos(job)
+        if pos != last:
+            last, since = pos, time.monotonic()
+            if pos >= 0:
+                sess.set_position(pos)
+        if pos >= target:
+            return
+        if pause_ev.is_set():
+            since = time.monotonic()
+        elif time.monotonic() - since > stall:
+            raise TimeoutError
+        time.sleep(0.2)
+
+
+def run_tts(args):
+    """文字朗讀／文字轉語音檔（--tts-file、--tts-text）"""
+    try:
+        import jtlw_tts as T
+        from jtlw_tts.tw_reading import _tts_split
+    except Exception as e:
+        _tts_fail(f"文字轉語音元件載入失敗（{type(e).__name__}: {e}）：請再執行一次升級（第一次升級拿不到新加的 jtlw_tts/）")
+    cfg = load_config()
+    s = T.settings(cfg)
+    file_only = args.tts_device == "none"
+    browser = args.tts_device == "browser"
+    if browser and not args.webui:
+        _tts_fail("瀏覽器播放只能從 WebUI 使用；命令列請用 --tts-device default 或裝置 ID")
+    fmt = args.tts_save or ("mp3" if file_only else None)
+    rate = float(args.tts_rate or 1.0)
+    if not T.RATE_MIN <= rate <= T.RATE_MAX:
+        _tts_fail(f"語速要在 {T.RATE_MIN}～{T.RATE_MAX} 倍之間（--tts-rate）")
+    try:
+        if args.tts_file:
+            text = T.load_text(args.tts_file)
+        else:
+            text = T.prepare_text(args.tts_text or "")
+    except OSError as e:
+        _tts_fail(f"讀不到文字檔：{args.tts_file}（{e.strerror or e}）")
+    except T.TTSError as e:
+        _tts_fail(e.message)
+    if len(text) > int(s["max_chars"]):
+        _tts_fail(f"文字太長：一次最多 {int(s['max_chars'])} 字，這份有 {len(text)} 字")
+    segments = _tts_split(text, int(s["chunk_chars"]))
+    if not segments:
+        _tts_fail("沒有可以朗讀的字（只有標點、空白或時間軸）")
+    start = int(getattr(args, "tts_start", 1) or 1) - 1          # 重念：從第幾段開始（段號照整份文字）
+    if not 0 <= start < len(segments):
+        _tts_fail(f"--tts-start 要在 1～{len(segments)} 之間（這份文字共 {len(segments)} 段）")
+    voice = T.get_voice(args.tts_voice or T.default_voice_id(cfg), missing_ok=True)
+    if not voice:
+        _tts_fail("還沒有設定聲音：在 WebUI 選「文字內容朗讀」→「管理聲音」匯入一段取得同意的台灣華語錄音"
+                  if not args.tts_voice else f"找不到聲音 {args.tts_voice}（--tts-list 列出可用的聲音）")
+    model = getattr(args, "tts_model", None) or T.DEFAULT_MODEL
+    prov, why = T.pick_provider(cfg, refresh=True, where=args.tts_provider, steps=args.tts_steps, model=model)
+    if not prov:
+        _tts_fail(why)
+    model_label = T.MODELS[model]["label"]
+    dev, dev_label = None, "系統預設"
+    if not file_only and not browser:
+        devs = _tts_output_devices()
+        if not devs:
+            _tts_fail("這台沒有播放裝置（伺服器、容器沒有音效卡）：從別台電腦開 WebUI 選「瀏覽器」播放，"
+                      "或改用「文字轉語音檔」")
+        if args.tts_device not in ("default", ""):
+            try:
+                dev = int(args.tts_device)
+            except ValueError:
+                _tts_fail(f"--tts-device 要是 default、none 或裝置 ID，不是「{args.tts_device}」")
+            hit = [d for d in devs if d["id"] == dev]
+            if not hit:
+                _tts_fail(f"找不到播放裝置 {dev}（--tts-list 列出可用的裝置）")
+            dev_label = hit[0]["name"]
+        else:
+            dev_label = next((d["name"] for d in devs if d["default"]), "系統預設")
+    n = len(segments)
+    gap = T.PAUSES.get(args.tts_pause or "normal", 0.5)
+    g = T.GENDERS.get(voice.get("gender") or "", "")
+    out_label = "不播放，只存成音訊檔" if file_only else ("瀏覽器" if browser else dev_label)
+    print(f"\n{C_TITLE}{BOLD}▎ {'文字轉語音檔' if file_only else '文字朗讀'}{RESET}")
+    print(f"{C_DIM}{'─' * 60}{RESET}")
+    print(f"  {C_WHITE}聲音：{voice['name']}{'（' + g + '）' if g else ''}　合成：{prov.label}・{model_label}　語速：{rate:g} 倍{RESET}")
+    print(f"  {C_WHITE}播放：{out_label}{'　存檔：' + fmt.upper() if fmt else ''}　共 {n} 段、{len(text)} 字"
+          f"{'　從第 ' + str(start + 1) + ' 段開始' if start else ''}{RESET}")
+    if model != T.DEFAULT_MODEL and not file_only:
+        print(f"  {C_DIM}{model_label}：{T.MODELS[model]['note']}。朗讀時每段之間可能要等合成{RESET}")
+    print(f"{C_DIM}{'─' * 60}{RESET}", flush=True)
+    mode = "tts_file" if file_only else "tts"
+    _webui_send({"type": "started", "mode": mode})
+    _webui_send({"type": "tts_info", "voice": voice["name"], "gender": voice.get("gender") or "",
+                 "provider": prov.label, "model": model, "model_label": model_label,
+                 "rate": rate, "segments": n, "start": start, "chars": len(text),
+                 "output": out_label, "save": fmt or "", "browser": browser})
+    sess = T.Session(prov, voice, s["custom"], segments[start:], rate, args.tts_steps,
+                     ahead=None if file_only else T.engine.PREFETCH, first=start).start()
+    k = n - start                       # 這次要念的段數；Session、瀏覽器播放用 0～k-1，字幕與紀錄用整份文字的段號
+    global _webui_pause_event
+    pause_ev = threading.Event()
+    _webui_pause_event = pause_ev
+    ts_name = time.strftime("%Y%m%d_%H%M%S")
+    os.makedirs(RECORDING_DIR, exist_ok=True)
+    save_final = os.path.join(RECORDING_DIR, f"朗讀_{ts_name}.{fmt}") if fmt else None
+    save_wav = (os.path.join(RECORDING_DIR, f".朗讀_{ts_name}.part.wav") if fmt == "mp3" else save_final) if fmt else None
+    writer, wsr = None, None
+    stream, out_sr = None, None
+    job = live_dir = None
+    if browser:
+        import uuid
+        job = uuid.uuid4().hex[:16]
+        live_dir = os.path.join(T.engine.TMP_DIR, f"live_{job}")
+        T.sweep_tmp()
+        os.makedirs(live_dir, exist_ok=True)
+        try:
+            os.remove(_TTS_POS_FLAG)
+        except OSError:
+            pass
+    t0 = time.monotonic()
+    done = 0
+    audio_secs = 0.0
+    err = None
+    stopped = False
+    first_wait_hint = True
+    try:
+        t_free = time.monotonic()       # 播放端「可以播下一段」的時間：等＝這一段合成好的時間減掉它（第一段就是按下開始後多久出聲）
+        for j, seg in enumerate(segments[start:]):
+            i = start + j
+            if not file_only and not browser:
+                sess.set_position(j)
+                t_free = time.monotonic()   # 上一段剛播完
+            r = None
+            waited = 0
+            while r is None:
+                try:
+                    r = sess.get(j, timeout=1.0)
+                    if r is None:
+                        raise KeyboardInterrupt
+                except TimeoutError:
+                    waited += 1
+                    if waited == 3 and first_wait_hint:
+                        msg = "合成中（第一次要先啟動合成服務，約 30 秒）" if j == 0 else f"合成第 {i + 1} 段中"
+                        print(f"  {C_DIM}{msg}...{RESET}", flush=True)
+                        _webui_send({"type": "progress", "stage": "合成中", "detail": msg})
+            first_wait_hint = j == 0 and waited < 3
+            synth_secs = r.get("seconds", 0.0)
+            wait_secs = max(0.0, r.get("ready", t_free) - t_free)
+            pcm, sr = r["pcm"], r["sr"]
+            if fmt:
+                if writer is None:
+                    writer = wave.open(save_wav, "wb")
+                    writer.setnchannels(1)
+                    writer.setsampwidth(2)
+                    writer.setframerate(sr)
+                    wsr = sr
+                wpcm = pcm if sr == wsr else T.to_pcm(T.pcm_wav(pcm, sr), 1.0, wsr)[0]
+                writer.writeframes(wpcm)
+                if i < n - 1:
+                    writer.writeframes(b"\x00\x00" * int(wsr * gap))
+            secs = len(pcm) / 2 / sr
+            audio_secs += secs + (gap if i < n - 1 else 0)
+            timestamp = time.strftime("%H:%M:%S")
+            if browser:
+                path = os.path.join(live_dir, f"{j}.wav")
+                with open(path + ".tmp", "wb") as f:
+                    f.write(T.pcm_wav(pcm, sr))
+                os.replace(path + ".tmp", path)
+                _webui_send({"type": "tts_audio", "job": job, "seq": j, "total": k, "duration": round(secs, 2),
+                             "gap": gap})
+                _tts_wait_browser(job, j, sess, pause_ev, stall=_TTS_BROWSER_STALL + 2 * secs)
+                t_free = time.monotonic() + secs + gap     # 瀏覽器開始播這一段了：播完（加停頓）才需要下一段
+            elif not file_only:
+                if stream is None:
+                    stream, out_sr = _tts_open_stream(dev, sr)
+                    if out_sr != sr:
+                        sess.out_sr = out_sr          # 之後的段落合成時就重新取樣
+                if sr != out_sr:
+                    pcm = T.to_pcm(T.pcm_wav(pcm, sr), 1.0, out_sr)[0]
+            label = "轉檔" if file_only else "朗讀"
+            timing = f"合 {synth_secs:.1f}s" + ("" if file_only or wait_secs < 0.1 else f" 等 {wait_secs:.1f}s")
+            print(f"{C_DIM}[{timestamp}] {i + 1}/{n}  {timing}{RESET}  {C_WHITE}{seg}{RESET}", flush=True)
+            ev = {"type": "transcription", "source": "main", "src_lang": label, "src_text": seg,
+                  "timestamp": timestamp, "tts_seq": i, "tts_total": n,
+                  "tts_synth": round(synth_secs, 1), "tts_secs": round(secs, 1)}
+            if not file_only:
+                ev["tts_wait"] = round(wait_secs, 1)
+            _webui_send(ev)
+            if file_only:
+                _webui_send({"type": "progress", "stage": "合成中", "detail": f"{i + 1}/{n} 段"})
+            elif not browser:
+                _tts_play(stream, pcm, out_sr, pause_ev)
+                if i < n - 1:
+                    _tts_play(stream, b"\x00\x00" * int(out_sr * gap), out_sr, pause_ev)
+            done = j + 1
+        if browser:
+            _tts_wait_browser(job, k, sess, pause_ev, stall=_TTS_BROWSER_STALL + 2 * audio_secs / max(k, 1))
+    except T.TTSError as e:
+        err = e.message
+    except TimeoutError:
+        err = "瀏覽器沒有在播放（分頁關掉了、或從別的分頁停止了），停止朗讀"
+    except KeyboardInterrupt:
+        stopped = True
+    except Exception as e:                       # noqa: BLE001  播放裝置拔掉等：說清楚，已存的檔案照樣收好
+        err = f"{type(e).__name__}: {e}"
+    finally:
+        sess.stop()
+        if stream is not None:
+            try:
+                (stream.stop if done == k and not stopped else stream.abort)()
+                stream.close()
+            except Exception:
+                pass
+        saved = None
+        if writer is not None:
+            try:
+                writer.close()
+                if fmt == "mp3":
+                    _webui_send({"type": "progress", "stage": "存檔中", "finishing": True, "detail": "轉成 MP3"})
+                    ff = T.engine._ffmpeg()
+                    rr = subprocess.run([ff, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", save_wav,
+                                         "-codec:a", "libmp3lame", "-q:a", "3", save_final],
+                                        capture_output=True, timeout=1800, **_SUBPROCESS_FLAGS) if ff else None
+                    if rr is not None and rr.returncode == 0 and os.path.exists(save_final):
+                        os.remove(save_wav)
+                        saved = save_final
+                    else:
+                        saved = save_final[:-4] + ".wav"
+                        os.replace(save_wav, saved)
+                        print(f"  {C_HIGHLIGHT}[注意] 轉 MP3 失敗，存成 WAV{RESET}", flush=True)
+                else:
+                    saved = save_final
+            except Exception as e:                # noqa: BLE001
+                print(f"  {C_HIGHLIGHT}[注意] 音訊檔沒有存好：{type(e).__name__}: {e}{RESET}", flush=True)
+        if live_dir:
+            shutil.rmtree(live_dir, ignore_errors=True)
+        el = int(time.monotonic() - t0)
+        print()
+        if err:
+            print(f"[錯誤] {err}", file=sys.stderr, flush=True)
+            _webui_send({"type": "progress", "stage": "錯誤", "detail": err})
+        head = "已停止" if stopped else ("沒有完成" if err else "完成")
+        print(f"{C_OK if head == '完成' else C_HIGHLIGHT}{BOLD}{'文字轉語音檔' if file_only else '朗讀'}{head}{RESET}"
+              f"  {C_WHITE}{done}/{k} 段、聲音 {int(audio_secs // 60):02d}:{int(audio_secs % 60):02d}、"
+              f"花了 {el // 60:02d}:{el % 60:02d}{RESET}")
+        if saved:
+            print(f"  {C_WHITE}檔案：{saved}{RESET}")
+            _webui_send_realtime_results(None, [saved])
+        print(flush=True)
+        _webui_flush()
+    if err:
+        sys.exit(1)
+
+
+def _tts_text_files():
+    """互動選單用：recordings/、logs/ 裡的文字檔（新的在前）"""
+    out = []
+    for d in (RECORDING_DIR, LOG_DIR):
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                p = os.path.join(d, f)
+                if os.path.isfile(p) and os.path.splitext(f)[1].lower() in (".txt", ".md", ".srt", ".vtt"):
+                    out.append(p)
+    return sorted(out, key=os.path.getmtime, reverse=True)
+
+
+def _ask_tts(args, file_only):
+    """互動選單：文字內容朗讀／文字轉語音檔要用的文字檔、聲音、語速、播放裝置"""
+    try:
+        import jtlw_tts as T
+    except Exception as e:
+        _tts_fail(f"文字轉語音元件載入失敗（{type(e).__name__}: {e}）：請再執行一次升級")
+    files = _tts_text_files()[:20]
+    print(f"\n\n{C_TITLE}{BOLD}▎ 要念的文字{RESET}")
+    print(f"{C_DIM}{'─' * 60}{RESET}")
+    for k, p in enumerate(files, 1):
+        print(f"  {C_DIM}[{k}]{RESET} {C_WHITE}{os.path.relpath(p, SCRIPT_DIR)}{RESET}")
+    print(f"  {C_DIM}或直接輸入文字檔的路徑（.txt／.md／.srt／.vtt）{RESET}")
+    print(f"{C_DIM}{'─' * 60}{RESET}")
+    while True:
+        print(f"{C_WHITE}選擇{' (1-' + str(len(files)) + ')' if files else ''} 或輸入路徑：{RESET}", end=" ")
+        try:
+            ans = input().strip().strip('"').strip("'")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+        if ans.isdigit() and 1 <= int(ans) <= len(files):
+            args.tts_file = files[int(ans) - 1]
+            break
+        if ans and os.path.isfile(os.path.expanduser(ans)):
+            args.tts_file = os.path.expanduser(ans)
+            break
+        print(f"  {C_HIGHLIGHT}找不到這個檔案{RESET}")
+    print(f"  {C_OK}→ {os.path.basename(args.tts_file)}{RESET}")
+    vs = T.list_voices()
+    if len(vs) > 1:
+        dv = T.settings(load_config())["voice"]
+        print(f"\n{C_TITLE}{BOLD}▎ 聲音{RESET}")
+        for k, v in enumerate(vs, 1):
+            g = T.GENDERS.get(v.get("gender") or "", "")
+            print(f"  {C_DIM}[{k}]{RESET} {C_WHITE}{v['name']}{'（' + g + '）' if g else ''}{RESET}"
+                  + (f"  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}" if v["id"] == dv else ""))
+        print(f"{C_WHITE}選擇 (1-{len(vs)}) [預設]：{RESET}", end=" ")
+        try:
+            ans = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+        if ans.isdigit() and 1 <= int(ans) <= len(vs):
+            args.tts_voice = vs[int(ans) - 1]["id"]
+    rates = [(0.8, "慢"), (1.0, "正常"), (1.2, "稍快"), (1.5, "快")]
+    print(f"\n{C_TITLE}{BOLD}▎ 語速{RESET}")
+    for k, (r, lab) in enumerate(rates, 1):
+        print(f"  {C_DIM}[{k}]{RESET} {C_WHITE}{lab}（{r:g} 倍）{RESET}" + (f"  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}" if r == 1.0 else ""))
+    print(f"{C_WHITE}選擇 (1-4) [2]：{RESET}", end=" ")
+    try:
+        ans = input().strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+    args.tts_rate = rates[int(ans) - 1][0] if ans in ("1", "2", "3", "4") else 1.0
+    if file_only:
+        args.tts_device, args.tts_save = "none", "mp3"
+        return
+    devs = _tts_output_devices()
+    if len(devs) > 1:
+        print(f"\n{C_TITLE}{BOLD}▎ 播放裝置{RESET}")
+        for k, d in enumerate(devs, 1):
+            print(f"  {C_DIM}[{k}]{RESET} {C_WHITE}{d['name']}{RESET}" + (f"  {C_HIGHLIGHT}{REVERSE} 系統預設 {RESET}" if d["default"] else ""))
+        print(f"{C_WHITE}選擇 (1-{len(devs)}) [系統預設]：{RESET}", end=" ")
+        try:
+            ans = input().strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+        if ans.isdigit() and 1 <= int(ans) <= len(devs):
+            args.tts_device = str(devs[int(ans) - 1]["id"])
+    print(f"{C_WHITE}同時存成 MP3？(y/N)：{RESET}", end=" ")
+    try:
+        ans = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+    if ans == "y":
+        args.tts_save = "mp3"
+
+
 def _detect_bidi_file_pair(file_list):
     """從檔案列表偵測雙向錄音配對。
     回傳 (lb_path, mic_path) 或 None。
@@ -11984,14 +12424,16 @@ def _select_audio_files():
 
 def _ask_input_source():
     """互動選單第一步：選擇輸入來源。
-    回傳 ("realtime", None) 或 ("file", [filepath, ...])"""
+    回傳 ("realtime", None)、("file", [filepath, ...])、("tts", None)、("tts_file", None)"""
     while True:
         print(f"\n\n{C_TITLE}{BOLD}▎ 輸入來源{RESET}")
         print(f"{C_DIM}{'─' * 60}{RESET}")
         print(f"  {C_HIGHLIGHT}{BOLD}[1] 即時音訊擷取{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
         print(f"  {C_DIM}[2]{RESET} {C_WHITE}讀入音訊檔案{RESET}")
+        print(f"  {C_DIM}[3]{RESET} {C_WHITE}文字內容朗讀{RESET}  {C_DIM}台灣華語念出來（GPU 伺服器或 Apple Silicon Mac）{RESET}")
+        print(f"  {C_DIM}[4]{RESET} {C_WHITE}文字轉語音檔{RESET}  {C_DIM}不播放，存成 MP3{RESET}")
         print(f"{C_DIM}{'─' * 60}{RESET}")
-        print(f"{C_WHITE}選擇 (1-2) [1]：{RESET}", end=" ")
+        print(f"{C_WHITE}選擇 (1-4) [1]：{RESET}", end=" ")
 
         try:
             user_input = input().strip()
@@ -12006,6 +12448,9 @@ def _ask_input_source():
                 continue  # 回到輸入來源選單
             print(f"  {C_OK}→ 讀入音訊檔案{RESET}")
             return ("file", result)
+        if user_input in ("3", "4"):
+            print(f"  {C_OK}→ {'文字內容朗讀' if user_input == '3' else '文字轉語音檔'}{RESET}")
+            return ("tts" if user_input == "3" else "tts_file", None)
 
         # 預設或輸入 1
         print(f"  {C_OK}→ 即時音訊擷取{RESET}\n")
@@ -16896,6 +17341,10 @@ def parse_args():
         (f"{_sc} --input m.mp3 --diarize --mode zh --summarize", "中文辨識 + 講者 + 摘要"),
         (f"{_sc} --input meeting.mp3 --local-asr", "強制本機 辨識"),
         (f"{_sc} --summarize log1.txt log2.txt", "批次摘要記錄檔"),
+        (f"{_sc} --tts-file 講稿.txt", "文字朗讀：台灣華語念出來（GPU 伺服器或 Apple Silicon Mac）"),
+        (f"{_sc} --tts-file 講稿.txt --tts-rate 1.2 --tts-save mp3", "朗讀＋存成 MP3，語速 1.2 倍"),
+        (f"{_sc} --tts-file 講稿.txt --tts-device none --tts-save mp3", "文字轉語音檔（不播放）"),
+        (f"{_sc} --tts-text '今天下午三點半開會。'", "直接念一段文字"),
     ]
     col = max(len(cmd) for cmd, _ in examples) + 3
     epilog = "範例:\n" + "\n".join(f"  {cmd:<{col}}{desc}" for cmd, desc in examples)
@@ -17008,6 +17457,29 @@ def parse_args():
     parser.add_argument(
         "--webui", action="store_true",
         help="同時將即時字幕推送到 WebUI（需另外啟動 webui.py）")
+    # 文字轉語音（v2.27.0）：朗讀是主程式的一個模式，字幕、懸浮字幕、WebUI 都沿用既有的
+    tts = parser.add_argument_group("文字轉語音（台灣華語朗讀，GPU 伺服器或 Apple Silicon Mac）")
+    tts.add_argument("--tts-file", metavar="FILE",
+                     help="朗讀文字檔（.txt／.md／.srt／.vtt；本工具的摘要檔只念「重點摘要」）")
+    tts.add_argument("--tts-text", metavar="TEXT", help="直接朗讀這段文字")
+    tts.add_argument("--tts-voice", metavar="ID", help="聲音 ID（預設用設定裡的預設聲音；--tts-list 列出）")
+    tts.add_argument("--tts-rate", type=float, default=1.0, metavar="R",
+                     help="語速倍數 0.5～2.0（預設 1.0；音調不變，存成的音訊檔也是這個速度）")
+    tts.add_argument("--tts-pause", choices=["short", "normal", "long"], default="normal",
+                     help="段落之間停頓：short／normal／long（預設 normal）")
+    tts.add_argument("--tts-device", metavar="DEV", default="default",
+                     help="播放裝置：default（系統預設）、裝置 ID（--tts-list 列出）、none（不播放，只存檔）")
+    tts.add_argument("--tts-save", choices=["mp3", "wav"], metavar="FORMAT",
+                     help="同時存成音訊檔（mp3／wav，存在 recordings/）；--tts-device none 時預設 mp3")
+    tts.add_argument("--tts-provider", choices=["auto", "remote", "mlx"], metavar="WHERE",
+                     help="合成位置：auto（GPU 伺服器優先）、remote（GPU 伺服器）、mlx（Apple Silicon 本機）")
+    tts.add_argument("--tts-model", choices=["voxcpm2", "breezyvoice"], metavar="MODEL",
+                     help="合成模型：voxcpm2（預設，速度快）、breezyvoice（台灣口音，但合成速度慢，不適合即時；只在 GPU 伺服器）")
+    tts.add_argument("--tts-steps", type=int, choices=[6, 10], metavar="N",
+                     help="Apple Silicon 本機的擴散步數：6（較快，預設）、10（音質較好）")
+    tts.add_argument("--tts-start", type=int, default=1, metavar="N",
+                     help="從第 N 段開始念（重念；預設 1）")
+    tts.add_argument("--tts-list", action="store_true", help="列出聲音與播放裝置後離開")
     return parser.parse_args()
 
 
@@ -17263,6 +17735,10 @@ def main():
         global _SCK_FORCE_OFF
         _SCK_FORCE_OFF = True
 
+    if getattr(args, "tts_list", False):
+        _tts_list()
+        return
+    tts_mode = bool(args.tts_file or args.tts_text is not None)
     cli_mode = (len(sys.argv) > 1 and not args.list_devices
                 and args.summarize is None and not args.input)
 
@@ -17271,11 +17747,10 @@ def main():
         _start_webui_sender()
         _start_webui_pause_watch()
 
-    # 字幕轉發初始化（從 config.json 讀取設定）
-    _init_subtitle_forwarder()
-
-    # 關鍵字通知初始化
-    _init_keyword_monitor()
+    # 字幕轉發、關鍵字通知（從 config.json 讀取設定）：朗讀念的是自己給的文字，不轉發、不通知
+    if not tts_mode:
+        _init_subtitle_forwarder()
+        _init_keyword_monitor()
 
     # 懸浮字幕覆蓋視窗
     global _overlay_proc_ref
@@ -17342,6 +17817,14 @@ def main():
         source, files = _ask_input_source()
         if source == "file":
             args.input = files
+        elif source in ("tts", "tts_file"):
+            _ask_tts(args, source == "tts_file")
+            tts_mode = True
+
+    # 文字朗讀／文字轉語音檔（v2.27.0）
+    if tts_mode:
+        run_tts(args)
+        return
 
     # --input 離線處理音訊檔
     if args.input:

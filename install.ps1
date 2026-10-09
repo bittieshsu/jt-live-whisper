@@ -367,7 +367,7 @@ function desktop_shortcut_is_current([string]$lnkPath) {
 # ─── PowerShell 執行原則：裝完之後在一般 PowerShell 打 .\start.ps1 會不會被擋（v2.26.15）────
 # 安裝是用 -ExecutionPolicy Bypass 執行的（只對這個行程有效），之後打 .\start.ps1、.\install.ps1 -Upgrade 用的是
 # 其他範圍的設定；Windows 用戶端各範圍都沒設（Undefined）時實際是 Restricted → 被擋（2026-10-06 pc-002 照 README 新裝）。
-# 有人可以回答時問一次（預設是）；沒人可以回答時不改、只說明；群組原則鎖住的改不了、照實說
+# Windows 預設（各範圍都沒設）時直接允許（v2.27.0 起，安裝與 -Upgrade 都會做）；有人刻意設過的尊重、有人時才問；群組原則鎖住的照實說
 function effective_policy_without_process {
     foreach ($sc in 'MachinePolicy', 'UserPolicy', 'CurrentUser', 'LocalMachine') {
         $p = "$(Get-ExecutionPolicy -Scope $sc)"
@@ -380,6 +380,15 @@ function effective_policy_without_process {
 }
 
 # 回傳 $true＝之後的 .\start.ps1 仍會被擋（安裝總結改寫成 powershell -ExecutionPolicy Bypass -File ...）
+# 允許執行本機腳本（目前使用者 RemoteSigned）；回傳是否成功
+function allow_local_scripts {
+    try { Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop } catch { }
+    # 這個行程是 Bypass（範圍更優先），Set-ExecutionPolicy 會報「被更特定的範圍覆寫」，但設定已經寫入：以讀回的為準
+    if ("$(Get-ExecutionPolicy -Scope CurrentUser)" -ne 'RemoteSigned') { return $false }
+    Get-ChildItem -Path $SCRIPT_DIR -Filter *.ps1 -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+    return $true
+}
+
 function ensure_script_execution {
     $pol, $sc = effective_policy_without_process
     if ($pol -notin @('Restricted', 'AllSigned')) { return $false }
@@ -387,23 +396,33 @@ function ensure_script_execution {
         check_notice "群組原則把 PowerShell 執行原則設成 $pol，無法直接執行 .\start.ps1"
         return $true
     }
+    if ($sc -eq 'Default') {
+        # 沒有人設過（Windows 用戶端的預設就是 Restricted）：直接允許，有沒有人回答都一樣。
+        # v2.26.15～v2.26.18 只在有人回答時才改、-Upgrade 也沒走到這裡 → 經 SSH 或排程安裝、升級上來的機器一直被擋
+        # （2026-10-09 pc-002；使用者：「install 應該要自動處理這個」）
+        if (allow_local_scripts) {
+            check_ok "已允許執行本機腳本（目前使用者，RemoteSigned；從網路下載、沒有簽章的腳本照樣擋）"
+            info "要改回 Windows 預設：Set-ExecutionPolicy -Scope CurrentUser Undefined"
+            return $false
+        }
+        check_notice "無法變更 PowerShell 執行原則；之後請用 powershell -ExecutionPolicy Bypass -File start.ps1"
+        return $true
+    }
+    # 有人刻意設成 Restricted／AllSigned（CurrentUser 或 LocalMachine）：尊重。沒有人可以回答時不改；有人時才問，預設否
     if ([Console]::IsInputRedirected) {
-        check_notice "PowerShell 執行原則是 $pol，之後的 .\start.ps1 會被擋（沒有人可以回答，這次不變更）"
+        check_notice "PowerShell 執行原則被設成 $pol（$sc），之後的 .\start.ps1 會被擋（這是有人設定的，不自動變更）"
         info "要允許的話執行一次：Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
         return $true
     }
     Write-Host ""
-    check_notice "PowerShell 執行原則是 $pol：之後在 PowerShell 打 .\start.ps1、.\install.ps1 -Upgrade 會被擋"
-    info "可以允許執行本機腳本（RemoteSigned，只影響目前使用者；從網路下載、沒有簽章的腳本照樣擋）"
-    $ans = ("" + (Read-Host "  是否允許？(Y/n)")).Trim()
-    if ($ans -eq 'n' -or $ans -eq 'N') {
+    check_notice "PowerShell 執行原則被設成 $pol（$sc）：之後在 PowerShell 打 .\start.ps1、.\install.ps1 -Upgrade 會被擋"
+    info "可以改成允許執行本機腳本（RemoteSigned，只影響目前使用者；從網路下載、沒有簽章的腳本照樣擋）"
+    $ans = ("" + (Read-Host "  是否允許？(y/N)")).Trim()
+    if ($ans -ne 'y' -and $ans -ne 'Y') {
         info "沒有變更；之後請用 powershell -ExecutionPolicy Bypass -File start.ps1"
         return $true
     }
-    try { Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop } catch { }
-    # 這個行程是 Bypass（範圍更優先），Set-ExecutionPolicy 會報「被更特定的範圍覆寫」，但設定已經寫入：以讀回的為準
-    if ("$(Get-ExecutionPolicy -Scope CurrentUser)" -eq 'RemoteSigned') {
-        Get-ChildItem -Path $SCRIPT_DIR -Filter *.ps1 -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+    if (allow_local_scripts) {
         check_ok "已允許執行本機腳本（目前使用者，RemoteSigned）"
         return $false
     }
@@ -487,6 +506,77 @@ function offer_desktop_shortcut($answer = $null, $desktopDir = $null, $programsD
     if ($made.Count -gt 0) { Set-Content -Path $SHORTCUT_STATE_FILE -Value ($made -join " ") -Encoding ASCII }
 }
 
+# ─── BreezyVoice（2026-10-09，選用、不是預設）────────────────
+# 與 install.sh 的 _rw_offer_breezy 同一套規則：台灣口音，但合成速度慢（約音訊長度的 1.2～2.5 倍），不適合即時。
+# 安裝與升級都問（預設否）；沒有人可以回答就不問、不裝，也不連線（非互動 SSH 工作階段裡擷取 ssh 的輸出會卡住）；
+# 升級時回答「否」記在 config.json（remote_whisper.breezy = "no"），之後升級不再問（完整安裝照樣問）。
+# 放在升級區塊前面：PowerShell 由上往下執行，升級時還沒定義後面的 ssh_test 等函式
+function set_rw_config([string]$key, $value) {
+    $cfg = read_config
+    if (-not ($cfg | Get-Member -Name "remote_whisper")) {
+        $cfg | Add-Member -NotePropertyName remote_whisper -NotePropertyValue ([PSCustomObject]@{})
+    }
+    $rw = $cfg.remote_whisper
+    if ($null -eq $value -or "$value" -eq "") {
+        $rw.PSObject.Properties.Remove($key)
+    } elseif ($rw | Get-Member -Name $key) {
+        $rw.$key = $value
+    } else {
+        $rw | Add-Member -NotePropertyName $key -NotePropertyValue $value
+    }
+    save_config $cfg
+}
+
+function rw_offer_breezy([string]$sshOpts, [string]$userHost, [bool]$upgrading = $false) {
+    if ([Console]::IsInputRedirected) { return }
+    $cfg = read_config
+    $rw = if ($cfg | Get-Member -Name "remote_whisper") { $cfg.remote_whisper } else { $null }
+    if ($upgrading -and $rw -and ($rw | Get-Member -Name "breezy") -and $rw.breezy -eq "no") { return }
+    $chkArgs = @($sshOpts.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)) + @("-n", $userHost,
+        'if test -x ~/jt-whisper-server/venv-breezy/bin/python && test -f ~/jt-whisper-server/breezyvoice/.jtlw-rev; then echo ready; elif grep -q _breezy_setup_main ~/jt-whisper-server/server.py 2>/dev/null; then echo missing; else echo old; fi')
+    $st = "$(& ssh @chkArgs 2>$null | Select-Object -Last 1)".Trim()
+    if ($st -eq "ready") { check_ok "GPU 伺服器 BreezyVoice 已安裝（選用的台灣口音合成模型）"; return }
+    if ($st -eq "old") {
+        info "BreezyVoice（選用的台灣口音合成模型）：GPU 伺服器上的程式較舊，執行 .\install.ps1 更新伺服器後就能加裝"
+        return
+    }
+    if ($st -ne "missing") { return }                      # 連不上：不問
+    Write-Host "  BreezyVoice（MediaTek，選用）：台灣口音，但合成速度慢（約音訊長度的 1.2～2.5 倍），不適合即時；預設仍用 VoxCPM2" -ForegroundColor White
+    Write-Host "    會在 GPU 伺服器裝約 8 GB（Python 環境 5.5 GB、模型 2.2 GB；要有 16 GB 可用空間），第一次約 10～20 分鐘；辨識不受影響" -ForegroundColor DarkGray
+    $ans = Read-Host "  是否加裝 BreezyVoice？(y/N)"
+    if ("$ans" -notmatch '^[Yy]') {
+        if ($upgrading) {
+            set_rw_config "breezy" "no"
+            info "跳過（升級時不再問；之後要裝：執行 .\install.ps1）"
+        } else {
+            info "跳過（之後要裝：重新執行 .\install.ps1）"
+        }
+        return
+    }
+    $setupArgs = @($sshOpts.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)) + @($userHost, "cd ~/jt-whisper-server && venv/bin/python3 server.py --breezy-setup")
+    & ssh @setupArgs
+    if ($LASTEXITCODE -eq 0) {
+        set_rw_config "breezy" $null
+        check_ok "GPU 伺服器 BreezyVoice 安裝完成（WebUI「合成模型」選 BreezyVoice）"
+    } else {
+        check_fail "GPU 伺服器 BreezyVoice 沒有安裝完成（其他功能不受影響；可再執行一次 .\install.ps1）"
+    }
+}
+
+# 升級：有設定 GPU 伺服器、而且不必輸入密碼就連得上時問（BatchMode：不可以卡在問密碼）
+function offer_breezy_on_upgrade() {
+    if ([Console]::IsInputRedirected) { return }
+    $cfg = read_config
+    if (-not ($cfg | Get-Member -Name "remote_whisper")) { return }
+    $rw = $cfg.remote_whisper
+    if (-not ($rw | Get-Member -Name "host") -or -not $rw.host) { return }
+    $user = if ($rw | Get-Member -Name "ssh_user") { $rw.ssh_user } else { "root" }
+    $port = if ($rw | Get-Member -Name "ssh_port") { $rw.ssh_port } else { 22 }
+    $opts = "-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -p $port"
+    if (($rw | Get-Member -Name "ssh_key") -and $rw.ssh_key -and (Test-Path $rw.ssh_key)) { $opts += " -i $($rw.ssh_key)" }
+    rw_offer_breezy $opts "$user@$($rw.host)" $true
+}
+
 # ─── Banner ───────────────────────────────────────────────────
 
 $cols = try { $Host.UI.RawUI.WindowSize.Width } catch { 60 }
@@ -495,7 +585,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.26.18 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.27.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -511,7 +601,7 @@ if ($Upgrade) {
     # 原本補檔與升級各自維護一份且內容不同，漏掉 README.md / CHANGELOG.md，
     # 升級後看不到改了什麼、README 版本號還停在舊版（2026-09-18 Windows 實機發現）。
     $UPGRADE_FILES = @("translate_meeting.py","start.sh","start.ps1","install.sh","install.ps1",
-                       "install-linux.sh","SOP.md","README.md","CHANGELOG.md","BENCHMARKS.md","webui.py",
+                       "install-linux.sh","SOP.md","README.md","CHANGELOG.md","BENCHMARKS.md","COMPLIANCE.md","webui.py",
                        "webui.html","subtitle_overlay.py","sck_audio_capture.swift",
                        "jtlw_tls.py","remote_whisper_server.py",
                        # 會議摘要（v2.25.0）：第一個放在子資料夾的，複製時要先建資料夾
@@ -523,6 +613,17 @@ if ($Upgrade) {
                        "jtlw_api/config.py","jtlw_api/engine.py","jtlw_api/events.py",
                        "jtlw_api/keys.py","jtlw_api/log.py","jtlw_api/store.py","jtlw_api/tls.py",
                        "jtlw_api/schemas/jtlw-api-v1.schema.json",
+                       # 文字轉語音（v2.27.0）：第一次 -Upgrade 跑舊腳本、拿不到，第二次才會到
+                       "jtlw_tts/__init__.py","jtlw_tts/__main__.py","jtlw_tts/engine.py","jtlw_tts/tw_reading.py",
+                       # 內建聲音（2026-10-09，8 個，VoxCPM2 依文字描述產生、不是真人錄音）
+                       "jtlw_tts/voices/b00000000001/voice.json","jtlw_tts/voices/b00000000001/ref.wav",
+                       "jtlw_tts/voices/b00000000002/voice.json","jtlw_tts/voices/b00000000002/ref.wav",
+                       "jtlw_tts/voices/b00000000003/voice.json","jtlw_tts/voices/b00000000003/ref.wav",
+                       "jtlw_tts/voices/b00000000004/voice.json","jtlw_tts/voices/b00000000004/ref.wav",
+                       "jtlw_tts/voices/b00000000005/voice.json","jtlw_tts/voices/b00000000005/ref.wav",
+                       "jtlw_tts/voices/b00000000006/voice.json","jtlw_tts/voices/b00000000006/ref.wav",
+                       "jtlw_tts/voices/b00000000007/voice.json","jtlw_tts/voices/b00000000007/ref.wav",
+                       "jtlw_tts/voices/b00000000008/voice.json","jtlw_tts/voices/b00000000008/ref.wav",
                        # 捷徑的 logo 圖示（v2.26.2，tools/build_icons.py 產生）
                        "icons/jt-live-whisper.png","icons/jt-live-whisper.ico","icons/jt-live-whisper.icns")
 
@@ -584,7 +685,9 @@ if ($Upgrade) {
             check_ok "已經是最新版本 (v${localVer})"
         }
         Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        $null = ensure_script_execution          # 升級上來的機器也要能直接打 .\start.ps1（v2.27.0）
         offer_desktop_shortcut
+        offer_breezy_on_upgrade
         exit 0
     }
 
@@ -634,7 +737,9 @@ if ($Upgrade) {
     check_ok "已升級 v${localVer} -> v${remoteVer}（更新 ${updated} 個檔案）"
     Write-Host ""
     Write-Host "  ${C_WARN}建議重新執行 .\install.ps1 確認相依套件完整${NC}"
+    $null = ensure_script_execution
     offer_desktop_shortcut
+    offer_breezy_on_upgrade
     exit 0
 }
 
@@ -1979,6 +2084,41 @@ function rw_ver_lt([string]$a, [string]$b) {
     try { return ([version]$a -lt [version]$b) } catch { return $false }
 }
 
+# 文字轉語音（2026-10）：GPU 伺服器的 venv-tts。與 install.sh 的 _rw_offer_tts 同一套：已經裝好只報告；
+# 沒裝的話有人可以回答才問（預設否：約 11 GB，GPU 伺服器多半是共用正式機），無人值守不動。
+# 回答是就在伺服器上跑 server.py --tts-setup（套件、模型、台灣念法資源都在那裡處理）
+function rw_offer_tts([string]$sshOpts, [string]$userHost) {
+    $chk = "test -x ~/jt-whisper-server/venv-tts/bin/python && test -f ~/jt-whisper-server/tts/moe_words.tsv && ~/jt-whisper-server/venv-tts/bin/python -c 'import voxcpm, g2pw' >/dev/null 2>&1"
+    if (ssh_test $sshOpts $userHost $chk) {
+        check_ok "GPU 伺服器 文字轉語音已設定"
+        return
+    }
+    if ([Console]::IsInputRedirected) {
+        info "文字轉語音（朗讀台灣華語）還沒設定；要用時在終端機重新執行 .\install.ps1"
+        return
+    }
+    if (-not (ssh_test $sshOpts $userHost "grep -q _tts_setup_main ~/jt-whisper-server/server.py")) {
+        info "GPU 伺服器上的 server.py 還沒有文字轉語音（版本較舊），更新伺服器後再設定"
+        return
+    }
+    Write-Host "  文字轉語音：把文字、逐字稿、摘要念成台灣華語（VoxCPM2，在 GPU 伺服器合成）" -ForegroundColor White
+    Write-Host "    會在 GPU 伺服器裝約 11 GB（Python 環境 5.2 GB、模型 4.7 GB、台灣念法資源 0.6 GB；要有 20 GB 可用空間），第一次約 10～30 分鐘；辨識不受影響" -ForegroundColor DarkGray
+    $ans = Read-Host "  是否在 GPU 伺服器設定文字轉語音？(y/N)"
+    if ($ans -ne 'y' -and $ans -ne 'Y') {
+        info "跳過（之後要用：重新執行 .\install.ps1）"
+        return
+    }
+    $argList = $sshOpts.Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+    $argList += $userHost
+    $argList += "cd ~/jt-whisper-server && venv/bin/python3 server.py --tts-setup"
+    & ssh @argList
+    if ($LASTEXITCODE -eq 0) {
+        check_ok "GPU 伺服器 文字轉語音設定完成"
+    } else {
+        check_fail "GPU 伺服器 文字轉語音沒有設定完成（辨識不受影響；可再執行一次 .\install.ps1）"
+    }
+}
+
 # ─── SSH 金鑰自動部署（避免重複輸入密碼）─────────────────────
 function ensure_ssh_key_auth([string]$userHost, [string]$sshPort) {
     # 1. 已有 key 且 BatchMode 連線成功 → 免密碼
@@ -2507,6 +2647,8 @@ print(f'{pt},{ct2},{ow}')`""
             }
         }
 
+        rw_offer_tts $sshOpts $userHost
+        rw_offer_breezy $sshOpts $userHost
         check_ok "GPU 伺服器 辨識環境正常（${userHost}）"
     } else {
         # 需要修復
@@ -2800,6 +2942,8 @@ print(f'{pt},{ct2}')`""
 
         # 預下載辨識模型
         download_remote_models $sshOpts $userHost
+        rw_offer_tts $sshOpts $userHost
+        rw_offer_breezy $sshOpts $userHost
 
         # 寫入 config.json
         $cfgToSave = read_config

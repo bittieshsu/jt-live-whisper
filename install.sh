@@ -13,7 +13,10 @@ GITHUB_RAW="https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/mai
 SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 _is_upgrade=false
 for _arg in "$@"; do [ "$_arg" = "--upgrade" ] && _is_upgrade=true; done
-if [ ! -f "$SCRIPT_DIR/translate_meeting.py" ] && [ "$_is_upgrade" = false ]; then
+# 當函式庫載入（JTLW_INSTALL_LIB=1）時絕不走這段：`bash -c` 的 $0 是 bash 本身（/bin/bash → SCRIPT_DIR=/bin），
+# 會被當成 curl | bash，cd 到 ~/Apps/jt-live-whisper 並 exec 正式安裝的 install.sh（2026-10-09 在 Mac 測試時發生，
+# 正式那份因 set -e 在載入點的 return 出錯而結束，沒有動到東西）
+if [ ! -f "$SCRIPT_DIR/translate_meeting.py" ] && [ "$_is_upgrade" = false ] && [ -z "${JTLW_INSTALL_LIB:-}" ]; then
     echo ""
     echo -e "\033[38;2;100;180;255m============================================================\033[0m"
     echo -e "\033[38;2;100;180;255m\033[1m  jt-live-whisper - 一鍵安裝\033[0m"
@@ -214,7 +217,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.26.18 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.27.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1417,6 +1420,130 @@ check_qwen_local_mac() {
     deactivate
 }
 
+# ─── 文字轉語音本機合成（2026-10，Apple Silicon，mlx-audio 的 VoxCPM2）────
+# 有 GPU 伺服器時合成在伺服器做，這台不必裝。要裝的話：**有人可以回答才問**（約 4 GB），無人值守不動。
+# 看能力不看版本：mlx-audio 已經有 voxcpm2 就不升級（Qwen3-ASR 本機路徑也用它，能不動就不動），只補 g2pw、pypinyin、opencc
+_TTS_MLX_CHECK='import importlib.util as u, os, sys, g2pw, pypinyin, opencc
+s = u.find_spec("mlx_audio")
+sys.exit(0 if s and any(os.path.isdir(os.path.join(p, "tts", "models", "voxcpm2")) for p in (s.submodule_search_locations or [])) else 1)'
+_TTS_MLX_MODEL="mlx-community/VoxCPM2-8bit"
+_TTS_MLX_REV="d52725898a0675703f7f9ddc5a4d1a3cdbb99032"
+_TTS_MLX_FILES='["config.json", "model.safetensors", "special_tokens_map.json", "tokenizer.json", "tokenizer_config.json"]' 
+
+# 能不能登入 GPU 伺服器（已有設定、檢查伺服器環境之前）：先試金鑰、不問密碼；沒有金鑰就產生一個；
+# 要密碼時講清楚再問（輸入一次就把這台的金鑰加到伺服器）。以前直接在「正在檢查伺服器環境」的轉圈裡連線，
+# ssh 問密碼的提示被轉圈蓋掉，看起來像卡住（2026-10-09 Mac 實機）。沒有人可以輸入時不問、回 1
+# 用法：_rw_ensure_key_auth 使用者 主機 埠；成功時 existing_key 是可用的金鑰（可能是空的＝ssh 預設金鑰就能登入）
+_rw_ensure_key_auth() {
+    local user="$1" host="$2" port="$3" key="${existing_key:-}"
+    local base="-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -p ${port}"
+    if [ -n "$key" ]; then
+        ssh $base -o BatchMode=yes -i "$key" "${user}@${host}" "echo ok" &>/dev/null && return 0
+    else
+        ssh $base -o BatchMode=yes "${user}@${host}" "echo ok" &>/dev/null && return 0
+        key="$HOME/.ssh/jt_whisper_ed25519"
+        if [ ! -f "$key" ]; then
+            mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+            ssh-keygen -t ed25519 -f "$key" -N "" -q -C "jt-whisper-auto" || return 1
+        fi
+        if ssh $base -o BatchMode=yes -i "$key" "${user}@${host}" "echo ok" &>/dev/null; then
+            _rw_save_key "$key"
+            return 0
+        fi
+    fi
+    if [ ! -t 0 ] && ! { : </dev/tty; } 2>/dev/null; then
+        echo -e "  ${C_WARN}[略過]${NC} 登入 ${user}@${host} 要密碼，這次沒有人可以輸入"
+        return 1
+    fi
+    [ -f "${key}.pub" ] || { check_fail "找不到公鑰 ${key}.pub"; return 1; }
+    echo -e "  ${C_WHITE}這台電腦登入 ${user}@${host} 需要密碼：輸入一次（輸入時畫面不會顯示），會把這台的金鑰加到伺服器，之後就不用再輸入${NC}"
+    if ssh $base "${user}@${host}" "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys" < "${key}.pub"; then
+        _rw_save_key "$key"
+        check_ok "已把這台的金鑰加到伺服器，之後免密碼"
+        return 0
+    fi
+    check_fail "登入 ${user}@${host} 失敗"
+    return 1
+}
+
+# 金鑰記進 config.json 的 remote_whisper.ssh_key（之後的檢查、更新都用它）
+_rw_save_key() {
+    existing_key="$1"
+    "$_PY" -c "
+import json, sys
+p = sys.argv[1]
+c = json.load(open(p, encoding='utf-8'))
+c.setdefault('remote_whisper', {})['ssh_key'] = sys.argv[2]
+json.dump(c, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+" "$SCRIPT_DIR/config.json" "$1" 2>/dev/null || true
+}
+
+check_tts_local_mac() {
+    [ "$(uname -m)" = "arm64" ] || return 0
+    local mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+    [ "$mem_gb" -ge 16 ] || return 0
+    source "$VENV_DIR/bin/activate" || return 0
+    if python3 -c "$_TTS_MLX_CHECK" &>/dev/null && [ -f "$SCRIPT_DIR/tts_data/moe_words.tsv" ] \
+        && python3 -c "from huggingface_hub import snapshot_download as d; d('$_TTS_MLX_MODEL', revision='$_TTS_MLX_REV', local_files_only=True, allow_patterns=$_TTS_MLX_FILES)" &>/dev/null; then
+        section "文字轉語音（本機合成，Apple Silicon）"
+        check_ok "本機文字轉語音（已安裝）"
+        deactivate
+        return 0
+    fi
+    local tty_in
+    if [ -t 0 ]; then
+        tty_in=/dev/stdin
+    elif { : </dev/tty; } 2>/dev/null; then
+        tty_in=/dev/tty
+    else
+        deactivate
+        return 0
+    fi
+    section "文字轉語音（本機合成，Apple Silicon）"
+    echo -e "  ${C_WHITE}把文字、逐字稿、摘要念成台灣華語。有設定文字轉語音的 GPU 伺服器時用伺服器，這台不必裝${NC}"
+    echo -e "  ${C_DIM}  本機合成：約 4 GB（模型 3.2 GB、台灣念法資源 0.6 GB），速度約與念出來一樣快${NC}"
+    local ans=""
+    # 預設「是」（2026-10-09 使用者：不要讓使用者還要做很多前置作業；以前預設否，按 Enter 就跳過，WebUI 的本機一直不能選）
+    if ! read -r -p "  是否在這台 Mac 啟用本機文字轉語音？(Y/n) " ans < "$tty_in"; then echo; deactivate; return 0; fi
+    case "$ans" in
+        [Nn]*) echo -e "  ${C_DIM}跳過（之後要用：重新執行 ./install.sh，問到這一題時按 Enter）${NC}"; deactivate; return 0 ;;
+    esac
+    # requests：g2pw 有 import 卻沒宣告相依（2026-10-09 Mac 實測）
+    local pkgs="g2pw==0.1.1 pypinyin==0.55.0 opencc-python-reimplemented==0.1.7 requests"
+    python3 -c 'import importlib.util as u, os, sys
+s = u.find_spec("mlx_audio")
+sys.exit(0 if s and any(os.path.isdir(os.path.join(p, "tts", "models", "voxcpm2")) for p in (s.submodule_search_locations or [])) else 1)' &>/dev/null \
+        || pkgs="$pkgs mlx-audio>=0.5.6"
+    # g2pw 會 import torch（只用 DataLoader）：產品 venv 通常已經有（講者辨識用），沒有才裝（2026-10-09 乾淨 venv 實測）
+    python3 -c "import torch" &>/dev/null || pkgs="$pkgs torch"
+    if run_spinner "安裝文字轉語音套件..." pip install --disable-pip-version-check $pkgs \
+            && python3 -c "$_TTS_MLX_CHECK" &>/dev/null; then
+        echo ""
+        check_ok "文字轉語音套件"
+    else
+        echo ""
+        check_notice "文字轉語音套件安裝失敗：朗讀只能透過 GPU 伺服器，其他功能不受影響"
+        deactivate
+        return 0
+    fi
+    if python3 "$SCRIPT_DIR/remote_whisper_server.py" --tts-fetch-data "$SCRIPT_DIR/tts_data"; then
+        check_ok "台灣念法資源（教育部辭典、g2pW）"
+    else
+        check_notice "台灣念法資源下載失敗：重新執行 ./install.sh 會從中斷處續傳"
+    fi
+    if run_spinner "下載 VoxCPM2 模型（約 3.2 GB）..." \
+            python3 -c "from huggingface_hub import snapshot_download as d; d('$_TTS_MLX_MODEL', revision='$_TTS_MLX_REV', allow_patterns=$_TTS_MLX_FILES)"; then
+        echo ""
+        check_ok "VoxCPM2 模型"
+    else
+        echo ""
+        check_notice "VoxCPM2 模型下載失敗：重新執行 ./install.sh"
+    fi
+    # 共用 MLX：確認既有功能還能載入
+    python3 -c "import mlx_whisper" &>/dev/null || check_notice "mlx-whisper 無法載入，請重新執行 ./install.sh"
+    deactivate
+}
+
 # ─── 升級 ────────────────────────────────────────
 # ─── macOS ScreenCaptureKit 系統音訊 helper ──────────────
 # 取代 BlackHole + 多重輸出裝置：直接向 macOS 借系統播放音訊，
@@ -1514,14 +1641,24 @@ check_sck() {
 # jtdt_meeting/ 是第一個放在子資料夾的（v2.25.0，會議摘要）：複製時要先建資料夾
 # jtlw_api/（REST API）v2.25.1 起公開：只放程式與介面規格，測試（test_*.py）跟 tools/ 一樣不發佈
 _UPGRADE_FILES="translate_meeting.py start.sh start.ps1 install.sh install.ps1 install-linux.sh \
-SOP.md README.md CHANGELOG.md BENCHMARKS.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
+SOP.md README.md CHANGELOG.md BENCHMARKS.md COMPLIANCE.md webui.py webui.html subtitle_overlay.py sck_audio_capture.swift \
 jtlw_tls.py remote_whisper_server.py \
 jtdt_meeting/__init__.py jtdt_meeting/meeting_insight.py jtdt_meeting/meeting_charts.py \
 jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py \
 jtlw_api/__init__.py jtlw_api/__main__.py jtlw_api/app.py jtlw_api/config.py jtlw_api/engine.py \
 jtlw_api/events.py jtlw_api/keys.py jtlw_api/log.py jtlw_api/store.py jtlw_api/tls.py \
 jtlw_api/schemas/jtlw-api-v1.schema.json \
+jtlw_tts/__init__.py jtlw_tts/__main__.py jtlw_tts/engine.py jtlw_tts/tw_reading.py \
+jtlw_tts/voices/b00000000001/voice.json jtlw_tts/voices/b00000000001/ref.wav \
+jtlw_tts/voices/b00000000002/voice.json jtlw_tts/voices/b00000000002/ref.wav \
+jtlw_tts/voices/b00000000003/voice.json jtlw_tts/voices/b00000000003/ref.wav \
+jtlw_tts/voices/b00000000004/voice.json jtlw_tts/voices/b00000000004/ref.wav \
+jtlw_tts/voices/b00000000005/voice.json jtlw_tts/voices/b00000000005/ref.wav \
+jtlw_tts/voices/b00000000006/voice.json jtlw_tts/voices/b00000000006/ref.wav \
+jtlw_tts/voices/b00000000007/voice.json jtlw_tts/voices/b00000000007/ref.wav \
+jtlw_tts/voices/b00000000008/voice.json jtlw_tts/voices/b00000000008/ref.wav \
 icons/jt-live-whisper.png icons/jt-live-whisper.ico icons/jt-live-whisper.icns"
+# jtlw_tts/（v2.27.0）：文字轉語音。新加的子資料夾：第一次 --upgrade 跑舊腳本、拿不到，第二次才會到
 # icons/（v2.26.2）：捷徑的 logo 圖示，由 tools/build_icons.py 照網站 favicon 產生
 
 # ─── GPU 伺服器 server.py 的啟停與版本比較 ──────────────────────
@@ -1626,6 +1763,136 @@ _rw_ver_lt() {
     [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
 }
 
+# 文字轉語音（2026-10）：GPU 伺服器的 venv-tts。已經裝好只報告；沒裝的話**有人可以回答才問**（預設否：約 11 GB，
+# 而且 GPU 伺服器多半是共用正式機），無人值守不動。回答是就在伺服器上跑 server.py --tts-setup：
+# 套件、模型、台灣念法資源都在那裡處理（install.ps1 叫同一個指令，不必兩邊各寫一遍）
+_rw_offer_tts() {   # $1=ssh_opts  $2=user@host
+    local st
+    st=$(ssh $1 "$2" "test -x ~/jt-whisper-server/venv-tts/bin/python && test -f ~/jt-whisper-server/tts/moe_words.tsv && ~/jt-whisper-server/venv-tts/bin/python -c 'import voxcpm, g2pw' >/dev/null 2>&1 && echo ready || echo missing" 2>/dev/null)
+    if [ "$st" = "ready" ]; then
+        check_ok "GPU 伺服器 文字轉語音已設定"
+        return 0
+    fi
+    local tty_in
+    if [ -t 0 ]; then
+        tty_in=/dev/stdin
+    elif { : </dev/tty; } 2>/dev/null; then
+        tty_in=/dev/tty
+    else
+        echo -e "  ${C_DIM}文字轉語音（朗讀台灣華語）還沒設定；要用時在有終端機的地方重新執行安裝程式${NC}"
+        return 0
+    fi
+    if ! ssh $1 "$2" "grep -q _tts_setup_main ~/jt-whisper-server/server.py" 2>/dev/null; then
+        echo -e "  ${C_DIM}GPU 伺服器上的 server.py 還沒有文字轉語音（版本較舊），更新伺服器後再設定${NC}"
+        return 0
+    fi
+    echo -e "  ${C_WHITE}文字轉語音：把文字、逐字稿、摘要念成台灣華語（VoxCPM2，在 GPU 伺服器合成）${NC}"
+    echo -e "  ${C_DIM}  會在 GPU 伺服器裝約 11 GB（Python 環境 5.2 GB、模型 4.7 GB、台灣念法資源 0.6 GB；要有 20 GB 可用空間），第一次約 10～30 分鐘；辨識不受影響${NC}"
+    local ans=""
+    if ! read -r -p "  是否在 GPU 伺服器設定文字轉語音？(y/N) " ans < "$tty_in"; then echo; return 0; fi
+    case "$ans" in
+        [Yy]*) ;;
+        *) echo -e "  ${C_DIM}跳過（之後要用：重新執行安裝程式）${NC}"; return 0 ;;
+    esac
+    if ssh $1 "$2" "cd ~/jt-whisper-server && venv/bin/python3 server.py --tts-setup"; then
+        check_ok "GPU 伺服器 文字轉語音設定完成"
+    else
+        check_fail "GPU 伺服器 文字轉語音沒有設定完成（辨識不受影響；可再執行一次安裝程式）"
+    fi
+}
+
+# BreezyVoice（2026-10-09，選用、不是預設）：台灣口音，但合成速度慢（約音訊長度的 1.2～2.5 倍），不適合即時。
+# 安裝與升級都問（預設否）；沒有人可以回答就不問、也不裝。升級時回答「否」記在 config.json（remote_whisper.breezy = "no"），
+# 之後升級不再問（完整重跑安裝程式照樣問）。$3=1 或 JTLW_FROM_UPGRADE=1 表示從升級來的
+_rw_offer_breezy() {   # $1=ssh_opts  $2=user@host  $3=upgrade
+    local upgrading="${3:-${JTLW_FROM_UPGRADE:-}}"
+    local st
+    st=$(ssh $1 "$2" "if test -x ~/jt-whisper-server/venv-breezy/bin/python && test -f ~/jt-whisper-server/breezyvoice/.jtlw-rev; then echo ready; elif grep -q _breezy_setup_main ~/jt-whisper-server/server.py 2>/dev/null; then echo missing; else echo old; fi" 2>/dev/null)
+    case "$st" in
+        ready) check_ok "GPU 伺服器 BreezyVoice 已安裝（選用的台灣口音合成模型）"; return 0 ;;
+        missing|old) ;;
+        *) return 0 ;;                                   # 連不上：不問
+    esac
+    if [ "$upgrading" = "1" ] && [ "$(_rw_cfg_get breezy)" = "no" ]; then
+        return 0
+    fi
+    local tty_in
+    if [ -t 0 ]; then
+        tty_in=/dev/stdin
+    elif { : </dev/tty; } 2>/dev/null; then
+        tty_in=/dev/tty
+    else
+        return 0
+    fi
+    if [ "$st" = "old" ]; then
+        echo -e "  ${C_DIM}BreezyVoice（選用的台灣口音合成模型）：GPU 伺服器上的程式較舊，執行 ./install.sh 更新伺服器後就能加裝${NC}"
+        return 0
+    fi
+    echo -e "  ${C_WHITE}BreezyVoice（MediaTek，選用）：台灣口音，但合成速度慢（約音訊長度的 1.2～2.5 倍），不適合即時；預設仍用 VoxCPM2${NC}"
+    echo -e "  ${C_DIM}  會在 GPU 伺服器裝約 8 GB（Python 環境 5.5 GB、模型 2.2 GB；要有 16 GB 可用空間），第一次約 10～20 分鐘；辨識不受影響${NC}"
+    local ans=""
+    if ! read -r -p "  是否加裝 BreezyVoice？(y/N) " ans < "$tty_in"; then echo; return 0; fi
+    case "$ans" in
+        [Yy]*) ;;
+        *)
+            if [ "$upgrading" = "1" ]; then
+                _rw_cfg_set breezy no
+                echo -e "  ${C_DIM}跳過（升級時不再問；之後要裝：執行 ./install.sh）${NC}"
+            else
+                echo -e "  ${C_DIM}跳過（之後要裝：重新執行安裝程式）${NC}"
+            fi
+            return 0 ;;
+    esac
+    if ssh $1 "$2" "cd ~/jt-whisper-server && venv/bin/python3 server.py --breezy-setup"; then
+        _rw_cfg_set breezy ""
+        check_ok "GPU 伺服器 BreezyVoice 安裝完成（WebUI「合成模型」選 BreezyVoice）"
+    else
+        check_fail "GPU 伺服器 BreezyVoice 沒有安裝完成（其他功能不受影響；可再執行一次安裝程式）"
+    fi
+}
+
+# config.json 的 remote_whisper.<鍵>：讀（沒有回空字串）／寫（空字串＝刪掉）
+_rw_cfg_get() {
+    "${_PY:-python3}" -c "
+import json, sys
+try:
+    print((json.load(open(sys.argv[1], encoding='utf-8')).get('remote_whisper') or {}).get(sys.argv[2], ''))
+except Exception:
+    print('')
+" "$SCRIPT_DIR/config.json" "$1" 2>/dev/null
+}
+
+_rw_cfg_set() {
+    "${_PY:-python3}" -c "
+import json, os, sys
+p = sys.argv[1]
+c = json.load(open(p, encoding='utf-8'))
+rw = c.setdefault('remote_whisper', {})
+if sys.argv[3]:
+    rw[sys.argv[2]] = sys.argv[3]
+else:
+    rw.pop(sys.argv[2], None)
+tmp = p + '.tmp'
+json.dump(c, open(tmp, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+os.replace(tmp, p)
+" "$SCRIPT_DIR/config.json" "$1" "$2" 2>/dev/null || true
+}
+
+# 升級（macOS；Linux 升級後會重跑完整安裝流程、在那裡問）：有設定 GPU 伺服器、而且不必輸入密碼就連得上時，問要不要加裝 BreezyVoice
+offer_breezy_on_upgrade() {
+    [ "$(uname -s)" = "Linux" ] && return 0              # Linux 升級後會重跑完整安裝流程（先同步伺服器程式），在那裡問
+    [ -f "$SCRIPT_DIR/config.json" ] || return 0
+    local host user port key opts
+    host=$(_rw_cfg_get host)
+    [ -n "$host" ] || return 0
+    user=$(_rw_cfg_get ssh_user); user=${user:-root}
+    port=$(_rw_cfg_get ssh_port); port=${port:-22}
+    key=$(_rw_cfg_get ssh_key)
+    opts="-o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -p $port"
+    if [ -n "$key" ] && [ -f "$key" ]; then opts="$opts -i $key"; fi
+    _rw_offer_breezy "$opts" "${user}@${host}" 1
+}
+
 do_upgrade() {
     section "從 GitHub 升級程式"
 
@@ -1682,6 +1949,7 @@ do_upgrade() {
             check_ok "已經是最新版本 (v${local_version})"
         fi
         offer_desktop_shortcut
+        offer_breezy_on_upgrade
         return 0
     fi
 
@@ -1716,6 +1984,7 @@ do_upgrade() {
     echo ""
     echo -e "  ${C_WARN}建議重新執行 ./install.sh 確認相依套件完整${NC}"
     offer_desktop_shortcut
+    offer_breezy_on_upgrade
     return 0
 }
 
@@ -2058,6 +2327,11 @@ if os.path.isfile(p):
             fi
         fi
 
+        if ! _rw_ensure_key_auth "$existing_user" "$existing_host" "$existing_port"; then
+            echo -e "  ${C_DIM}  略過 GPU 伺服器檢查（之後要檢查：重新執行 ./install.sh）${NC}"
+            return 0
+        fi
+
         # 組合 SSH（含 ControlMaster）
         local ctrl_sock="/tmp/jt-ssh-cm-${existing_user}@${existing_host}:${existing_port}"
         local chk_opts="-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p $existing_port"
@@ -2326,6 +2600,8 @@ else:
                     fi
                 fi
             fi
+            _rw_offer_tts "$chk_opts" "$existing_user@$existing_host"
+            _rw_offer_breezy "$chk_opts" "$existing_user@$existing_host"
             # 關閉 SSH 多工
             ssh -o ControlPath="$ctrl_sock" -O exit "$existing_user@$existing_host" &>/dev/null || true
             check_ok "GPU 伺服器 辨識環境正常（${existing_user}@${existing_host}）"
@@ -2745,6 +3021,8 @@ else:
 \"
     " 2>&1 | grep -v "^Shared connection"
     check_ok "辨識模型下載完成"
+    _rw_offer_tts "$ssh_opts" "$rw_user@$rw_host"
+    _rw_offer_breezy "$ssh_opts" "$rw_user@$rw_host"
 
     # 關閉 SSH 多工連線
     _cleanup_ssh_cm
@@ -3404,5 +3682,6 @@ check_mlx_whisper
 check_qwen_local_mac
 check_nemotron_local
 setup_remote_whisper
+check_tts_local_mac
 print_summary
 offer_desktop_shortcut

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>jt-live-whisper | 100% 全地端 AI 語音工具箱</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-<meta name="description" content="jt-live-whisper：100% 全地端 AI 語音工具箱。即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。支援 macOS / Windows / Linux，可選配 GPU 伺服器加速。" />
+<meta name="description" content="jt-live-whisper：100% 全地端 AI 語音工具箱。即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要、台灣華語朗讀，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。支援 macOS / Windows / Linux，可選配 GPU 伺服器加速。" />
 <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -27,6 +27,7 @@
       <a class="nav-page" href="index.html" aria-current="page"><span class="zh">首頁</span><span class="en">Home</span></a>
       <a class="nav-page" href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a>
       <a class="nav-page" href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <a class="nav-page" href="compliance.html"><span class="zh">資料與合規</span><span class="en">Compliance</span></a>
       <span class="nav-sep" aria-hidden="true"></span>
       <a class="btn btn-ghost btn-sm" href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
       <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
@@ -56,8 +57,8 @@
       </span>
     </h1>
     <p class="lead">
-      <span class="zh">jt-live-whisper 是 100% 全地端的 AI 語音工具箱：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識與會議摘要。所有 AI 模型都在你自己的設備上執行，資料不經過任何雲端服務。</span>
-      <span class="en">jt-live-whisper is a 100% on-device AI voice toolkit: live transcription, live translation, batch audio processing, speaker diarization and meeting summaries. Every AI model runs on your own hardware; nothing ever touches the cloud.</span>
+      <span class="zh">jt-live-whisper 是 100% 全地端的 AI 語音工具箱：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要與台灣華語朗讀。所有 AI 模型都在你自己的設備上執行，資料不經過任何雲端服務。</span>
+      <span class="en">jt-live-whisper is a 100% on-device AI voice toolkit: live transcription, live translation, batch audio processing, speaker diarization, meeting summaries and Taiwanese Mandarin text-to-speech. Every AI model runs on your own hardware; nothing ever touches the cloud.</span>
     </p>
     <ul class="hero-points">
       <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
@@ -84,6 +85,7 @@
       <span class="pill"><span class="zh">WebUI 介面</span><span class="en">Web UI</span></span>
       <span class="pill"><span class="zh">懸浮字幕</span><span class="en">Overlay subtitles</span></span>
       <span class="pill"><span class="zh">關鍵字通知</span><span class="en">Keyword alerts</span></span>
+      <span class="pill"><span class="zh">台灣華語朗讀</span><span class="en">Taiwanese Mandarin TTS</span></span>
       <span class="pill">macOS · Windows · Linux</span>
     </div>
   </div>
@@ -107,7 +109,7 @@
     </div>
     <div class="grid g3">
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 7.5 8 9 4.6-1.5 8-4 8-9V6z"/></svg></span><span class="zh">完全地端執行</span><span class="en">Fully on-device</span></h3><p><span class="zh">辨識、翻譯、講者辨識、摘要全部用自有設備上的 AI 模型，無需雲端 API Key、不上傳任何資料。</span><span class="en">Recognition, translation, diarization and summaries all use local AI models: no cloud API key, no uploads.</span></p></div>
-      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="zh">隱私安全</span><span class="en">Private &amp; secure</span></h3><p><span class="zh">會議內容、語音資料全程留在自有設備，適合企業內部會議與機密討論。</span><span class="en">Meeting content and audio stay on your machine, ideal for internal and confidential discussions.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="zh">隱私安全</span><span class="en">Private &amp; secure</span></h3><p><span class="zh">會議內容、語音資料全程留在自有設備，適合企業內部會議與機密討論。<a href="compliance.html">資料保護與合規 →</a></span><span class="en">Meeting content and audio stay on your machine, ideal for internal and confidential discussions. <a href="compliance.html">Data protection &amp; compliance →</a></span></p></div>
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4"/></svg></span><span class="zh">零月租成本</span><span class="en">Zero subscription</span></h3><p><span class="zh">不需要付費雲端 API（ChatGPT、Claude、Gemini 等），所有採用的 AI 模型皆為自由開源。</span><span class="en">No paid cloud APIs (ChatGPT, Claude, Gemini…); every model is free and open source.</span></p></div>
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17V7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10M4 17h16M4 17l-1 3h18l-1-3"/></svg></span><span class="zh">不限應用程式</span><span class="en">Any application</span></h3><p><span class="zh">採用系統音訊層級擷取，理論上任何軟體的聲音輸出都能處理（Zoom、Teams、Meet、YouTube、Podcast 等）。macOS 13 以上使用系統內建的 ScreenCaptureKit，免安裝虛擬音訊驅動、免建立多重輸出裝置。</span><span class="en">Captures at the system-audio level, so virtually any app's output works (Zoom, Teams, Meet, YouTube, podcasts…). On macOS 13+ it uses the built-in ScreenCaptureKit: no virtual audio driver, no Multi-Output Device.</span></p></div>
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-7"/></svg></span><span class="zh">功能完整</span><span class="en">Complete toolkit</span></h3><p><span class="zh">從即時轉錄翻譯、離線音訊處理、講者辨識到 AI 摘要，一套搞定。</span><span class="en">From live transcription &amp; translation to offline processing, diarization and AI summaries, all in one.</span></p></div>
@@ -136,6 +138,7 @@
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="13" width="8" height="7" rx="1.5"/><path d="M11 7.5h4a2 2 0 0 1 2 2v3.5"/></svg></span><span class="zh">接進你的系統</span><span class="en">Integrates with your systems</span></h3><p><span class="zh">可當成語音後端，已接上 <a href="https://jasoncheng7115.github.io/jt-doc-tools/" target="_blank" rel="noopener">jt-doc-tools</a> 與 <a href="https://jasoncheng7115.github.io/jt-vc-portal/" target="_blank" rel="noopener">jt-vc-portal</a>：上傳錄音或會議錄影 → 辨識、分離講者、校正 → 產出會議摘要與決議，<b>每一條都指得回誰在第幾分鐘說的</b>。全程在自己的機器上跑。</span><span class="en">Use it as a speech backend: already wired into <a href="https://jasoncheng7115.github.io/jt-doc-tools/" target="_blank" rel="noopener">jt-doc-tools</a> and <a href="https://jasoncheng7115.github.io/jt-vc-portal/" target="_blank" rel="noopener">jt-vc-portal</a>: upload a recording or meeting video → transcribe, separate speakers, correct → summaries and decisions, <b>each citing who said it and when</b>. All on your own hardware.</span></p></div>
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span><span class="zh">伺服器模式</span><span class="en">Server mode</span></h3><p><span class="zh"><code>./install.sh --server</code> 裝在無桌面的主機上，WebUI 以 systemd 服務常駐、開機自動啟動，區網其他電腦用瀏覽器就能操作。可限制來源網段、加上 TLS。</span><span class="en"><code>./install.sh --server</code> installs on a headless box; the Web UI runs as a systemd service on boot and anyone on the LAN can drive it from a browser. Source ranges and TLS are configurable.</span></p></div>
       <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4M16 21l4-4-4-4M4 7h11a5 5 0 0 1 5 5M20 17H9a5 5 0 0 1-5-5"/></svg></span><span class="zh">雙向字幕 + 16 種模式</span><span class="en">Bidirectional &amp; 16 modes</span></h3><p><span class="zh">英中 / 日中 / 韓中雙向，同時擷取系統音訊與麥克風，對方外語翻中文、自己中文翻外語；另支援台語（台灣閩南語）辨識，共 16 種功能模式。</span><span class="en">EN↔ZH / JA↔ZH / KO↔ZH bidirectional from system audio + mic, plus Taiwanese Hokkien ASR; 16 modes in total.</span></p></div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></span><span class="zh">台灣華語朗讀</span><span class="en">Taiwanese Mandarin TTS</span></h3><p><span class="zh">把文字、講稿、摘要念成台灣華語，邊念邊顯示字幕，也能存成 MP3（v2.27.0）；念法以台灣日常說法為準，在自己的 GPU 伺服器或 Apple Silicon Mac 合成，聲音可用內建的 8 個（AI 產生）或自己匯入、取得同意的錄音。預設 VoxCPM2（快），也可選台灣口音的 BreezyVoice（較慢）。</span><span class="en">Read text, scripts and summaries aloud in Taiwanese Mandarin with live subtitles, or save them as MP3 (v2.27.0); readings follow everyday Taiwanese usage, synthesized on your own GPU server or Apple Silicon Mac in one of 8 built-in AI-generated voices or a consented voice you import. VoxCPM2 by default (fast), or BreezyVoice for a native Taiwanese accent (slower).</span></p></div>
     </div>
     <p style="text-align:center;margin-top:28px"><a class="btn btn-ghost" href="features.html"><span class="zh">看完整功能詳解 →</span><span class="en">See all features →</span></a></p>
   </div>
@@ -339,6 +342,7 @@ irm https://raw.githubusercontent.com/jasoncheng7115/jt-live-whisper/main/instal
     <div>
       <a href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a> ·
       <a href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a> ·
+      <a href="compliance.html"><span class="zh">資料與合規</span><span class="en">Compliance</span></a> ·
       <a href="https://github.com/jasoncheng7115/jt-live-whisper/blob/main/CHANGELOG.md" target="_blank" rel="noopener">CHANGELOG</a> ·
       <a href="https://github.com/jasoncheng7115/jt-live-whisper/issues" target="_blank" rel="noopener">Issues</a>
     </div>

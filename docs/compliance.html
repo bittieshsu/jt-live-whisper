@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>資料保護與合規 | jt-live-whisper</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<meta name="description" content="jt-live-whisper 的資料保護與合規：資料不出去、工具本身做到的控制，以及組織使用後要做的事（個資法、GDPR、ISO/IEC 27001、ISO/IEC 42001）。" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<!-- site-nav：由 tools/site_nav.py 產生，請改那支 -->
+<nav>
+  <div class="wrap nav-in">
+    <a class="brand" href="index.html" style="text-decoration:none">
+      <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
+        <defs><linearGradient id="bm" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2c3e50"/><stop offset="1" stop-color="#3498db"/></linearGradient></defs>
+        <rect width="64" height="64" rx="14" fill="url(#bm)"/>
+        <g stroke="#fff" stroke-width="4" stroke-linecap="round">
+          <line x1="16" y1="26" x2="16" y2="38"/><line x1="25" y1="18" x2="25" y2="46"/>
+          <line x1="34" y1="24" x2="34" y2="40"/><line x1="43" y1="14" x2="43" y2="50"/><line x1="52" y1="28" x2="52" y2="36"/>
+        </g>
+      </svg>
+      jt-live-whisper
+    </a>
+    <div class="nav-links">
+      <a class="nav-page" href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
+      <a class="nav-page" href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a>
+      <a class="nav-page" href="usage.html"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <a class="nav-page" href="compliance.html" aria-current="page"><span class="zh">資料與合規</span><span class="en">Compliance</span></a>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a class="btn btn-ghost btn-sm" href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
+      <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
+      <button class="btn btn-ghost btn-sm" id="langBtn" type="button">English</button>
+    </div>
+  </div>
+</nav>
+<div class="page-nav"><div class="wrap page-nav-in">
+    <span class="page-nav-label"><span class="zh">本頁</span><span class="en">On this page</span></span>
+    <a href="#local"><span class="zh">資料在哪裡</span><span class="en">Where data lives</span></a>
+    <a href="#controls"><span class="zh">工具做到的</span><span class="en">What the tool does</span></a>
+    <a href="#checklist"><span class="zh">組織要做的</span><span class="en">Your checklist</span></a>
+    <a href="#standards"><span class="zh">法規對照</span><span class="en">Standards</span></a>
+</div></div>
+<!-- /site-nav -->
+
+<header class="hero" style="padding:64px 0 44px">
+  <div class="wrap">
+    <span class="eyebrow"><span class="zh">資料保護與合規</span><span class="en">Data protection &amp; compliance</span></span>
+    <h1 style="margin-top:6px"><span class="zh">資料不出去</span><span class="en">Your data stays in</span></h1>
+    <p class="lead"><span class="zh">語音、逐字稿、翻譯、摘要都在你自己的設備上處理，不需要任何雲端 AI 服務，讓組織比較容易符合個人資料保護、資訊安全與 AI 管理的要求。</span><span class="en">Speech, transcripts, translations and summaries are processed on your own hardware with no cloud AI service, which makes privacy, security and AI governance requirements easier to meet.</span></p>
+    <p class="note" style="margin-top:14px"><span class="zh">個資法、GDPR、ISO/IEC 27001、ISO/IEC 42001 檢驗的是<b>組織怎麼管理</b>，不是某一套軟體，所以本工具箱不宣稱「通過」或「符合」任何認證。這一頁說明工具本身做到什麼，以及你的組織使用後還要做哪些事。本頁不是法律意見。</span><span class="en">Privacy laws and ISO/IEC 27001 / 42001 assess <b>how an organization is managed</b>, not a piece of software, so the toolbox claims no certification. This page explains what the tool does and what your organization still needs to do. It is not legal advice.</span></p>
+  </div>
+</header>
+
+<section id="local">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">資料在哪裡</span><span class="en">Where your data lives</span></h2>
+      <p><span class="zh">錄音、逐字稿、摘要都在你的內網裡處理與保存；雲端 AI 服務完全用不到。</span><span class="en">Recordings, transcripts and summaries are processed and stored inside your network; no cloud AI service is involved.</span></p></div>
+    <div class="flow-wrap"><svg class="flow-svg flow-desk" viewBox="0 0 1120 380" role="img" aria-label="資料流向：資料留在你的內網"><defs><marker id="cpda" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h"/></marker><marker id="cpdn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h-no"/></marker><marker id="cpdm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h-maybe"/></marker><marker id="cpdi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h-in"/></marker></defs><rect x="6" y="6" width="760" height="368" rx="16" class="cp-lan"/><text x="30" y="36" class="fl-t fl-lane-t zh" text-anchor="start">你的內網（自有設備）</text><text x="30" y="36" class="fl-t fl-lane-t en" text-anchor="start">Your network (your hardware)</text><rect x="36" y="140" width="260" height="100" rx="12" class="cp-node"/><text x="166.0" y="176.0" class="fl-t fl-title zh" text-anchor="middle">你的電腦（WebUI）</text><text x="166.0" y="176.0" class="fl-t fl-title en" text-anchor="middle">Your computer (WebUI)</text><text x="166.0" y="195.0" class="fl-t fl-sub zh" text-anchor="middle">錄音・逐字稿・摘要・聲音</text><text x="166.0" y="195.0" class="fl-t fl-sub en" text-anchor="middle">Audio · transcripts · summaries · voices</text><text x="166.0" y="214.0" class="fl-t fl-sub zh" text-anchor="middle">都存在這裡</text><text x="166.0" y="214.0" class="fl-t fl-sub en" text-anchor="middle">are stored here</text><rect x="486" y="40" width="250" height="100" rx="12" class="cp-node"/><text x="611.0" y="76.0" class="fl-t fl-title zh" text-anchor="middle">GPU 伺服器</text><text x="611.0" y="76.0" class="fl-t fl-title en" text-anchor="middle">GPU server</text><text x="611.0" y="95.0" class="fl-t fl-sub zh" text-anchor="middle">辨識・講者辨識・朗讀</text><text x="611.0" y="95.0" class="fl-t fl-sub en" text-anchor="middle">ASR · diarization · TTS</text><text x="611.0" y="114.0" class="fl-t fl-sub zh" text-anchor="middle">暫存音檔處理完就刪</text><text x="611.0" y="114.0" class="fl-t fl-sub en" text-anchor="middle">temp audio deleted after use</text><rect x="486" y="240" width="250" height="100" rx="12" class="cp-node"/><text x="611.0" y="285.5" class="fl-t fl-title zh" text-anchor="middle">LLM 伺服器（如 Ollama）</text><text x="611.0" y="285.5" class="fl-t fl-title en" text-anchor="middle">LLM server (e.g. Ollama)</text><text x="611.0" y="304.5" class="fl-t fl-sub zh" text-anchor="middle">翻譯・摘要・校正</text><text x="611.0" y="304.5" class="fl-t fl-sub en" text-anchor="middle">Translation · summaries · fixes</text><path d="M296,175 H390 V90 H482" class="fl-arrow" marker-start="url(#cpda)" marker-end="url(#cpda)"/><path d="M296,205 H390 V290 H482" class="fl-arrow" marker-start="url(#cpda)" marker-end="url(#cpda)"/><text x="938" y="36" class="fl-t fl-lane-t zh" text-anchor="middle">外部</text><text x="938" y="36" class="fl-t fl-lane-t en" text-anchor="middle">Outside</text><rect x="820" y="50" width="236" height="92" rx="12" class="cp-onode"/><text x="938.0" y="82.0" class="fl-t fl-title zh" text-anchor="middle">雲端 AI 服務</text><text x="938.0" y="82.0" class="fl-t fl-title en" text-anchor="middle">Cloud AI services</text><text x="938.0" y="101.0" class="fl-t fl-sub zh" text-anchor="middle">ChatGPT・Claude・Gemini…</text><text x="938.0" y="101.0" class="fl-t fl-sub en" text-anchor="middle">ChatGPT · Claude · Gemini…</text><text x="938.0" y="120.0" class="fl-t cp-no zh" text-anchor="middle">✕ 不會送出</text><text x="938.0" y="120.0" class="fl-t cp-no en" text-anchor="middle">✕ never sent</text><rect x="820" y="160" width="236" height="92" rx="12" class="cp-onode"/><text x="938.0" y="192.0" class="fl-t fl-title zh" text-anchor="middle">轉發平台</text><text x="938.0" y="192.0" class="fl-t fl-title en" text-anchor="middle">Forwarding platforms</text><text x="938.0" y="211.0" class="fl-t fl-sub zh" text-anchor="middle">Telegram・Slack・LINE…</text><text x="938.0" y="211.0" class="fl-t fl-sub en" text-anchor="middle">Telegram · Slack · LINE…</text><text x="938.0" y="230.0" class="fl-t cp-maybe zh" text-anchor="middle">你開啟轉發時才送字幕</text><text x="938.0" y="230.0" class="fl-t cp-maybe en" text-anchor="middle">subtitles only if you turn it on</text><rect x="820" y="270" width="236" height="92" rx="12" class="cp-onode"/><text x="938.0" y="302.0" class="fl-t fl-title zh" text-anchor="middle">GitHub・HuggingFace</text><text x="938.0" y="302.0" class="fl-t fl-title en" text-anchor="middle">GitHub · HuggingFace</text><text x="938.0" y="321.0" class="fl-t fl-sub zh" text-anchor="middle">程式與模型</text><text x="938.0" y="321.0" class="fl-t fl-sub en" text-anchor="middle">code and models</text><text x="938.0" y="340.0" class="fl-t cp-in zh" text-anchor="middle">安裝時只下載，不上傳資料</text><text x="938.0" y="340.0" class="fl-t cp-in en" text-anchor="middle">download only, at install</text><path d="M770,96 H816" class="fl-arrow cp-no-line" marker-end="url(#cpdn)"/><path d="M770,206 H816" class="fl-arrow cp-maybe-line" marker-end="url(#cpdm)"/><path d="M816,316 H770" class="fl-arrow cp-in-line" marker-end="url(#cpdi)"/></svg><svg class="flow-svg flow-mobile" viewBox="0 0 390 640" role="img" aria-label="資料流向：資料留在你的內網"><defs><marker id="cpma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h"/></marker><marker id="cpmn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h-no"/></marker><marker id="cpmm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h-maybe"/></marker><marker id="cpmi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="cp-h-in"/></marker></defs><rect x="4" y="4" width="382" height="300" rx="16" class="cp-lan"/><text x="195" y="30" class="fl-t fl-lane-t zh" text-anchor="middle">你的內網（自有設備）</text><text x="195" y="30" class="fl-t fl-lane-t en" text-anchor="middle">Your network (your hardware)</text><rect x="70" y="46" width="250" height="92" rx="12" class="cp-node"/><text x="195.0" y="80.0" class="fl-t fl-title-m zh" text-anchor="middle">你的電腦（WebUI）</text><text x="195.0" y="80.0" class="fl-t fl-title-m en" text-anchor="middle">Your computer (WebUI)</text><text x="195.0" y="97.0" class="fl-t fl-sub-m zh" text-anchor="middle">錄音・逐字稿・摘要・聲音</text><text x="195.0" y="97.0" class="fl-t fl-sub-m en" text-anchor="middle">Audio · transcripts · summaries · voices</text><text x="195.0" y="114.0" class="fl-t fl-sub-m zh" text-anchor="middle">都存在這裡</text><text x="195.0" y="114.0" class="fl-t fl-sub-m en" text-anchor="middle">are stored here</text><rect x="14" y="190" width="174" height="98" rx="12" class="cp-node"/><text x="101.0" y="227.0" class="fl-t fl-title-m zh" text-anchor="middle">GPU 伺服器</text><text x="101.0" y="227.0" class="fl-t fl-title-m en" text-anchor="middle">GPU server</text><text x="101.0" y="244.0" class="fl-t fl-sub-m zh" text-anchor="middle">辨識・講者辨識・朗讀</text><text x="101.0" y="244.0" class="fl-t fl-sub-m en" text-anchor="middle">ASR · diarization · TTS</text><text x="101.0" y="261.0" class="fl-t fl-sub-m zh" text-anchor="middle">暫存音檔處理完就刪</text><text x="101.0" y="261.0" class="fl-t fl-sub-m en" text-anchor="middle">temp audio deleted after use</text><rect x="202" y="190" width="174" height="98" rx="12" class="cp-node"/><text x="289.0" y="235.5" class="fl-t fl-title-m zh" text-anchor="middle">LLM 伺服器</text><text x="289.0" y="235.5" class="fl-t fl-title-m en" text-anchor="middle">LLM server</text><text x="289.0" y="252.5" class="fl-t fl-sub-m zh" text-anchor="middle">翻譯・摘要・校正</text><text x="289.0" y="252.5" class="fl-t fl-sub-m en" text-anchor="middle">Translation · summaries · fixes</text><path d="M150,138 V186" class="fl-arrow" marker-start="url(#cpma)" marker-end="url(#cpma)"/><path d="M240,138 V186" class="fl-arrow" marker-start="url(#cpma)" marker-end="url(#cpma)"/><text x="195" y="336" class="fl-t fl-lane-t zh" text-anchor="middle">外部</text><text x="195" y="336" class="fl-t fl-lane-t en" text-anchor="middle">Outside</text><rect x="30" y="352" width="330" height="80" rx="12" class="cp-onode"/><text x="195.0" y="380.0" class="fl-t fl-title-m zh" text-anchor="middle">雲端 AI 服務</text><text x="195.0" y="380.0" class="fl-t fl-title-m en" text-anchor="middle">Cloud AI services</text><text x="195.0" y="397.0" class="fl-t fl-sub-m zh" text-anchor="middle">ChatGPT・Claude・Gemini…</text><text x="195.0" y="397.0" class="fl-t fl-sub-m en" text-anchor="middle">ChatGPT · Claude · Gemini…</text><text x="195.0" y="414.0" class="fl-t cp-no zh" text-anchor="middle">✕ 不會送出</text><text x="195.0" y="414.0" class="fl-t cp-no en" text-anchor="middle">✕ never sent</text><rect x="30" y="446" width="330" height="80" rx="12" class="cp-onode"/><text x="195.0" y="474.0" class="fl-t fl-title-m zh" text-anchor="middle">轉發平台</text><text x="195.0" y="474.0" class="fl-t fl-title-m en" text-anchor="middle">Forwarding platforms</text><text x="195.0" y="491.0" class="fl-t fl-sub-m zh" text-anchor="middle">Telegram・Slack・LINE…</text><text x="195.0" y="491.0" class="fl-t fl-sub-m en" text-anchor="middle">Telegram · Slack · LINE…</text><text x="195.0" y="508.0" class="fl-t cp-maybe zh" text-anchor="middle">你開啟轉發時才送字幕</text><text x="195.0" y="508.0" class="fl-t cp-maybe en" text-anchor="middle">subtitles only if you turn it on</text><rect x="30" y="540" width="330" height="80" rx="12" class="cp-onode"/><text x="195.0" y="568.0" class="fl-t fl-title-m zh" text-anchor="middle">GitHub・HuggingFace</text><text x="195.0" y="568.0" class="fl-t fl-title-m en" text-anchor="middle">GitHub · HuggingFace</text><text x="195.0" y="585.0" class="fl-t fl-sub-m zh" text-anchor="middle">程式與模型</text><text x="195.0" y="585.0" class="fl-t fl-sub-m en" text-anchor="middle">code and models</text><text x="195.0" y="602.0" class="fl-t cp-in zh" text-anchor="middle">安裝時只下載，不上傳資料</text><text x="195.0" y="602.0" class="fl-t cp-in en" text-anchor="middle">download only, at install</text></svg></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th><span class="zh">資料</span><span class="en">Data</span></th><th><span class="zh">在哪裡處理、存在哪裡</span><span class="en">Where it is processed and stored</span></th></tr></thead>
+            <tbody>
+              <tr><td><span class="zh">會議錄音、即時音訊</span><span class="en">Meeting recordings, live audio</span></td><td><span class="zh">你的電腦；選用 GPU 伺服器時送到<b>你自己架設</b>的 GPU 伺服器辨識，辨識完立刻刪除暫存音檔</span><span class="en">Your computer; with a GPU server, audio goes to <b>your own</b> server for recognition and the temporary file is deleted right after</span></td></tr>
+              <tr><td><span class="zh">逐字稿、翻譯、摘要</span><span class="en">Transcripts, translations, summaries</span></td><td><span class="zh">你的電腦（<code>logs/</code>）；翻譯與摘要送到<b>你自己設定</b>的 LLM 伺服器（例如內網的 Ollama）</span><span class="en">Your computer (<code>logs/</code>); translation and summaries use the LLM server <b>you configure</b> (e.g. Ollama on your LAN)</span></td></tr>
+              <tr><td><span class="zh">錄音檔</span><span class="en">Audio files</span></td><td><span class="zh">你的電腦（<code>recordings/</code>）</span><span class="en">Your computer (<code>recordings/</code>)</span></td></tr>
+              <tr><td><span class="zh">朗讀用的參考錄音（聲音）</span><span class="en">Reference recordings for text-to-speech (voices)</span></td><td><span class="zh">你的電腦（<code>tts_voices/</code>）；用 GPU 伺服器合成時伺服器依內容快取一份，<b>刪除聲音時兩邊一起刪</b>（伺服器連不上時記下來，之後補刪）</span><span class="en">Your computer (<code>tts_voices/</code>); the GPU server caches a copy by content, and <b>deleting a voice deletes both</b> (if the server is unreachable, it is deleted later)</span></td></tr>
+              <tr><td><span class="zh">設定（含密碼雜湊、轉發平台的認證）</span><span class="en">Settings (password hashes, forwarding credentials)</span></td><td><span class="zh">你的電腦（<code>config.json</code>）</span><span class="en">Your computer (<code>config.json</code>)</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+    <ul class="ck" style="margin-top:18px">
+      <li><span class="zh">不需要 ChatGPT、Claude、Gemini 等雲端 API 金鑰，不會把內容送給第三方 AI 服務</span><span class="en">No ChatGPT, Claude or Gemini API keys; nothing is sent to third-party AI services</span></li>
+      <li><span class="zh">WebUI 網頁不載入外部的字型、腳本或追蹤程式</span><span class="en">The WebUI loads no outside fonts, scripts or trackers</span></li>
+      <li><span class="zh">所有 AI 模型都是開源授權，在自己的設備上執行；模型、版本與授權都列在文件裡</span><span class="en">All AI models are open-licensed and run on your hardware; models, versions and licenses are documented</span></li>
+    </ul>
+    <h3 style="margin:34px 0 12px"><span class="zh">會連到外部的情況</span><span class="en">When something does go out</span></h3>
+    <p style="margin:0 0 14px;color:var(--muted);font-size:14px"><span class="zh">都跟你的會議內容無關，或由你自己決定。</span><span class="en">Either none of your content, or your own decision.</span></p>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th><span class="zh">情況</span><span class="en">When</span></th><th><span class="zh">送出什麼</span><span class="en">What leaves</span></th></tr></thead>
+            <tbody>
+              <tr><td><span class="zh">安裝、升級</span><span class="en">Install, upgrade</span></td><td><span class="zh">從 GitHub、PyPI、HuggingFace 等下載程式與模型，<b>不送出你的資料</b></span><span class="en">Downloads code and models from GitHub, PyPI, HuggingFace; <b>none of your data</b></span></td></tr>
+              <tr><td><span class="zh">第一次用到某個模型</span><span class="en">First use of a model</span></td><td><span class="zh">從 HuggingFace 下載模型檔，<b>不送出你的資料</b></span><span class="en">Downloads the model from HuggingFace; <b>none of your data</b></span></td></tr>
+              <tr><td><span class="zh">你開啟「字幕轉發」</span><span class="en">You turn on subtitle forwarding</span></td><td><span class="zh">字幕會送到你設定的平台（Telegram、Slack、Discord、Teams、LINE、Nextcloud Talk 或自訂網址）。預設關閉，設定頁只能在本機打開</span><span class="en">Subtitles go to the platforms you set (Telegram, Slack, Discord, Teams, LINE, Nextcloud Talk or a custom URL). Off by default; the settings page opens only on the local machine</span></td></tr>
+              <tr><td><span class="zh">你把 GPU 伺服器或 LLM 伺服器設在外部主機</span><span class="en">You point the GPU or LLM server at an outside host</span></td><td><span class="zh">音訊或文字會送到那台主機，是否允許由你決定</span><span class="en">Audio or text goes to that host; your call</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+  </div>
+</section>
+
+<section id="controls" class="alt">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">工具本身做到的</span><span class="en">What the tool does</span></h2></div>
+    <div class="grid g2">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="zh">存取控制</span><span class="en">Access control</span></h3>
+        <ul class="ck">
+          <li><span class="zh"><b>WebUI</b>：管理密碼與唯讀密碼（設定檔只存雜湊）、限制哪些 IP 可以連、加密連線（TLS），反向代理後面也能正確判斷來源</span><span class="en"><b>WebUI</b>: admin and read-only passwords (only hashes stored), IP allow-list, TLS, correct client detection behind a reverse proxy</span></li>
+          <li><span class="zh">安全設定、轉發、關鍵字通知、懸浮字幕這幾頁只有在本機才能打開</span><span class="en">Security, forwarding, keyword alert and overlay settings open only on the local machine</span></li>
+          <li><span class="zh"><b>REST API</b>：每個呼叫端一把金鑰（只存雜湊），<b>每個呼叫端只看得到自己送的作業</b>；從網址抓音檔時只允許設定好的主機</span><span class="en"><b>REST API</b>: one key per client (only hashes stored); <b>each client sees only its own jobs</b>; audio URLs limited to allowed hosts</span></li>
+          <li><span class="zh">伺服器版的服務以安裝資料夾的擁有者身分執行，不會因為用 sudo 安裝就一律以 root 執行</span><span class="en">The server edition runs as the install folder's owner, not root just because sudo was used</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span><span class="zh">可追溯、可人工覆核</span><span class="en">Traceable, reviewable</span></h3>
+        <ul class="ck">
+          <li><span class="zh">會議摘要的決議、待辦、風險等每一條都附<b>時間點與引用的原文</b>，可以回到逐字稿查證</span><span class="en">Every decision, action item and risk in a meeting summary cites <b>timestamps and the source text</b></span></li>
+          <li><span class="zh">引用驗證不過的項目直接不輸出；整段摘要裡找不到依據的數字或名詞會標示出來</span><span class="en">Items whose citations do not check out are dropped; ungrounded numbers or names in the summary are flagged</span></li>
+          <li><span class="zh">校正後的逐字稿保留原始辨識結果；校正幅度異常時自動保留原文</span><span class="en">Corrected transcripts keep the raw recognition; abnormal edits fall back to the original</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span><span class="zh">透明與品質</span><span class="en">Transparency and quality</span></h3>
+        <ul class="ck">
+          <li><span class="zh">原始碼公開（Apache-2.0），可以自行稽核</span><span class="en">Open source (Apache-2.0), auditable</span></li>
+          <li><span class="zh">準確度、速度與已知限制公開在 BENCHMARKS.md</span><span class="en">Accuracy, speed and known limits are published in BENCHMARKS.md</span></li>
+          <li><span class="zh">每次發版前跑完整的守門測試；改了什麼都記在 CHANGELOG</span><span class="en">A full release gate runs before every release; every change is in the CHANGELOG</span></li>
+          <li><span class="zh">模型與上游程式<b>固定版本</b>，不會在你不知情時換掉</span><span class="en">Models and upstream code are <b>pinned</b>; nothing changes behind your back</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></span><span class="zh">朗讀與保存期限</span><span class="en">Text-to-speech and retention</span></h3>
+        <ul class="ck">
+          <li><span class="zh">內建的 8 個聲音是 AI 依文字描述產生，<b>不是真人錄音</b>；匯入自己的聲音要勾選「已取得錄音者的書面同意」並填寫來源</span><span class="en">The 8 built-in voices are AI-generated from text descriptions, <b>not recordings of real people</b>; importing your own requires confirming the speaker's written consent and recording its source</span></li>
+          <li><span class="zh">錄音者要求刪除時，刪除聲音會一併刪掉 GPU 伺服器上的快取</span><span class="en">When a speaker asks for deletion, deleting the voice also deletes the GPU server's cached copy</span></li>
+          <li><span class="zh">REST API：確認收到（ACK）後刪除作業內容；沒有確認的保留 7 天</span><span class="en">REST API: job content is deleted after acknowledgement; unacknowledged jobs are kept 7 days</span></li>
+          <li><span class="zh">日誌不記錄金鑰、授權標頭、詞彙庫與逐字稿內容</span><span class="en">Logs never contain keys, authorization headers, glossaries or transcript text</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="checklist">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">你的組織使用後要做的</span><span class="en">What your organization does</span></h2></div>
+    <div class="grid g2">
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></svg></span><span class="zh">錄音前</span><span class="en">Before recording</span></h3>
+        <ul class="ck">
+          <li><span class="zh"><b>告知與同意</b>：告知與會者用途、保存多久、誰看得到，依組織規範取得同意</span><span class="en"><b>Notice and consent</b>: tell participants the purpose, retention and who can see it; get consent per your policy</span></li>
+          <li><span class="zh"><b>用途限制</b>：決定哪些會議可以錄（人事、法務、醫療要另外考慮）；只錄需要的，可以只即時轉錄、不存錄音</span><span class="en"><b>Purpose limits</b>: decide which meetings may be recorded; record only what you need, or transcribe live without keeping audio</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></span><span class="zh">部署與存取</span><span class="en">Deployment and access</span></h3>
+        <ul class="ck">
+          <li><span class="zh"><b>一定要設密碼</b>：WebUI 開在所有網路介面上，沒設密碼又沒限制來源時，同網段的人連得進來；設管理與唯讀密碼、限制 IP，跨網段開 TLS</span><span class="en"><b>Always set passwords</b>: the WebUI listens on all interfaces; set admin and read-only passwords, restrict IPs, and use TLS across networks</span></li>
+          <li><span class="zh"><b>GPU 伺服器與 LLM 伺服器放在內網</b>：用防火牆只開給需要的電腦，跨網段走 VPN</span><span class="en"><b>Keep the GPU and LLM servers internal</b>: firewall them to the machines that need them and use a VPN across networks</span></li>
+          <li><span class="zh"><b>主機安全</b>：系統更新、帳號管理、磁碟加密（FileVault、BitLocker、LUKS）</span><span class="en"><b>Host security</b>: updates, account management, disk encryption (FileVault, BitLocker, LUKS)</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></span><span class="zh">保存與刪除</span><span class="en">Retention and deletion</span></h3>
+        <ul class="ck">
+          <li><span class="zh"><b>訂出保存期限</b>：依規範定期清理 <code>recordings/</code>、<code>logs/</code>（包含備份）</span><span class="en"><b>Set retention</b>: clean up <code>recordings/</code> and <code>logs/</code> on schedule, backups included</span></li>
+          <li><span class="zh"><b>刪除要求</b>：錄音、逐字稿、摘要、聲音、備份都要處理</span><span class="en"><b>Erasure requests</b>: cover recordings, transcripts, summaries, voices and backups</span></li>
+          <li><span class="zh"><b>備份</b>：需要保存的自行備份，定期測試還原</span><span class="en"><b>Backups</b>: back up what you keep and test restores</span></li>
+        </ul>
+      </div>
+      <div class="card"><h3><span class="ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M2 21v-1a6 6 0 0 1 12 0v1M16 11l2 2 4-4"/></svg></span><span class="zh">人工覆核與外部服務</span><span class="en">Human review and outside services</span></h3>
+        <ul class="ck">
+          <li><span class="zh"><b>AI 輸出要人確認</b>：可能聽錯、誤譯、漏掉或寫錯決議與待辦對象；用在對外、決策、法律、醫療、財務前請對照原文</span><span class="en"><b>Review AI output</b>: it can mishear, mistranslate or get decisions and owners wrong; check against the source before external, legal, medical or financial use</span></li>
+          <li><span class="zh"><b>合成語音</b>：對外使用時標示為 AI 合成；同意書寫清楚用途、範圍、期限、撤回與刪除；不可冒充本人</span><span class="en"><b>Synthetic speech</b>: label it as AI-generated; consent should cover purpose, scope, duration, withdrawal and deletion; never impersonate</span></li>
+          <li><span class="zh"><b>字幕轉發、外部 LLM 或 GPU 伺服器</b>：開啟前評估那個服務的資料保存與使用政策</span><span class="en"><b>Forwarding, outside LLM or GPU servers</b>: assess their data retention and use policies first</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="standards" class="alt">
+  <div class="wrap">
+    <div class="sec-head"><h2><span class="zh">對照常見的法規與標準</span><span class="en">Mapping to common laws and standards</span></h2></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th><span class="zh">法規或標準</span><span class="en">Law or standard</span></th><th><span class="zh">檢驗什麼</span><span class="en">What it checks</span></th><th><span class="zh">本工具箱幫得上的</span><span class="en">What the toolbox provides</span></th><th><span class="zh">你的組織要補的</span><span class="en">What your organization adds</span></th></tr></thead>
+            <tbody>
+              <tr><td><span class="zh"><b>個人資料保護法</b>（台灣）</span><span class="en"><b>Personal Data Protection Act</b> (Taiwan)</span></td><td><span class="zh">蒐集前告知、目的限制、安全維護</span><span class="en">Notice before collection, purpose limits, security</span></td><td><span class="zh">資料留在自有設備、存取控制、刪除聲音兩邊一起刪</span><span class="en">Data stays on your hardware, access control, voice deletion on both sides</span></td><td><span class="zh">告知與同意、保存期限、安全維護措施、當事人請求的處理流程</span><span class="en">Notice and consent, retention, security measures, handling data-subject requests</span></td></tr>
+              <tr><td><span class="zh"><b>GDPR</b>（處理歐盟個人資料時）</span><span class="en"><b>GDPR</b> (EU personal data)</span></td><td><span class="zh">合法依據、資料最小化、當事人權利、跨境傳輸</span><span class="en">Lawful basis, minimization, data-subject rights, transfers</span></td><td><span class="zh">不跨境、不送第三方 AI 服務</span><span class="en">No cross-border transfer, no third-party AI services</span></td><td><span class="zh">合法依據與紀錄、刪除與查詢請求的處理、必要時的影響評估</span><span class="en">Lawful basis and records, erasure and access requests, impact assessments where needed</span></td></tr>
+              <tr><td><span class="zh"><b>ISO/IEC 27001</b>（資訊安全管理）</span><span class="en"><b>ISO/IEC 27001</b> (information security)</span></td><td><span class="zh">組織的資訊安全管理制度</span><span class="en">The organization's information security management system</span></td><td><span class="zh">存取控制、加密連線、資料留在內網、API 依呼叫端隔離、固定版本與變更紀錄</span><span class="en">Access control, TLS, data on your LAN, per-client API isolation, pinned versions and a changelog</span></td><td><span class="zh">列入資產清單與風險評估、適用性聲明、網路隔離、備份、日誌與事件處理、內部稽核</span><span class="en">Asset inventory and risk assessment, Statement of Applicability, network segmentation, backups, logging and incident handling, internal audit</span></td></tr>
+              <tr><td><span class="zh"><b>ISO/IEC 42001</b>（AI 管理）</span><span class="en"><b>ISO/IEC 42001</b> (AI management)</span></td><td><span class="zh">組織的 AI 管理制度</span><span class="en">The organization's AI management system</span></td><td><span class="zh">模型清單與版本、公開的實測與限制、摘要可追溯到原文、找不到依據的內容不輸出或標示、資料不出去</span><span class="en">Model inventory and versions, published benchmarks and limits, summaries traceable to the transcript, ungrounded content dropped or flagged, data stays in</span></td><td><span class="zh">AI 使用政策與範圍、風險與影響評估、人工覆核流程、人員訓練、使用監控與問題回報</span><span class="en">AI policy and scope, risk and impact assessment, human review, training, monitoring and issue reporting</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot-in">
+    <div>
+      <strong>jt-live-whisper</strong> · <span class="zh">100% 全地端 AI 語音工具箱</span><span class="en">100% on-device AI voice toolkit</span><br>
+      <span style="opacity:.7">Apache-2.0 · © 2026 Jason Cheng (Jason Tools)</span>
+    </div>
+    <div>
+      <a href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a> ·
+      <a href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a> ·
+      <a href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a> ·
+      <a href="compliance.html"><span class="zh">資料與合規</span><span class="en">Compliance</span></a> ·
+      <a href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<div id="lightbox"><img id="lightbox-img" alt="" /></div>
+<script src="script.js"></script>
+</body>
+</html>

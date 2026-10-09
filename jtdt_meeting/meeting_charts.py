@@ -406,7 +406,7 @@ def mindmap(nodes: Sequence[dict], *, width: int = 980,
 
         # --- 沒有子節點：畫成整寬的扁條，不要留一片空白 ---------------------
         if not children:
-            note = "無決議／待辦"
+            note = "無決議/待辦"
             # 扣掉右邊那行註記的位置再折行，字才不會壓到它。
             rh = box_h(label, 46)
             body.append(

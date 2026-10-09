@@ -65,6 +65,7 @@ def _exit_if_venv_python_changed(fix):
 
 _exit_if_venv_python_changed(
     "Qwen3-ASR 的 venv-qwen 要照手冊「Qwen3-ASR（實驗）」重建" if "--qwen-worker" in sys.argv else
+    "文字轉語音的 venv-tts 要重建：在用戶端重新執行安裝程式，設定 GPU 伺服器的文字轉語音" if "--tts-worker" in sys.argv else
     "請在用戶端重新執行安裝程式（./install.sh 或 install.ps1），檢查 GPU 伺服器時選擇修復：會重建伺服器的 venv")
 
 # ── Qwen3-ASR worker（v2.23.0，實驗）──────────────────────────────
@@ -186,6 +187,1019 @@ if __name__ == "__main__" and "--qwen-worker" in sys.argv:
     _qwen_worker_main()
     sys.exit(0)
 
+
+# ── 文字轉語音（VoxCPM2，2026-10）──────────────────────────────
+# 規格與實測：specs/2026-10-08_TTS開發規格_v2.md。VoxCPM2 要 CUDA 13 版 torch（2.11.0+cu130，GB10 的 sm_121），
+# 跟這支服務的 venv 不同 → 跟 Qwen 一樣在**獨立 venv（venv-tts）的子行程**跑，以 `--tts-worker <port>` 啟動。
+# 常駐約 9.5 GB（行程 3.6＋顯示卡 5.8，2026-10-09 實測），共用 GPU 不常駐：第一次用到才啟動、閒置 JT_TTS_IDLE 秒（預設 30 分鐘）關閉。
+# 台灣念法（教育部辭典＋g2pW＋自訂，以 {拼音} 交給模型）也在 worker 裡做，用戶端不必裝 g2pW 與辭典。
+# 下面 _tts_ 開頭的純函式與 jtlw_tts/tw_reading.py 逐字相同（Mac 本機合成用那一份；測試比對兩邊）。
+TTS_MODEL = "openbmb/VoxCPM2"
+TTS_MODEL_REV = "32279effe8c19989596f05d353d1447f51d9e915"
+TTS_DIR = os.path.expanduser(os.environ.get("JT_TTS_DIR") or "~/jt-whisper-server/tts")
+_TTS_HAN = re.compile(r"[㐀-鿿]+")
+_TTS_TONE = {"ˊ": "2", "ˇ": "3", "ˋ": "4"}
+_TTS_NO_HINT = frozenset("一不")         # 會變調：辭典標本調，硬加提示反而念錯
+# **念法以台灣日常說法為準**（2026-10-09 使用者：「萌典不要以他為準，請以台灣日常為準」）：教育部辭典只是基礎，
+# 跟台灣日常說法不同的字，不管在哪個詞裡都改用日常說法（自訂發音照樣優先）。值：(要換掉的念法，None＝一律換, 換成)。
+# 液、亞、俄：教育部 ㄧㄝˋ／ㄧㄚˋ／ㄜˊ 跟大陸相同，台灣多念 ㄧˋ／ㄧㄚˇ／ㄜˋ；黑：ㄏㄜˋ 是讀音，辭典 265 個含黑的詞只有 5 個用它；
+# 熟（成熟、熟悉）ㄕㄨˊ→ㄕㄡˊ、癌 ㄧㄢˊ→ㄞˊ、它（它們）ㄊㄨㄛ→ㄊㄚ、洽（接洽）ㄒㄧㄚˊ→ㄑㄧㄚˋ、燥（肉燥）ㄙㄠˋ→ㄗㄠˋ、
+# 括（包括）ㄎㄨㄛˋ→ㄍㄨㄚ、魄（落魄）ㄊㄨㄛˋ→ㄆㄛˋ；
+# 語料裡「因辭典而指定、跟模型預設不同」的 220 種逐一檢查、使用者試聽後再加（2026-10-09）：場（市場、現場、一場）ㄔㄤˊ→ㄔㄤˇ、
+# 妨（無妨）ㄈㄤ→ㄈㄤˊ、縱（縱貫、縱谷）ㄗㄨㄥ→ㄗㄨㄥˋ、多（多麼）ㄉㄨㄛˊ→ㄉㄨㄛ、擷（擷取）ㄐㄧㄝˊ→ㄒㄧㄝˊ、
+# 伐（步伐）ㄈㄚ→ㄈㄚˊ、玩（把玩）ㄨㄢˋ→ㄨㄢˊ、署（簽署、部署）ㄕㄨˋ→ㄕㄨˇ。
+# 使用者試聽決定照教育部的（不要改）：蝸牛 ㄍㄨㄚ、優酪乳 ㄌㄨㄛˋ、從容 ㄘㄨㄥ、剝皮 ㄅㄛ、曝光 ㄆㄨˋ、說服 ㄕㄨㄟˋ、寂寞 ㄐㄧˊ、艘 ㄙㄠ、
+# 盡快／盡量 ㄐㄧㄣˋ、言行 ㄒㄧㄥˋ
+_TTS_TW_COMMON = {"液": (None, "ㄧ4"), "亞": (None, "ㄧㄚ3"), "俄": (None, "ㄜ4"), "黑": ("ㄏㄜ4", "ㄏㄟ1"),
+                  "熟": ("ㄕㄨ2", "ㄕㄡ2"), "癌": ("ㄧㄢ2", "ㄞ2"), "它": ("ㄊㄨㄛ1", "ㄊㄚ1"), "洽": ("ㄒㄧㄚ2", "ㄑㄧㄚ4"),
+                  "燥": ("ㄙㄠ4", "ㄗㄠ4"), "括": ("ㄎㄨㄛ4", "ㄍㄨㄚ1"), "魄": ("ㄊㄨㄛ4", "ㄆㄛ4"),
+                  "場": (None, "ㄔㄤ3"), "妨": (None, "ㄈㄤ2"), "縱": (None, "ㄗㄨㄥ4"), "多": ("ㄉㄨㄛ2", "ㄉㄨㄛ1"),
+                  "擷": (None, "ㄒㄧㄝ2"), "伐": ("ㄈㄚ1", "ㄈㄚ2"), "玩": ("ㄨㄢ4", "ㄨㄢ2"), "署": (None, "ㄕㄨ3")}
+# 台灣日常念法（詞）：比辭典優先、自訂發音照樣更優先。角色（教育部主音 ㄐㄩㄝˊ）、暖暖（基隆的暖暖區；教育部 ㄒㄩㄢ）、
+# 著急（教育部 ㄓㄠ）、裝載（教育部 ㄗㄞˋ，使用者：要念三聲）、兒子（教育部 ㄗˇ，日常輕聲）、
+# 強制（教育部 ㄑㄧㄤˇ）、牛仔（教育部 ㄗˇ）、折返（教育部 ㄓㄜ）、胜肽（教育部 ㄒㄧㄥ）、
+# 參與（教育部 ㄩˋ）、罪行（教育部 ㄒㄧㄥˋ）、記載（教育部 ㄗㄞˋ）：使用者試聽決定（言行照教育部 ㄒㄧㄥˋ）、
+# 丁丁（教育部是伐木聲 ㄓㄥ）、家樂福、麥當當、亂數；挑戰、慎重：辭典由左往右會切出「大挑」「重考」
+# （「強行」不加：會把「加強行員」切成強行）
+_TTS_TW_WORDS = {"角色": ["ㄐㄧㄠ3", "ㄙㄜ4"], "主角": ["ㄓㄨ3", "ㄐㄧㄠ3"], "配角": ["ㄆㄟ4", "ㄐㄧㄠ3"],
+                 "暖暖": ["ㄋㄨㄢ3", "ㄋㄨㄢ3"], "著急": ["ㄓㄠ2", "ㄐㄧ2"], "裝載": ["ㄓㄨㄤ1", "ㄗㄞ3"], "兒子": ["ㄦ2", "ㄗ5"],
+                 "目的事業": ["ㄇㄨ4", "ㄉㄧ4", "ㄕ4", "ㄧㄝ4"],
+                 "強制": ["ㄑㄧㄤ2", "ㄓ4"], "牛仔": ["ㄋㄧㄡ2", "ㄗㄞ3"], "折返": ["ㄓㄜ2", "ㄈㄢ3"],
+                 "參與": ["ㄘㄢ1", "ㄩ3"], "罪行": ["ㄗㄨㄟ4", "ㄒㄧㄥ2"], "記載": ["ㄐㄧ4", "ㄗㄞ3"],
+                 "胜肽": ["ㄕㄥ4", "ㄊㄞ4"], "丁丁": ["ㄉㄧㄥ1", "ㄉㄧㄥ1"], "家樂福": ["ㄐㄧㄚ1", "ㄌㄜ4", "ㄈㄨ2"],
+                 "麥當當": ["ㄇㄞ4", "ㄉㄤ1", "ㄉㄤ1"], "亂數": ["ㄌㄨㄢ4", "ㄕㄨ4"], "挑戰": ["ㄊㄧㄠ3", "ㄓㄢ4"],
+                 "慎重": ["ㄕㄣ4", "ㄓㄨㄥ4"]}
+# 不在辭典詞裡的字（念法是 g2pW 猜的）改用這個念法，值：(要換掉的念法，None＝一律換, 換成)（2026-10-09 自動偵測）。
+# 蘋：蘋概股、蘋粉的蘋都是蘋果的蘋（g2pW 猜 ㄆㄧㄣˊ；辭典裡念 ㄆㄧㄣˊ 的白蘋、蘋婆照辭典）。
+# 差：g2pW 把很差、太差、變差都判成 ㄔㄚ；教育部「不好、欠缺」念 ㄔㄚˋ，ㄔㄚˋ 也是 ㄔㄚ 的語音（差別、差距、誤差是辭典詞，照辭典）
+# 兒：g2pW 把兒化（那兒、鳥兒、好玩兒）標成 ㄦ 一聲，教育部是輕聲 ˙ㄦ（輕聲不加提示，模型自己念兒化）
+_TTS_TW_SINGLE = {"蘋": (None, "ㄆㄧㄥ2"), "差": ("ㄔㄚ1", "ㄔㄚ4"), "兒": ("ㄦ1", "ㄦ5")}
+# 異體字：辭典查不到時換成辭典用的字再查（沈積→沉積 ㄔㄣˊ，g2pW 判成姓氏的 ㄕㄣˇ；什麽→什麼）。
+# 姓氏的沈（沈約、沈括）辭典本來就查得到，不換
+_TTS_VARIANT = str.maketrans("沈麽", "沉麼")
+# 台灣念法跟模型預設一樣、模型卻還是會念錯的字：一律加念法提示（2026-10-09 試聽：命脈的脈、協會的協念錯；
+# 自動偵測：阿嬤的嬤念成ㄇㄛˊ；一曝十寒的曝念成大陸「曝光」的ㄅㄠˋ，教育部只有ㄆㄨˋ）
+_TTS_ALWAYS_HINT = frozenset("脈協嬤曝")
+# 繁體一個字、簡體依念法分成兩個字，OpenCC 分不出來的：念法不是第一個就寫成第二個字再送進模型
+# （扮演著：簡體的「著」只念ㄓㄨˋ，模型照著念；助詞與著急、著陸在簡體寫「着」，2026-10-09 自動偵測）
+_TTS_SIMP_BY_READING = {"著": ("ㄓㄨ4", "着")}
+# 辭典由左往右找最長的詞會切錯：「扮演著重要」切出「著重」（ㄓㄨㄛˊ）、「組中的字」切出「中的」（射中靶心 ㄓㄨㄥˋ ㄉㄧˋ）、
+# 「他的是不是」切出文言「的是」（ㄉㄧˊ）、「都會忘記」切出「都會」（都市）、「環境和文化」切出「和文」、「生存沒有」切出「存沒」。
+# 這些常用字在辭典詞裡的念法跟 g2pW（看上下文）不同時，那個詞多半是切錯的 → 不採用，改試短一點的詞或照 g2pW
+# （2026-10-09 用 Common Voice 4,636 句比對：改到 111 處，只有公文的「目的事業」改壞，另列在 _TTS_TW_WORDS）。
+# 再加種分間得要當重（一種生物≠種生、多分布≠多分、之間有≠間有、找得到≠得到、要不要≠不要、當晚餐≠當晚、很多重要≠多重）：
+# 改到 34 處、改壞 5 處（慎重另列在 _TTS_TW_WORDS；鹽分、當名嘴、當日、才會得是 g2pW 判錯）
+_TTS_G2P_FIRST = frozenset("的了著都和沒給從參覺會種分間得要當重")
+# 送進模型前把沒加提示的字轉成簡體（見 _tts_spoken）
+_TTS_SIMPLIFIED = True
+_TTS_MAX_WORD = 8
+_TTS_SENT_END = "。！？!?；;\n"
+
+
+def _tts_syl(b):
+    """教育部注音（ㄌㄜˋ、˙ㄇㄣ、ㄒㄧ）→ 注音＋聲調數字（ㄌㄜ4、ㄇㄣ5、ㄒㄧ1），與 g2pW 的格式相同"""
+    if b.startswith("˙"):
+        return b[1:] + "5"
+    if b and b[-1] in _TTS_TONE:
+        return b[:-1] + _TTS_TONE[b[-1]]
+    return b + "1"
+
+
+def _tts_moe_lines(entries):
+    """教育部《重編國語辭典修訂本》（g0v/moedict-data 的 dict-revised.json 解析後的 list）→ 精簡對照檔的行：
+    「詞<TAB>讀音|讀音」，讀音以空白分字。只留 2～8 個漢字的詞；同一詞的多個讀音全部保留（大家：ㄐㄧㄚ／ㄍㄨ）"""
+    rows = {}
+    for e in entries:
+        t = e.get("title", "")
+        if not (2 <= len(t) <= _TTS_MAX_WORD) or not _TTS_HAN.fullmatch(t):
+            continue
+        for h in e.get("heteronyms") or []:
+            b = re.split(r"[（(]", h.get("bopomofo") or "")[0].strip()   # 「（讀音）……（語音）」取第一個
+            syl = [x for x in re.split(r"[\s　]+", b) if x]
+            if len(syl) == len(t):
+                r = " ".join(_tts_syl(x) for x in syl)
+                if r not in rows.setdefault(t, []):
+                    rows[t].append(r)
+    return [t + "\t" + "|".join(rs) for t, rs in rows.items() if rs]
+
+
+def _tts_moe_load(lines):
+    words = {}
+    for ln in lines:
+        t, _, rs = ln.rstrip("\n").partition("\t")
+        if t and rs:
+            words[t] = [r.split() for r in rs.split("|")]
+    return words
+
+
+def _tts_custom(entries):
+    """自訂字典 {"和": "ㄏㄢˋ", "垃圾": "ㄌㄜˋ ㄙㄜˋ"} → {詞: [注音＋數字…]}；字數與讀音數不合的回傳在 bad"""
+    good, bad = {}, []
+    for w, v in (entries or {}).items():
+        syl = [x for x in re.split(r"[\s　]+", str(v).strip()) if x]
+        if w and _TTS_HAN.fullmatch(w) and len(syl) == len(w):
+            good[w] = [_tts_syl(x) for x in syl]
+        else:
+            bad.append(w)
+    return good, bad
+
+
+def _tts_score(cand, ctx):
+    """注音＋聲調都對 2 分、只有注音對 1 分：字音（便 ㄆㄧㄢ／ㄅㄧㄢ）比輕聲與否重要"""
+    return sum(2 if a == b else (1 if b and a[:-1] == b[:-1] else 0) for a, b in zip(cand, ctx))
+
+
+def _tts_overlay(text, tw, moe, custom):
+    """每個字的台灣念法：自訂（詞或單字）＞台灣常用念法（_TTS_TW_COMMON，詞裡也換）＞教育部辭典的詞（最長比對；多個讀音挑跟 g2pW 最接近的，
+    一樣接近取辭典的第一個）＞g2pW（tw 傳入的就是 g2pW 的結果）。單字的自訂只用在沒被詞涵蓋的字（和平的和照辭典）。
+    全由數字字組成的辭典詞不比對：那些是專名或成語（「五百」是古代職官，念ㄨˇ ㄅㄛˊ），數字照 g2pW（2026-10-09 實測三千五百元被念成五{bo2}）"""
+    tw = list(tw)
+    g2p = list(tw)
+    fixed = set()                                    # 自訂發音給的位置：辭典詞、台灣常用念法都不蓋掉它
+    words = {**_TTS_TW_WORDS, **{w: r for w, r in custom.items() if len(w) > 1}}
+    # 先套自訂的詞：自訂比辭典優先，就算辭典有更長的詞（自訂「液化」、辭典有「液化石油氣」，2026-10-09）
+    for m in _TTS_HAN.finditer(text):
+        i, end = m.start(), m.end()
+        while i < end:
+            for n in range(min(max([0] + [len(w) for w in words]), end - i), 1, -1):
+                if text[i:i + n] in words:
+                    tw[i:i + n] = words[text[i:i + n]]
+                    fixed.update(range(i, i + n))
+                    i += n
+                    break
+            else:
+                i += 1
+    for m in _TTS_HAN.finditer(text):
+        i, end = m.start(), m.end()
+        while i < end:
+            if i in fixed:
+                i += 1
+                continue
+            for n in range(min(_TTS_MAX_WORD, end - i), 1, -1):
+                w = text[i:i + n]
+                key = w if w in moe else w.translate(_TTS_VARIANT)
+                if key in moe and w.strip(_TTS_NUM_HAN) and not fixed.intersection(range(i, i + n)):
+                    cands = moe[key]
+                    ctx = tw[i:i + n]
+                    best = max(cands, key=lambda c: (_tts_score(c, ctx), -cands.index(c)))
+                    if any(g2p[i + k] and text[i + k] in _TTS_G2P_FIRST and best[k] != g2p[i + k] for k in range(n)):
+                        continue                         # 切錯了：試短一點的詞
+                    tw[i:i + n] = best
+                    i += n
+                    break
+            else:
+                if text[i] in custom:
+                    tw[i] = custom[text[i]][0]
+                    fixed.add(i)
+                elif text[i] in _TTS_TW_SINGLE and tw[i] and _TTS_TW_SINGLE[text[i]][0] in (None, tw[i]):
+                    tw[i] = _TTS_TW_SINGLE[text[i]][1]
+                i += 1
+    for k, ch in enumerate(text):
+        rule = _TTS_TW_COMMON.get(ch)
+        if rule and k not in fixed and tw[k] and (rule[0] is None or tw[k] == rule[0]):
+            tw[k] = rule[1]
+    return tw
+
+
+def _tts_hint(text, tw, cn, to_pinyin, force=()):
+    """台灣念法（tw）與模型預設會念的（cn，pypinyin 的大陸念法）不同的字換成 {拼音}；
+    一、不、台灣念輕聲的不換。to_pinyin：注音＋數字 → 拼音＋數字（如 ㄌㄜ4 → le4），換不出來回 None。
+    force：一定要換的位置（模型詞彙裡沒有的字，見 _tts_vocab_chars）；g2pW 沒給念法時用 pypinyin 的"""
+    out = []
+    for k, (ch, t, c) in enumerate(zip(text, tw, cn)):
+        if k in force and not t:
+            t = c
+        if t and (c and (t != c or ch in _TTS_ALWAYS_HINT) or k in force) and ch not in _TTS_NO_HINT and not t.endswith("5"):
+            py = to_pinyin(t)
+            if py:
+                out.append("{" + py + "}")
+                continue
+        out.append(ch)
+    return "".join(out)
+
+
+_TTS_CNUM = "零一二三四五六七八九"
+_TTS_NUM_HAN = "零〇一二三四五六七八九十百千萬億兆兩"
+_TTS_NUM = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
+# 模型自己念數字（文字正規化關閉），2026-10-09 GPU 實測各 3 次：千分位逗號 3/3 亂念、負號 3/3 被吞掉、
+# NT$ 念成美元；日期、時間、IP、版本號、電話、小數、百分比、分數都對 → 只改念錯的這三種，其他不動
+_TTS_MONEY = (
+    (re.compile(r"(?:NT|NTD)\$\s*(" + _TTS_NUM + r")(?:\s*元)?"), r"新台幣\1元"),
+    (re.compile(r"(?:US|USD)\$\s*(" + _TTS_NUM + r")"), r"\1美元"),
+    (re.compile(r"(?<![A-Za-z])\$\s*(" + _TTS_NUM + r")"), r"\1美元"),
+    (re.compile(r"€\s*(" + _TTS_NUM + r")"), r"\1歐元"),
+    (re.compile(r"£\s*(" + _TTS_NUM + r")"), r"\1英鎊"),
+)
+_TTS_TEMP = (
+    (re.compile(r"(?<![A-Za-z0-9_.])[-−](\d+(?:\.\d+)?)\s*(?:°C|℃)"), r"零下\1度"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:°C|℃)"), r"\1度"),
+    (re.compile(r"(?<![A-Za-z0-9_.])[-−](\d+(?:\.\d+)?)\s*(?:°F|℉)"), r"華氏零下\1度"),
+    (re.compile(r"(\d+(?:\.\d+)?)\s*(?:°F|℉)"), r"華氏\1度"),
+)
+# 前面是英數字、小數點、斜線、冒號等就不是負號（2026-10-09、02-2345-6789、A-1、3-5 天）
+_TTS_NEG = re.compile(r"(?<![A-Za-z0-9_.,/:\-−+])[-−](?=\d)")
+_TTS_COMMA_NUM = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+)(\.\d+)?(?!\d|,\d)")
+
+
+def _tts_cn_sec(x, leading):
+    """1～9999 → 國字；2 在千、百前念「兩」；開頭的十幾不說「一十」"""
+    out, zero, started = "", False, False
+    for d, u in zip((x // 1000, x // 100 % 10, x // 10 % 10, x % 10), ("千", "百", "十", "")):
+        if d == 0:
+            zero = zero or started
+            continue
+        if zero:
+            out += "零"
+            zero = False
+        ch = "兩" if d == 2 and u in ("千", "百") else _TTS_CNUM[d]
+        if d == 1 and u == "十" and not started and leading:
+            ch = ""
+        out += ch + u
+        started = True
+    return out
+
+
+def _tts_cn_int(n):
+    """整數 → 國字（台灣說法）：1250000 → 一百二十五萬、10005 → 一萬零五、20000 → 兩萬"""
+    if n == 0:
+        return "零"
+    secs = []
+    while n:
+        secs.append(n % 10000)
+        n //= 10000
+    out, gap = "", False
+    for i in range(len(secs) - 1, -1, -1):
+        sec = secs[i]
+        if sec == 0:
+            gap = gap or bool(out)
+            continue
+        if out and (gap or sec < 1000):
+            out += "零"
+        out += ("兩" if sec == 2 and i else _tts_cn_sec(sec, not out)) + ("", "萬", "億", "兆")[i]
+        gap = False
+    return out
+
+
+def _tts_numbers(text):
+    """模型念錯的數字寫法先換成念得對的：金額符號 → 幣別、溫度、負號 → 負、千分位逗號 → 國字"""
+    for rx, rep in _TTS_MONEY + _TTS_TEMP:
+        text = rx.sub(rep, text)
+    text = _TTS_NEG.sub("負", text)
+    return _TTS_COMMA_NUM.sub(lambda m: _tts_cn_int(int(m.group(1).replace(",", "")))
+                              + ("點" + "".join(_TTS_CNUM[int(c)] for c in m.group(2)[1:]) if m.group(2) else ""), text)
+
+
+def _tts_glued(s, k):
+    """在 s[k] 之後切會不會切斷一個詞：英數字中間、數字裡的逗號／小數點／冒號（1,250,000、0.5、3:30）"""
+    a, b = s[k], s[k + 1] if k + 1 < len(s) else ""
+    if a.isascii() and a.isalnum() and b.isascii() and b.isalnum():
+        return True
+    if a in ",.:" and k and s[k - 1].isdigit() and b.isdigit():
+        return True
+    return b in ",.:" and a.isdigit() and k + 2 < len(s) and s[k + 2].isdigit()
+
+
+def _tts_split(text, limit=80):
+    """切句：句末標點與換行；一句超過 limit 字再依逗號切，仍太長就硬切（不切在英數字、1,250,000、3:30 中間）。
+    只有標點、沒有字的片段丟掉（送進模型會產生雜音）"""
+    sents, buf = [], ""
+    for i, ch in enumerate(text):
+        buf += ch
+        if ch in _TTS_SENT_END or (ch == "." and (i + 1 == len(text) or text[i + 1].isspace())
+                                   and not (i and text[i - 1].isdigit())):
+            sents.append(buf)
+            buf = ""
+    sents.append(buf)
+    out = []
+    for s in sents:
+        s = s.strip()
+        while len(s) > limit:
+            cut = max((k for k, c in enumerate(s[:limit]) if c in "，,、：:" and not _tts_glued(s, k)), default=-1)
+            if cut < limit // 3:
+                cut = limit - 1
+                while cut > limit // 2 and _tts_glued(s, cut):
+                    cut -= 1
+            out.append(s[:cut + 1].strip())
+            s = s[cut + 1:].strip()
+        out.append(s)
+    return [s for s in out if re.search(r"\w", s)]
+
+
+def _tts_load_text(tts_dir):
+    """台灣念法要用的資源：教育部辭典對照檔、g2pW、pypinyin（模型預設念法的近似）、OpenCC 繁轉簡。
+    Mac 本機合成也用同一份（jtlw_tts/tw_reading.py）"""
+    import opencc
+    from g2pw import G2PWConverter
+    from pypinyin import Style, lazy_pinyin
+    from pypinyin.contrib.tone_convert import to_tone3
+    from pypinyin.pinyin_dict import pinyin_dict
+    from pypinyin.style.bopomofo import BopomofoConverter
+    moe_path = os.path.join(tts_dir, "moe_words.tsv")
+    if not os.path.exists(moe_path):
+        raise FileNotFoundError(f"找不到教育部辭典對照檔 {moe_path}（安裝程式會下載並轉檔）")
+    with open(moe_path, encoding="utf-8") as f:
+        moe = _tts_moe_load(f)
+    bc = BopomofoConverter()
+
+    def base_bopo(base):   # 沒有聲調的拼音 pypinyin 會當輕聲加「˙」，拿掉才能跟 g2pW 的格式比（第一版因此一個字都沒換）
+        return bc.to_bopomofo(base.replace("v", "ü")).replace("˙", "")
+
+    def split_tone(p):
+        m = re.match(r"([a-zü]+)([1-5])$", p.replace("ü", "v"))
+        return (m.group(1), m.group(2)) if m else (p, "")
+
+    bopo2base = {}
+    for readings in pinyin_dict.values():
+        for r in readings.split(","):
+            base, _ = split_tone(to_tone3(r, neutral_tone_with_five=True))
+            bopo2base.setdefault(base_bopo(base), base)
+
+    def py2bopo(p):
+        base, d = split_tone(p)
+        return base_bopo(base) + d if d else None
+
+    def bopo2py(b):
+        base = bopo2base.get(b[:-1]) if b and b[-1].isdigit() else None
+        return base + b[-1] if base else None
+
+    g2p = G2PWConverter(model_dir=os.path.join(tts_dir, "G2PWModel") + "/", style="bopomofo",
+                        model_source=os.path.join(tts_dir, "bert-base-chinese"))
+    g2p.num_workers = 0          # 預設開子行程：macOS／Windows 用 spawn 會卡死；建構時傳 0 會被當成沒指定
+    return {"moe": moe, "g2p": g2p, "lazy_pinyin": lazy_pinyin, "TONE3": Style.TONE3,
+            "t2s": opencc.OpenCC("t2s"), "py2bopo": py2bopo, "bopo2py": bopo2py}
+
+
+def _tts_readings(R, text, custom=None):
+    """每個字的 (台灣念法, 模型預設念法)，都是注音＋數字；非漢字為 None"""
+    good, _ = _tts_custom(custom)
+    tw = _tts_overlay(text, [g if g else None for g in R["g2p"](text)[0]], R["moe"], good)
+    src = _tts_simp_src(text, tw)                    # 模型預設念法拿「送進模型的字」算：着急的着、著作的著念法不同
+    cn = [None] * len(text)
+    for m in _TTS_HAN.finditer(src):
+        run = m.group(0)
+        simp = R["t2s"].convert(run)
+        if len(simp) != len(run):
+            continue
+        for k, p in enumerate(R["lazy_pinyin"](simp, style=R["TONE3"], neutral_tone_with_five=True)):
+            cn[m.start() + k] = R["py2bopo"](p)
+    # 刻意指定念法的詞（台灣日常念法、自訂發音）：pypinyin 可能跟前後文切成別的詞（「萬人參與」切出「人參」，「與」算成單字的ㄩˇ，
+    # 跟台灣念法一樣就不加提示，模型卻照「參與」念ㄩˋ），所以這個詞再單獨算一次，兩種算法有一種跟台灣念法不同就加提示（2026-10-09）
+    for w, r in {**_TTS_TW_WORDS, **{w: r for w, r in good.items() if len(w) > 1}}.items():
+        i = text.find(w)
+        while i >= 0:
+            simp = R["t2s"].convert(src[i:i + len(w)])
+            if tw[i:i + len(w)] == r and len(simp) == len(w):
+                for k, p in enumerate(R["lazy_pinyin"](simp, style=R["TONE3"], neutral_tone_with_five=True)):
+                    b = R["py2bopo"](p)
+                    if b and tw[i + k] == cn[i + k] and b != tw[i + k]:
+                        cn[i + k] = b
+            i = text.find(w, i + 1)
+    return tw, cn
+
+
+def _tts_vocab_chars(path):
+    """模型詞彙裡的中文單字（模型資料夾的 tokenizer.json）。不在裡面的字只能拆成位元組送進模型，模型不知道怎麼念，
+    一律加念法提示（2026-10-09 自動偵測：人名用字的昀、婞，蚵仔煎的蚵都念錯，三個字都不在詞彙裡）。讀不到回 None（不套這條）"""
+    try:
+        with open(path, encoding="utf-8") as f:
+            vocab = json.load(f)["model"]["vocab"]
+        return frozenset(k for k in vocab if len(k) == 1 and _TTS_HAN.fullmatch(k))
+    except Exception:
+        return None
+
+
+def _tts_simp_src(text, tw):
+    """送進模型前要寫成的字（_TTS_SIMP_BY_READING）：扮演著 → 扮演着、著急 → 着急；著作照舊"""
+    if not _TTS_SIMPLIFIED:
+        return text
+    return "".join(_TTS_SIMP_BY_READING[ch][1] if ch in _TTS_SIMP_BY_READING and t and t != _TTS_SIMP_BY_READING[ch][0]
+                   else ch for ch, t in zip(text, tw))
+
+
+def _tts_spoken(R, text, custom=None):
+    """原文 → 送進模型的文字（念錯的數字寫法先換掉；台灣念法與模型預設不同的字換成 {拼音}）。
+    沒加提示的字轉成簡體再送：模型幾乎只學過簡體，繁體字會念錯（2026-10-09 實測 協、脈、漲、頒、衝 等）；
+    「模型預設念法」本來就是拿簡體算的（_tts_readings 的 cn），轉了之後模型念的正好就是比對時假設的"""
+    text = _tts_numbers(text)
+    tw, cn = _tts_readings(R, text, custom)
+    text = _tts_simp_src(text, tw)
+    sent = R["t2s"].convert(text) if _TTS_SIMPLIFIED else text      # 沒加提示時送進模型的字
+    vocab = R.get("vocab")
+    force = {k for k, ch in enumerate(sent) if _TTS_HAN.fullmatch(ch) and ch not in vocab} if vocab and len(sent) == len(text) else ()
+    hinted = _tts_hint(text, tw, cn, R["bopo2py"], force)
+    if not _TTS_SIMPLIFIED:
+        return hinted
+    return "".join(p if p.startswith("{") else R["t2s"].convert(p) for p in re.split(r"(\{[a-z]+[1-5]\})", hinted))
+
+
+def _tts_build_moe_main():
+    """安裝程式用：server.py --tts-build-moe <dict-revised.json[.xz]> <moe_words.tsv>（格式轉換，只用標準函式庫）"""
+    import lzma
+    i = sys.argv.index("--tts-build-moe")
+    src, dst = sys.argv[i + 1], sys.argv[i + 2]
+    with (lzma.open if src.endswith(".xz") else open)(src, "rt", encoding="utf-8") as f:
+        lines = _tts_moe_lines(json.load(f))
+    tmp = dst + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    os.replace(tmp, dst)
+    print(f"教育部辭典對照檔：{len(lines)} 個詞 → {dst}")
+
+
+def _tts_worker_main():
+    """只聽 127.0.0.1。POST /synthesize {text, voice_wav, voice_text, custom, steps, cfg} → audio/wav（48 kHz 單聲道）；
+    POST /convert {text, custom} → {spoken}（送進模型的文字，除錯與測試用）"""
+    import http.server
+    import io
+    import signal
+    import urllib.parse
+    port = int(sys.argv[sys.argv.index("--tts-worker") + 1])
+    parent = os.getppid()
+
+    def _watch():
+        while True:
+            time.sleep(5)
+            if os.getppid() != parent:          # 主服務結束了
+                try:
+                    os.killpg(0, signal.SIGKILL)
+                finally:
+                    os._exit(0)
+    threading.Thread(target=_watch, daemon=True).start()
+    state = {"ready": False, "error": ""}
+    lock = threading.Lock()
+    R = {}
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, obj, ctype="application/json", headers=None):
+            b = obj if isinstance(obj, bytes) else json.dumps(obj, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(b)))
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_GET(self):
+            if self.path != "/health":
+                return self._send(404, {"error": "not found"})
+            if state["error"]:
+                return self._send(500, {"ok": False, "error": state["error"]})
+            self._send(200, {"ok": True, "model": TTS_MODEL}) if state["ready"] \
+                else self._send(503, {"ok": False, "loading": True})
+
+        def do_POST(self):
+            if self.path not in ("/synthesize", "/convert"):
+                return self._send(404, {"error": "not found"})
+            if not state["ready"]:
+                return self._send(503, {"error": state["error"] or "文字轉語音模型載入中"})
+            try:
+                req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                text = str(req.get("text") or "").strip()
+                if not text:
+                    return self._send(400, {"error": "沒有文字"})
+                with lock:                      # 一次一件（主服務本來就排隊，這裡是保險）
+                    sp = _tts_spoken(R, text, req.get("custom"))
+                    if self.path == "/convert":
+                        return self._send(200, {"spoken": sp})
+                    t0 = time.monotonic()
+                    try:
+                        wav = R["model"].generate(
+                            text=sp, prompt_wav_path=req["voice_wav"], prompt_text=req["voice_text"],
+                            reference_wav_path=req["voice_wav"], cfg_value=float(req.get("cfg") or 2.0),
+                            inference_timesteps=int(req.get("steps") or 10), normalize=False)
+                    finally:
+                        R["torch"].cuda.empty_cache()
+                buf = io.BytesIO()
+                R["sf"].write(buf, wav, R["sr"], format="WAV", subtype="PCM_16")
+                self._send(200, buf.getvalue(), "audio/wav", {
+                    "X-TTS-Spoken": urllib.parse.quote(sp),
+                    "X-TTS-Duration": f"{len(wav) / R['sr']:.3f}",
+                    "X-TTS-Seconds": f"{time.monotonic() - t0:.3f}"})
+            except Exception as e:
+                self._send(500, {"error": f"{type(e).__name__}: {e}"})
+
+    # 先綁埠號再載入（比照 Qwen worker：同一個埠已有 worker 時立刻失敗，不會白白載一份模型）
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        import soundfile
+        import torch as _torch
+        import voxcpm.model.voxcpm2 as _v2
+        from huggingface_hub import snapshot_download
+        from voxcpm import VoxCPM
+        path = snapshot_download(TTS_MODEL, revision=TTS_MODEL_REV, local_files_only=True)
+        R.update(_tts_load_text(TTS_DIR), sf=soundfile, torch=_torch, vocab=_tts_vocab_chars(os.path.join(path, "tokenizer.json")))
+        # 載入記憶體：上游先在 CPU 建 float32 模型（9.5 GB）再讀 bf16 權重，峰值 14.5 GB；
+        # 直接在 GPU 上以 bf16 建，峰值 6.5 GB、輸出波形逐點相同（2026-10-08 實測）
+        orig_init = _v2.VoxCPM2Model.__init__
+
+        def _init(self, *a, **k):
+            prev = _torch.get_default_dtype()
+            _torch.set_default_dtype(_torch.bfloat16)
+            try:
+                with _torch.device("cuda"):
+                    orig_init(self, *a, **k)
+            finally:
+                _torch.set_default_dtype(prev)
+        _v2.VoxCPM2Model.__init__ = _init
+        # torch.compile 在 GB10 上反而慢 45%（RTF 0.91 → 1.32），不開；不載降噪（多一個模型、要 modelscope）
+        R["model"] = VoxCPM(voxcpm_model_path=path, zipenhancer_model_path=None, enable_denoiser=False, optimize=False)
+        R["sr"] = R["model"].tts_model.sample_rate
+        state["ready"] = True
+        print(f"[tts-worker] 就緒 127.0.0.1:{port}（{TTS_MODEL}）", flush=True)
+    except Exception as e:
+        state["error"] = f"{type(e).__name__}: {e}"
+        print(f"[tts-worker] 載入失敗：{state['error']}", flush=True)
+    threading.Event().wait()
+
+
+# ── 文字轉語音的安裝（只用標準函式庫：安裝程式在 GPU 伺服器、Mac 本機都用這一份，不必在 install.sh／install.ps1 各寫一遍）──
+TTS_G2PW_URL = "https://storage.googleapis.com/esun-ai/g2pW/G2PWModel-v2-onnx.zip"
+TTS_BERT = ("google-bert/bert-base-chinese", "8f23c25b06e129b6c986331a13d8d025a92cf0ea")
+TTS_MOE_URL = "https://raw.githubusercontent.com/g0v/moedict-data/a6dc997417507eb510fc29822bc514de2c92728c/dict-revised.json.xz"
+TTS_MOE_NOTICE = ("moe_words.tsv 由教育部《重編國語辭典修訂本》（g0v/moedict-data 整理）轉成「詞→讀音」對照，只做格式轉換。\n"
+                  "著作權屬教育部，創用 CC 姓名標示-禁止改作 3.0 臺灣；依教育部解釋，禁止改作限制的是文字本身，"
+                  "不限制格式轉換及後續應用。https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/index.html\n")
+# GPU 伺服器 venv-tts 的套件：2026-10-08 在 DGX Spark 測過的組合。只列推論真的用到的（voxcpm 的 funasr、modelscope、gradio 用不到）
+TTS_TORCH = "2.11.0"
+TTS_PIP = ["voxcpm==2.0.3", "transformers==5.19.0", "huggingface-hub==1.33.0", "tokenizers==0.23.2", "safetensors==0.8.0",
+           "numpy==2.5.3", "librosa==1.0.0", "soundfile==0.14.0", "einops==0.8.2", "pydantic==2.13.5", "simplejson==4.2.0",
+           "tqdm==4.70.1", "onnxruntime==1.30.0", "g2pw==0.1.1", "pypinyin==0.55.0", "opencc-python-reimplemented==0.1.7",
+           "requests"]                          # g2pw 有 import requests 卻沒宣告相依（Mac 實測才發現）
+
+
+def _tts_download(url, dest, tries=6, stall=30):
+    """續傳＋重試（GitHub 原始檔有時很慢、還會停住：一次下載 15 MB 曾超過 5 分鐘）。
+    stall 秒收不到資料就斷線續傳（以前 120 秒，畫面一直不動、看起來像當掉：2026-10-09 Mac 實機）；
+    在終端機上顯示已下載多少（經 ssh 跑、輸出不是終端機時不顯示，免得記錄裡一堆進度行）"""
+    import urllib.request
+    tmp = dest + ".part"
+    tty = sys.stdout.isatty()
+    for n in range(1, tries + 1):
+        have = os.path.getsize(tmp) if os.path.exists(tmp) else 0
+        req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
+        shown = False
+        try:
+            with urllib.request.urlopen(req, timeout=stall) as r, open(tmp, "ab" if have and r.status == 206 else "wb") as f:
+                got = have if have and r.status == 206 else 0
+                h = getattr(r, "headers", None)
+                try:
+                    total = int(h.get("Content-Length")) + got if h is not None and h.get("Content-Length") else None
+                except (TypeError, ValueError):
+                    total = None
+                last = 0.0
+                while True:
+                    b = r.read(1 << 16)
+                    if not b:
+                        break
+                    f.write(b)
+                    got += len(b)
+                    if tty and time.monotonic() - last > 0.5:
+                        last, shown = time.monotonic(), True
+                        print(f"\r    已下載 {got / 1048576:.1f}" + (f"／{total / 1048576:.1f}" if total else "") + " MB   ",
+                              end="", flush=True)
+            if shown:
+                print()
+            os.replace(tmp, dest)
+            return dest
+        except Exception as e:
+            if shown:
+                print()
+            if n == tries:
+                raise RuntimeError(f"下載失敗（{url}）：{type(e).__name__}: {e}") from e
+            print(f"    下載停住或中斷（{type(e).__name__}），{5 * n} 秒後從中斷處續傳（第 {n + 1}/{tries} 次）", flush=True)
+            time.sleep(5 * n)
+
+
+def _tts_fetch_data(d):
+    """台灣念法要用的資源 → d：G2PWModel/（g2pW 模型，約 600 MB）、bert-base-chinese/（分詞器）、moe_words.tsv（教育部辭典對照）。
+    已經有的不重下"""
+    import lzma
+    import zipfile
+    os.makedirs(d, exist_ok=True)
+    g = os.path.join(d, "G2PWModel")
+    if not os.path.exists(os.path.join(g, "version")):
+        print("  [文字轉語音] 下載 g2pW 模型（約 600 MB，判斷破音字的台灣念法）...", flush=True)
+        z = _tts_download(TTS_G2PW_URL, os.path.join(d, "G2PWModel.zip"))
+        shutil.rmtree(g, ignore_errors=True)          # 上次解到一半的先清掉（壓縮檔最上層剛好就叫 G2PWModel）
+        with zipfile.ZipFile(z) as zf:
+            top = zf.namelist()[0].split("/")[0]
+            zf.extractall(d)
+        if top != "G2PWModel":
+            os.replace(os.path.join(d, top), g)
+        os.remove(z)
+    b = os.path.join(d, "bert-base-chinese")
+    os.makedirs(b, exist_ok=True)
+    for f in ("vocab.txt", "tokenizer.json", "tokenizer_config.json", "config.json"):
+        if not os.path.exists(os.path.join(b, f)):
+            _tts_download(f"https://huggingface.co/{TTS_BERT[0]}/resolve/{TTS_BERT[1]}/{f}", os.path.join(b, f))
+    m = os.path.join(d, "moe_words.tsv")
+    if not os.path.exists(m):
+        print("  [文字轉語音] 下載教育部《重編國語辭典修訂本》（約 15 MB）並轉成讀音對照...", flush=True)
+        x = _tts_download(TTS_MOE_URL, os.path.join(d, "dict-revised.json.xz"))
+        with lzma.open(x, "rt", encoding="utf-8") as f:
+            lines = _tts_moe_lines(json.load(f))
+        with open(m + ".tmp", "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(m + ".tmp", m)
+        os.remove(x)                      # 只留轉好的對照（格式轉換），原始辭典不留
+        with open(os.path.join(d, "NOTICE-moe.txt"), "w", encoding="utf-8") as f:
+            f.write(TTS_MOE_NOTICE)
+    print(f"  [文字轉語音] 資源就緒：{d}", flush=True)
+
+
+def _tts_gpu_info():
+    """(顯示卡名稱, compute capability, 驅動支援的 CUDA 版本 (major, minor))；沒有 NVIDIA 顯示卡回 None"""
+    import subprocess
+    try:
+        q = subprocess.run(["nvidia-smi", "--query-gpu=name,compute_cap", "--format=csv,noheader"],
+                           capture_output=True, text=True, timeout=30)
+        h = subprocess.run(["nvidia-smi"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if q.returncode != 0 or not q.stdout.strip():
+        return None
+    name, cap = [x.strip() for x in q.stdout.strip().splitlines()[0].split(",")[:2]]
+    m = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", h.stdout)
+    return name, cap, (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+def _tts_torch_index(cap, cuda):
+    """驅動支援 CUDA 13 → cu130；GB10（12.1）一定要 cu130（cu128 的 NVRTC 不認 sm_121，2026-10-08 實測）；其餘 cu128"""
+    if cuda >= (13, 0):
+        return "cu130"
+    if cap.startswith("12.1"):
+        raise RuntimeError("這張顯示卡（compute capability 12.1）需要支援 CUDA 13 的驅動（580 以上）")
+    if cuda >= (12, 8):
+        return "cu128"
+    raise RuntimeError(f"顯示卡驅動只支援 CUDA {cuda[0]}.{cuda[1]}，文字轉語音需要 12.8 以上")
+
+
+def _tts_setup_main():
+    """GPU 伺服器：server.py --tts-setup。建立 ~/jt-whisper-server/venv-tts、裝固定版本的套件、下載 VoxCPM2 與台灣念法資源，最後驗證。
+    重跑安全：已經裝好的跳過。裝完約 11 GB（venv-tts 5.2 GB：CUDA 13 版 torch 自帶整組 CUDA 程式庫；模型 4.7 GB；g2pW 0.6 GB；2026-10-09 GB10 實測）"""
+    import shutil as _sh
+    import subprocess
+    home = os.path.dirname(os.path.abspath(__file__))
+    venv = os.environ.get("JT_TTS_VENV") or os.path.join(home, "venv-tts")
+    py = os.path.join(venv, "bin", "python")
+    info = _tts_gpu_info()
+    if not info:
+        print("  [文字轉語音] 這台沒有 NVIDIA 顯示卡（找不到 nvidia-smi），不設定", flush=True)
+        sys.exit(2)
+    name, cap, cuda = info
+    try:
+        idx = _tts_torch_index(cap, cuda)
+    except RuntimeError as e:
+        print(f"  [文字轉語音] {e}", flush=True)
+        sys.exit(2)
+    print(f"  [文字轉語音] 顯示卡 {name}（{cap}），驅動支援 CUDA {cuda[0]}.{cuda[1]} → torch {TTS_TORCH}+{idx}", flush=True)
+    free = _sh.disk_usage(home).free / 1024 ** 3
+    if free < 20:
+        print(f"  [文字轉語音] 磁碟只剩 {free:.0f} GB，需要約 20 GB（含下載暫存）", flush=True)
+        sys.exit(2)
+
+    def run(cmd, what):
+        print(f"  [文字轉語音] {what}...", flush=True)
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            print(f"  [文字轉語音] {what}失敗（結束碼 {r.returncode}）", flush=True)
+            sys.exit(1)
+
+    if not os.path.exists(py):
+        base = next((p for p in (_sh.which("python3.12"), _sh.which("python3.11"), _sh.which("python3")) if p), None)
+        if not base:
+            print("  [文字轉語音] 找不到 python3", flush=True)
+            sys.exit(1)
+        run([base, "-m", "venv", venv], f"建立 {venv}")
+    ok = subprocess.run([py, "-c", "import importlib.metadata as m,sys;sys.exit(0 if m.version('torch').startswith('%s') "
+                                   "and m.version('voxcpm')=='2.0.3' and m.version('g2pw') else 1)" % TTS_TORCH],
+                        capture_output=True).returncode == 0
+    if not ok:
+        run([py, "-m", "pip", "install", "-q", "--upgrade", "pip"], "更新 pip")
+        run([py, "-m", "pip", "install", "-q", "--no-cache-dir", f"torch=={TTS_TORCH}", f"torchaudio=={TTS_TORCH}",
+             "--index-url", f"https://download.pytorch.org/whl/{idx}"], f"安裝 torch {TTS_TORCH}（{idx}，含 CUDA 程式庫約 7 GB）")
+        # voxcpm 宣告的相依有 torchcodec（沒有 ARM Linux 版；VoxCPM2 讀音檔用 librosa，用不到）、funasr 等：不讓 pip 自己解
+        run([py, "-m", "pip", "install", "-q", "--no-deps", TTS_PIP[0]], "安裝 voxcpm")
+        run([py, "-m", "pip", "install", "-q", "--no-cache-dir"] + TTS_PIP[1:], "安裝其他套件")
+        print("  （pip 若列出「voxcpm requires matplotlib、modelscope、torchcodec…, which is not installed」是刻意的："
+              "那些是訓練、網頁介面與 ARM 沒有的套件，朗讀用不到）", flush=True)
+    run([py, "-c", f"from huggingface_hub import snapshot_download as s; s({TTS_MODEL!r}, revision={TTS_MODEL_REV!r})"],
+        "下載 VoxCPM2 模型（約 4.7 GB）")
+    _tts_fetch_data(TTS_DIR)
+    run([py, "-c", "import torch, voxcpm, g2pw, pypinyin, opencc; assert torch.cuda.is_available(), '看不到顯示卡'; "
+                   "x = torch.ones(4, device='cuda'); print('  torch', torch.__version__, torch.cuda.get_device_name(0), float(x.sum()))"],
+        "檢查")
+    print("  [文字轉語音] 完成：第一次朗讀時才啟動合成服務（約 30 秒），閒置 30 分鐘自動關閉", flush=True)
+
+
+# ── BreezyVoice（MediaTek Research，Apache-2.0；2026-10-09 起選用，不是預設）──────────────
+# 用台灣華語訓練，口音與念法道地；但合成慢：GB10 上合成時間約是音訊長度的 1.4～2.5 倍（VoxCPM2 約 0.9），不適合即時朗讀。
+# 上游照 requirements 在 ARM 裝不起來（torch 2.3.1＋cu118、WeTextProcessing 的 pynini、ttsfrd 都只有 x86）→
+# 獨立 venv（venv-breezy，torch 與 venv-tts 同版），上游原始碼的固定版本放 BREEZY_DIR，worker 載入時補相容：
+#   wetext 取代 WeTextProcessing、**不轉簡體**（上游轉簡體後罕見字判斷全亂，漏句、亂念，2026-10-08 實測）、
+#   soundfile 讀參考錄音（torchaudio 2.9 起讀檔要 torchcodec，ARM 沒有）、補 torchaudio.set_audio_backend、ruamel.yaml<0.18
+BREEZY_MODEL = "MediaTek-Research/BreezyVoice-300M"
+BREEZY_MODEL_REV = "e33b502e0ac21c16b0ee0d00df66ac3fa737393d"
+BREEZY_FILES = ["cosyvoice.yaml", "configuration.json", "campplus.onnx", "speech_tokenizer_v1.onnx", "llm.pt", "flow.pt",
+                "hift.pt", "spk2info.pt"]                    # 約 2.2 GB；不下載 ttsfrd 資源（x86 專用）與 TensorRT 用的檔
+BREEZY_CODE_REV = "d592c9d3e8927a0f53f68616387060dcd32a05ea"
+BREEZY_CODE_URL = f"https://codeload.github.com/mtkresearch/BreezyVoice/tar.gz/{BREEZY_CODE_REV}"
+BREEZY_DIR = os.path.expanduser(os.environ.get("JT_BREEZY_DIR") or "~/jt-whisper-server/breezyvoice")
+BREEZY_SR = 22050
+# venv-breezy 的套件：2026-10-09 在 DGX Spark 測過的組合（torch 用 TTS_TORCH 同版）
+BREEZY_PIP = ["conformer==0.3.2", "diffusers==0.41.0", "hydra-core==1.3.2", "HyperPyYAML==1.2.2", "ruamel.yaml==0.17.40",
+              "omegaconf==2.3.0", "lightning==2.6.6", "inflect==7.5.0", "einops==0.8.2", "wetext==0.1.8",
+              "openai-whisper==20250625", "tiktoken==0.14.0", "numba==0.68.0", "matplotlib==3.11.2", "gdown==6.4.2",
+              "wget==3.2", "pyarrow==26.0.0", "transformers==5.19.0", "huggingface-hub==1.33.0", "tokenizers==0.23.2",
+              "safetensors==0.8.0", "numpy==2.5.3", "scipy==1.18.1", "librosa==1.0.0", "soundfile==0.14.0",
+              "onnxruntime==1.30.0", "g2pw==0.1.1", "pypinyin==0.55.0", "opencc-python-reimplemented==0.1.7",
+              "tqdm==4.70.1", "requests"]
+_BREEZY_DOTS = re.compile(r"\d+(?:\.\d+){2,}")
+
+
+def _breezy_prep(text):
+    """送進 BreezyVoice 的文字正規化之前：jtlw 的數字處理（千分位、負數、金錢），版本號與 IP 逐字念
+    （wetext 會把 0.6.46 弄成「零.六点四六」）；方括號是上游的注音語法，原文的拿掉"""
+    text = _tts_numbers(text).replace("[", " ").replace("]", " ")
+    return _BREEZY_DOTS.sub(lambda m: "點".join("".join(_TTS_CNUM[int(c)] for c in p) for p in m.group(0).split(".")), text)
+
+
+def _breezy_tn_trad(src, out, s2t):
+    """wetext 關掉轉簡體，數字念法照樣寫成簡體（点、万）：原文沒有、正規化才多出來的字轉成繁體"""
+    return "".join(c if c in src else s2t(c) for c in out)
+
+
+def _breezy_annotate(text, tw, raw, freq, char2phn, always):
+    """BreezyVoice 的念法提示 `字[:ㄅㄧㄢ4]`。挑哪些字照上游（get_bopomofo_rare：訓練資料裡少見的字、這次不是最常見念法的
+    破音字，模型就是照這套訓練的），念法換成 jtlw 的（教育部辭典、發音字典、台灣常用念法）；jtlw 跟 g2pW 判斷不同的字
+    （我們修正過的）與 _TTS_ALWAYS_HINT 也加；一、不不加（會變調）。tw／raw：每個字的 jtlw 念法／g2pW 原始判斷"""
+    out = []
+    for k, ch in enumerate(text):
+        t = tw[k]
+        nxt = text[k + 1] if k + 1 < len(text) else ""
+        if not t or ch in _TTS_NO_HINT or nxt == "[" or not _TTS_HAN.fullmatch(ch):
+            out.append(ch)
+            continue
+        f = freq.get(ch, 0)
+        cands = char2phn.get(ch) or []
+        pick = (f < 500 or (len(cands) >= 2 and t != cands[0] and (f < 10000 or ch in always))
+                or (raw[k] is not None and raw[k] != t) or ch in _TTS_ALWAYS_HINT)
+        out.append(f"{ch}[:{t}]" if pick else ch)
+    return "".join(out)
+
+
+def _breezy_worker_main():
+    """只聽 127.0.0.1，介面同 _tts_worker_main：POST /synthesize {text, voice_wav, voice_text, custom} → audio/wav（22.05 kHz）；
+    POST /convert {text, custom} → {spoken}"""
+    import http.server
+    import io
+    import signal
+    import types
+    import urllib.parse
+    port = int(sys.argv[sys.argv.index("--breezy-worker") + 1])
+    parent = os.getppid()
+
+    def _watch():
+        while True:
+            time.sleep(5)
+            if os.getppid() != parent:
+                try:
+                    os.killpg(0, signal.SIGKILL)
+                finally:
+                    os._exit(0)
+    threading.Thread(target=_watch, daemon=True).start()
+    state = {"ready": False, "error": ""}
+    lock = threading.Lock()
+    R = {}
+    prompts = {}
+
+    def spoken(text, custom):
+        norm = R["cv"].frontend.text_normalize_new(_breezy_prep(text), split=False)
+        tw, _ = _tts_readings(R, norm, custom)
+        return _breezy_annotate(norm, tw, R["g2p"](norm)[0], R["freq"], R["char2phn"], R["always"])
+
+    def prompt_for(wav, text):
+        """參考錄音的特徵每句都一樣：同一個聲音只算一次"""
+        if (wav, text) not in prompts:
+            ptxt = spoken(text, None)
+            mi = R["cv"].frontend.frontend_zero_shot("。", ptxt, R["load_wav"](wav, 16000))
+            if len(prompts) >= 8:
+                prompts.clear()
+            prompts[(wav, text)] = {k: v for k, v in mi.items() if k not in ("text", "text_len")}
+        return prompts[(wav, text)]
+
+    class _H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, obj, ctype="application/json", headers=None):
+            b = obj if isinstance(obj, bytes) else json.dumps(obj, ensure_ascii=False).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(b)))
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_GET(self):
+            if self.path != "/health":
+                return self._send(404, {"error": "not found"})
+            if state["error"]:
+                return self._send(500, {"ok": False, "error": state["error"]})
+            self._send(200, {"ok": True, "model": BREEZY_MODEL}) if state["ready"] \
+                else self._send(503, {"ok": False, "loading": True})
+
+        def do_POST(self):
+            if self.path not in ("/synthesize", "/convert"):
+                return self._send(404, {"error": "not found"})
+            if not state["ready"]:
+                return self._send(503, {"error": state["error"] or "BreezyVoice 載入中"})
+            try:
+                req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                text = str(req.get("text") or "").strip()
+                if not text:
+                    return self._send(400, {"error": "沒有文字"})
+                with lock:
+                    sp = spoken(text, req.get("custom"))
+                    if self.path == "/convert":
+                        return self._send(200, {"spoken": sp})
+                    t0 = time.monotonic()
+                    torch = R["torch"]
+                    try:
+                        base = prompt_for(req["voice_wav"], req["voice_text"])
+                        parts = []
+                        for piece in re.split(r"(?<=[？！。.?!])\s*", sp):      # 上游 inference_zero_shot_no_normalize 的切法
+                            if piece:
+                                tok, tok_len = R["cv"].frontend._extract_text_token(piece)
+                                parts.append(R["cv"].model.inference(**dict(base, text=tok, text_len=tok_len))["tts_speech"])
+                        wav = torch.concat(parts, dim=1).squeeze(0).float().numpy() if parts else None
+                    finally:
+                        torch.cuda.empty_cache()
+                if wav is None:
+                    return self._send(400, {"error": "沒有可以念的文字"})
+                buf = io.BytesIO()
+                R["sf"].write(buf, wav, BREEZY_SR, format="WAV", subtype="PCM_16")
+                self._send(200, buf.getvalue(), "audio/wav", {
+                    "X-TTS-Spoken": urllib.parse.quote(sp),
+                    "X-TTS-Duration": f"{len(wav) / BREEZY_SR:.3f}",
+                    "X-TTS-Seconds": f"{time.monotonic() - t0:.3f}"})
+            except Exception as e:
+                self._send(500, {"error": f"{type(e).__name__}: {e}"})
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), _H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        import opencc
+        import soundfile
+        import torch as _torch
+        import torchaudio
+        import torchaudio.functional as _AF
+        from huggingface_hub import snapshot_download
+        from wetext import Normalizer as _WN
+        s2t = opencc.OpenCC("s2tw").convert
+
+        class _Zh:                                   # 代替 WeTextProcessing 的 tn.chinese.normalizer.Normalizer
+            def __init__(self, **kw):
+                self.n = _WN(lang="zh", operator="tn", traditional_to_simple=False, remove_erhua=False, full_to_half=False)
+
+            def normalize(self, text):
+                return _breezy_tn_trad(text, self.n.normalize(text), s2t)
+
+        class _En:
+            def __init__(self, **kw):
+                self.n = _WN(lang="en", operator="tn")
+
+            def normalize(self, text):
+                return self.n.normalize(text)
+        for name in ("tn", "tn.chinese", "tn.english"):
+            sys.modules.setdefault(name, types.ModuleType(name))
+        for name, cls in (("tn.chinese.normalizer", _Zh), ("tn.english.normalizer", _En)):
+            m = types.ModuleType(name)
+            m.Normalizer = cls
+            sys.modules[name] = m
+        if not hasattr(torchaudio, "set_audio_backend"):
+            torchaudio.set_audio_backend = lambda *a, **k: None
+
+        def load_wav(wav, target_sr):
+            x, sr = soundfile.read(wav, dtype="float32", always_2d=True)
+            s = _torch.from_numpy(x.mean(axis=1)).unsqueeze(0)
+            return _AF.resample(s, sr, target_sr) if sr != target_sr else s
+        sys.path[:0] = [BREEZY_DIR, os.path.join(BREEZY_DIR, "third_party", "Matcha-TTS")]
+        import cosyvoice.utils.file_utils as _fu
+        _fu.load_wav = load_wav
+        import single_inference as _si
+        from utils.word_utils import always_augment_chars, char2phn, word_to_dataset_frequency
+        path = snapshot_download(BREEZY_MODEL, revision=BREEZY_MODEL_REV, local_files_only=True, allow_patterns=BREEZY_FILES)
+        R.update(_tts_load_text(TTS_DIR), sf=soundfile, torch=_torch, load_wav=load_wav,
+                 freq=dict(word_to_dataset_frequency), char2phn=dict(char2phn), always=set(always_augment_chars))
+        R["cv"] = _si.CustomCosyVoice(path)
+        state["ready"] = True
+        print(f"[breezy-worker] 就緒 127.0.0.1:{port}（{BREEZY_MODEL}）", flush=True)
+    except Exception as e:
+        state["error"] = f"{type(e).__name__}: {e}"
+        print(f"[breezy-worker] 載入失敗：{state['error']}", flush=True)
+    threading.Event().wait()
+
+
+def _breezy_setup_main():
+    """GPU 伺服器：server.py --breezy-setup。建立 venv-breezy、裝固定版本的套件、下載上游原始碼（固定版本）與模型（約 2.2 GB），
+    台灣念法資源沒有就一起下載，最後檢查。重跑安全：已經裝好的跳過。裝完約 8 GB（venv 約 5.5 GB，含 CUDA 13 版 torch；模型 2.2 GB）"""
+    import shutil as _sh
+    import subprocess
+    import tarfile
+    home = os.path.dirname(os.path.abspath(__file__))
+    venv = os.environ.get("JT_BREEZY_VENV") or os.path.join(home, "venv-breezy")
+    py = os.path.join(venv, "bin", "python")
+    tag = "  [BreezyVoice]"
+    info = _tts_gpu_info()
+    if not info:
+        print(f"{tag} 這台沒有 NVIDIA 顯示卡（找不到 nvidia-smi），不設定", flush=True)
+        sys.exit(2)
+    name, cap, cuda = info
+    try:
+        idx = _tts_torch_index(cap, cuda)
+    except RuntimeError as e:
+        print(f"{tag} {e}", flush=True)
+        sys.exit(2)
+    free = _sh.disk_usage(home).free / 1024 ** 3
+    if free < 16:
+        print(f"{tag} 磁碟只剩 {free:.0f} GB，需要約 16 GB（含下載暫存）", flush=True)
+        sys.exit(2)
+
+    def run(cmd, what):
+        print(f"{tag} {what}...", flush=True)
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL)
+        if r.returncode != 0:
+            print(f"{tag} {what}失敗（結束碼 {r.returncode}）", flush=True)
+            sys.exit(1)
+
+    if not os.path.exists(py):
+        base = next((p for p in (_sh.which("python3.12"), _sh.which("python3.11"), _sh.which("python3")) if p), None)
+        if not base:
+            print(f"{tag} 找不到 python3", flush=True)
+            sys.exit(1)
+        run([base, "-m", "venv", venv], f"建立 {venv}")
+    ok = subprocess.run([py, "-c", "import importlib.metadata as m,sys;sys.exit(0 if m.version('torch').startswith('%s') "
+                                   "and m.version('wetext')=='0.1.8' and m.version('ruamel.yaml')=='0.17.40' else 1)" % TTS_TORCH],
+                        capture_output=True).returncode == 0
+    if not ok:
+        run([py, "-m", "pip", "install", "-q", "--upgrade", "pip"], "更新 pip")
+        run([py, "-m", "pip", "install", "-q", "--no-cache-dir", f"torch=={TTS_TORCH}", f"torchaudio=={TTS_TORCH}",
+             "--index-url", f"https://download.pytorch.org/whl/{idx}"], f"安裝 torch {TTS_TORCH}（{idx}，含 CUDA 程式庫約 7 GB）")
+        run([py, "-m", "pip", "install", "-q", "--no-cache-dir"] + BREEZY_PIP, "安裝其他套件")
+    mark = os.path.join(BREEZY_DIR, ".jtlw-rev")
+    if not (os.path.exists(mark) and open(mark).read().strip() == BREEZY_CODE_REV):
+        tmp = os.path.join(home, f".breezyvoice-{BREEZY_CODE_REV[:12]}.tar.gz")
+        print(f"{tag} 下載 BreezyVoice 原始碼（固定版本 {BREEZY_CODE_REV[:12]}）...", flush=True)
+        _tts_download(BREEZY_CODE_URL, tmp)
+        new = BREEZY_DIR + ".new"
+        _sh.rmtree(new, ignore_errors=True)
+        os.makedirs(new)
+        with tarfile.open(tmp) as tf:
+            for m in tf.getmembers():
+                parts = m.name.split("/", 1)
+                if len(parts) < 2 or not parts[1] or m.issym() or m.islnk() or ".." in parts[1].split("/"):
+                    continue
+                m.name = parts[1]
+                tf.extract(m, new)
+        open(os.path.join(new, ".jtlw-rev"), "w").write(BREEZY_CODE_REV + "\n")
+        _sh.rmtree(BREEZY_DIR, ignore_errors=True)
+        os.replace(new, BREEZY_DIR)
+        os.remove(tmp)
+    run([py, "-c", f"from huggingface_hub import snapshot_download as s; s({BREEZY_MODEL!r}, revision={BREEZY_MODEL_REV!r}, "
+                   f"allow_patterns={BREEZY_FILES!r})"], "下載 BreezyVoice 模型（約 2.2 GB）")
+    _tts_fetch_data(TTS_DIR)
+    run([py, "-c", "import torch, wetext, whisper, hyperpyyaml, conformer, diffusers, g2pw, pypinyin, opencc; "
+                   "assert torch.cuda.is_available(), '看不到顯示卡'; print('  torch', torch.__version__, torch.cuda.get_device_name(0))"],
+        "檢查")
+    print(f"{tag} 完成：第一次選用時才啟動（約 20 秒），閒置 30 分鐘自動關閉。合成較慢（約音訊長度的 1.2～2.5 倍）", flush=True)
+
+
+if __name__ == "__main__" and "--tts-worker" in sys.argv:
+    _tts_worker_main()
+    sys.exit(0)
+if __name__ == "__main__" and "--breezy-worker" in sys.argv:
+    _breezy_worker_main()
+    sys.exit(0)
+if __name__ == "__main__" and "--breezy-setup" in sys.argv:
+    _breezy_setup_main()
+    sys.exit(0)
+if __name__ == "__main__" and "--tts-build-moe" in sys.argv:
+    _tts_build_moe_main()
+    sys.exit(0)
+if __name__ == "__main__" and "--tts-fetch-data" in sys.argv:
+    _tts_fetch_data(sys.argv[sys.argv.index("--tts-fetch-data") + 1])
+    sys.exit(0)
+if __name__ == "__main__" and "--tts-setup" in sys.argv:
+    _tts_setup_main()
+    sys.exit(0)
+
 # 原始碼編譯的 CTranslate2 將 libctranslate2.so 安裝到 /usr/local/lib
 # 需在 import ctranslate2 前確保 LD_LIBRARY_PATH 包含此路徑
 if "/usr/local/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
@@ -194,8 +1208,8 @@ if "/usr/local/lib" not in os.environ.get("LD_LIBRARY_PATH", ""):
 import numpy as np
 import torch
 import uvicorn
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import Body, FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -203,7 +1217,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.26.18"
+SERVER_VERSION = "2.27.0"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -748,6 +1762,156 @@ def _qwen_stop(wait=0.0):
 def _qwen_ready():
     p = _QWEN.get("proc")
     return bool(_QWEN.get("ready") and p is not None and p.poll() is None)
+
+
+# ── 文字轉語音：worker 的啟動、閒置關閉（worker 本體見檔案前段 _tts_worker_main）──
+_TTS_START_LOCK = threading.Lock()
+_TTS_RUN_LOCK = threading.Lock()          # 合成一次一件（GPU 共用；辨識有自己的排隊）
+TTS_IDLE = float(os.environ.get("JT_TTS_IDLE") or 1800)
+TTS_MIN_MEM_GB = float(os.environ.get("JT_TTS_MIN_MEM_GB") or 10)   # 實測常駐約 9.5 GB、載入峰值 11.8 GB（含 GPU）
+BREEZY_MIN_MEM_GB = float(os.environ.get("JT_BREEZY_MIN_MEM_GB") or 8)
+# 兩個合成模型各一個 worker：各自第一次用到才啟動、閒置關閉、一次一件；彼此不排隊（BreezyVoice 慢，不擋 VoxCPM2）
+_TTS = {"proc": None, "port": None, "ready": False, "error": "", "last_used": 0.0, "stopping": False,
+        "key": "voxcpm2", "name": "文字轉語音", "flag": "--tts-worker", "venv": "venv-tts", "py_env": "JT_TTS_PYTHON",
+        "min_mem": TTS_MIN_MEM_GB, "start_lock": _TTS_START_LOCK, "run_lock": _TTS_RUN_LOCK,
+        "setup_hint": "在用戶端重新執行安裝程式，設定 GPU 伺服器的文字轉語音"}
+_BREEZY = {"proc": None, "port": None, "ready": False, "error": "", "last_used": 0.0, "stopping": False,
+           "key": "breezyvoice", "name": "BreezyVoice", "flag": "--breezy-worker", "venv": "venv-breezy",
+           "py_env": "JT_BREEZY_PYTHON", "min_mem": BREEZY_MIN_MEM_GB, "start_lock": threading.Lock(),
+           "run_lock": threading.Lock(),
+           "setup_hint": "在用戶端執行安裝程式（或 --upgrade），問到「是否加裝 BreezyVoice」時回答 y"}
+_TTS_WORKERS = {"voxcpm2": _TTS, "breezyvoice": _BREEZY}
+
+
+def _tts_python(w=_TTS):
+    p = os.environ.get(w["py_env"]) or os.path.expanduser(f"~/jt-whisper-server/{w['venv']}/bin/python")
+    return p if os.path.exists(p) else None
+
+
+def _tts_mem_available_gb():
+    """/proc/meminfo 的 MemAvailable（GB）；讀不到回 None。GB10 的 CPU 與 GPU 共用這塊記憶體"""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 ** 2
+    except OSError:
+        pass
+    return None
+
+
+def _tts_unavailable(w=_TTS):
+    """這台不能跑這個合成模型的原因；可以跑回 None"""
+    if not _tts_python(w):
+        return f"GPU 伺服器沒有裝{w['name']}（{w['venv']}）：{w['setup_hint']}"
+    if w is _BREEZY and not os.path.exists(os.path.join(BREEZY_DIR, ".jtlw-rev")):
+        return f"GPU 伺服器的 BreezyVoice 原始碼不完整（{BREEZY_DIR}）：{w['setup_hint']}"
+    if not torch.cuda.is_available():
+        return "GPU 伺服器沒有可用的顯示卡"
+    return None
+
+
+def _tts_ready(w=_TTS):
+    p = w.get("proc")
+    return bool(w.get("ready") and p is not None and p.poll() is None)
+
+
+def _tts_ensure(timeout=300, w=_TTS):
+    """worker 沒在跑就啟動並等它就緒；回傳 None（就緒）或錯誤說明。第一次用到才啟動、閒置由 _tts_idle_watch 關閉"""
+    import subprocess
+    import urllib.error
+    import urllib.request
+    why = _tts_unavailable(w)
+    if why:
+        return why
+    name = w["name"]
+    with w["start_lock"]:
+        if _tts_ready(w):
+            return None
+        p = w.get("proc")
+        if p is None or p.poll() is not None:
+            avail = _tts_mem_available_gb()
+            if avail is not None and avail < w["min_mem"]:
+                return (f"GPU 伺服器可用記憶體只剩 {avail:.1f} GB，{name}需要約 {w['min_mem']:.0f} GB；"
+                        f"請稍後再試（其他服務的模型閒置後會釋放）")
+            port = w["port"]
+            if _qwen_port_busy(port):
+                return f"埠號 {port} 已被佔用（可能是上一次沒收乾淨的 worker）；設 {w['py_env'].replace('PYTHON', 'PORT')} 換一個"
+            env = dict(os.environ)
+            log = open(os.path.join(tempfile.gettempdir(), f"jt-tts-worker-{port}.log"), "ab")
+            p = subprocess.Popen([_tts_python(w), os.path.abspath(__file__), w["flag"], str(port)],
+                                 stdin=subprocess.DEVNULL, stdout=log, stderr=log, env=env, start_new_session=True)
+            w.update(proc=p, ready=False, error="", stopping=False, log=log.name)
+            print(f"[{name}] worker 啟動中（pid {p.pid}，127.0.0.1:{port}）")
+        t0 = time.monotonic()
+        while p.poll() is None and time.monotonic() - t0 < timeout:
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{w['port']}/health", timeout=3):
+                    w.update(ready=True, error="", last_used=time.time())
+                    print(f"[{name}] 就緒（{time.monotonic() - t0:.0f}s）")
+                    return None
+            except urllib.error.HTTPError as e:
+                if e.code == 500:              # worker 載入失敗：它自己說明原因
+                    try:
+                        msg = json.loads(e.read()).get("error", "")
+                    except Exception:
+                        msg = ""
+                    _tts_stop(wait=10, w=w)
+                    w["error"] = f"{name}模型載入失敗：{msg}（見 {w.get('log')}）"
+                    return w["error"]
+            except Exception:
+                pass
+            time.sleep(1)
+        if p.poll() is not None:
+            w["error"] = f"{name} worker 結束（代碼 {p.returncode}），見 {w.get('log')}"
+        else:
+            _tts_stop(wait=10, w=w)
+            w["error"] = f"{name}模型 {timeout} 秒內沒有載入完成，見 {w.get('log')}"
+        return w["error"]
+
+
+def _tts_stop(wait=0.0, w=_TTS):
+    """收掉 worker 整個行程群組。wait>0 時等它真的結束，逾時就 SIGKILL"""
+    import signal
+    w["stopping"] = True
+    w["ready"] = False
+    p = w.get("proc")
+    if p is None or p.poll() is not None:
+        return
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+    except Exception:
+        pass
+    t0 = time.monotonic()
+    while wait and p.poll() is None and time.monotonic() - t0 < wait:
+        time.sleep(0.2)
+    if wait and p.poll() is None:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait(5)
+        except Exception:
+            pass
+
+
+def _tts_stop_all(wait=0.0):
+    """兩個合成 worker 都收掉（os.execv 前、結束時）"""
+    for w in _TTS_WORKERS.values():
+        _tts_stop(wait=wait, w=w)
+
+
+def _tts_idle_watch():
+    """閒置 TTS_IDLE 秒就關掉 worker，把記憶體還給共用 GPU（下次用到再啟動）"""
+    while True:
+        time.sleep(30)
+        for w in _TTS_WORKERS.values():
+            if _tts_ready(w) and not w["run_lock"].locked() and time.time() - w["last_used"] > TTS_IDLE:
+                print(f"[{w['name']}] 閒置 {int(TTS_IDLE // 60)} 分鐘，關閉 worker")
+                _tts_stop(wait=20, w=w)
+
+
+def _tts_voice_paths(sha):
+    d = os.path.join(TTS_DIR, "voices")
+    return os.path.join(d, f"{sha}.wav"), os.path.join(d, f"{sha}.txt")
 
 
 def _transcribe_qwen(wav_path, language):
@@ -1434,7 +2598,169 @@ def health():
         "queue": True,
         # v2.21.8：有排定的更新時用戶端先等它換完再送件（null＝沒有）
         "update_pending": _update_pending_info(),
+        # 文字轉語音（2026-10）：null＝這台沒裝 venv-tts；詳細狀態見 /v1/tts/health
+        "tts": ({"model": TTS_MODEL, "running": _tts_ready(),
+                 "models": [k for k, w in _TTS_WORKERS.items() if _tts_python(w)]}
+                if any(_tts_python(w) for w in _TTS_WORKERS.values()) else None),
     }
+
+
+# ── 文字轉語音（2026-10）：用戶端先切句，一次送一句；聲音以 sha256 快取（先問有沒有，沒有才上傳）──
+_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+TTS_MAX_CHARS = 300          # 一次一句（用戶端以 80 字切句）；擋掉沒切句就整篇送來的
+TTS_VOICE_MAX_BYTES = 20 * 1024 * 1024
+
+
+_TTS_MODEL_REPO = {"voxcpm2": TTS_MODEL, "breezyvoice": BREEZY_MODEL}
+
+
+def _tts_model_health(w):
+    why = _tts_unavailable(w)
+    p = w.get("proc")
+    return {"available": why is None, "reason": why, "model": _TTS_MODEL_REPO[w["key"]], "running": _tts_ready(w),
+            "loading": bool(p is not None and p.poll() is None and not w["ready"]), "error": w["error"],
+            "min_mem_gb": w["min_mem"]}
+
+
+@app.get("/v1/tts/health")
+def tts_health():
+    """最上層的欄位是 VoxCPM2（v2.27.0 第一版的格式，舊用戶端照讀）；models 是每個合成模型各自的狀態"""
+    avail = _tts_mem_available_gb()
+    out = _tts_model_health(_TTS)
+    out.update(idle_seconds=TTS_IDLE, mem_available_gb=round(avail, 1) if avail is not None else None,
+               models={k: _tts_model_health(w) for k, w in _TTS_WORKERS.items()})
+    return out
+
+
+@app.get("/v1/tts/voices/{sha}")
+def tts_voice_exists(sha: str):
+    if not _SHA_RE.match(sha) or not all(os.path.exists(x) for x in _tts_voice_paths(sha)):
+        return JSONResponse({"error": "voice_not_found"}, status_code=404)
+    return {"voice": sha}
+
+
+@app.delete("/v1/tts/voices/{sha}")
+def tts_voice_delete(sha: str):
+    """用戶端刪除聲音時一併刪掉這裡快取的參考錄音與逐字稿（錄音者可以要求刪除：不可以只刪用戶端那份）。
+    別台用戶端還在用同一段錄音的話，下次合成時會自動重新上傳"""
+    if not _SHA_RE.match(sha):
+        return JSONResponse({"error": "invalid_voice"}, status_code=400)
+    gone = False
+    for p in _tts_voice_paths(sha):
+        try:
+            os.remove(p)
+            gone = True
+        except FileNotFoundError:
+            pass
+    return {"voice": sha, "deleted": gone}
+
+
+@app.post("/v1/tts/voices")
+async def tts_voice_upload(file: UploadFile = File(...), text: str = Form(...)):
+    """上傳參考錄音（WAV／FLAC，3～60 秒）＋一字不差的逐字稿 → {voice: sha256}"""
+    import hashlib
+    import io
+    import soundfile as sf
+    data = await file.read(TTS_VOICE_MAX_BYTES + 1)
+    text = (text or "").strip()
+    if len(data) > TTS_VOICE_MAX_BYTES:
+        return JSONResponse({"error": "voice_too_large", "detail": "參考錄音超過 20 MB"}, status_code=400)
+    if not text or len(text) > 1000:
+        return JSONResponse({"error": "invalid_transcript", "detail": "逐字稿不可空白、不可超過 1000 字"}, status_code=400)
+    try:
+        info = sf.info(io.BytesIO(data))
+    except Exception:
+        return JSONResponse({"error": "invalid_audio", "detail": "讀不懂這個音檔，請轉成 WAV 再上傳"}, status_code=400)
+    if not 3 <= info.duration <= 60:
+        return JSONResponse({"error": "invalid_audio", "detail": f"參考錄音要 3～60 秒，這段是 {info.duration:.1f} 秒"},
+                            status_code=400)
+    sha = hashlib.sha256(data + b"\n" + text.encode()).hexdigest()
+    wav, txt = _tts_voice_paths(sha)
+    os.makedirs(os.path.dirname(wav), exist_ok=True)
+    for path, body in ((wav, data), (txt, text.encode())):
+        tmp = path + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(body)
+        os.replace(tmp, path)
+    return {"voice": sha, "duration": round(info.duration, 2)}
+
+
+def _tts_worker_post(path, payload, timeout, w=_TTS):
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(f"http://127.0.0.1:{w['port']}{path}", data=json.dumps(payload).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), dict(e.headers)
+    except Exception as e:
+        return 502, json.dumps({"error": f"{w['name']} worker 沒有回應（{type(e).__name__}）"}).encode(), {}
+
+
+def _tts_request(payload, worker_path):
+    w = _TTS_WORKERS.get(str(payload.get("model") or "voxcpm2"))
+    if w is None:
+        return None, JSONResponse({"error": "unknown_model", "detail": f"合成模型只有 {'、'.join(_TTS_WORKERS)}"},
+                                  status_code=400)
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return None, JSONResponse({"error": "empty_text"}, status_code=400)
+    if len(text) > TTS_MAX_CHARS:
+        return None, JSONResponse({"error": "text_too_long",
+                                   "detail": f"一次最多 {TTS_MAX_CHARS} 字，請先切句"}, status_code=400)
+    body = {"text": text, "custom": payload.get("custom") or {}}
+    if worker_path == "/synthesize":
+        sha = str(payload.get("voice") or "")
+        wav, txt = _tts_voice_paths(sha) if _SHA_RE.match(sha) else (None, None)
+        if not wav or not os.path.exists(wav) or not os.path.exists(txt):
+            return None, JSONResponse({"error": "voice_not_found"}, status_code=404)
+        with open(txt, encoding="utf-8") as f:
+            body.update(voice_wav=wav, voice_text=f.read(), steps=payload.get("steps") or 10,
+                        cfg=payload.get("cfg") or 2.0)
+    err = _tts_ensure(w=w)
+    if err:
+        return None, JSONResponse({"error": "tts_unavailable", "detail": err}, status_code=503)
+    with w["run_lock"]:
+        w["last_used"] = time.time()
+        try:
+            code, data, headers = _tts_worker_post(worker_path, body, 300, w)
+        finally:
+            w["last_used"] = time.time()
+    return (code, data, headers), None
+
+
+@app.post("/v1/tts/speech")
+def tts_speech(payload: dict = Body(...)):
+    """{text（一句，≤300 字）, voice（sha256）, custom（自訂讀音）, model（voxcpm2／breezyvoice，預設 voxcpm2）, steps, cfg}
+    → audio/wav（VoxCPM2 48 kHz、BreezyVoice 22.05 kHz，單聲道）。
+    標頭 X-TTS-Spoken：送進模型的文字（含 {拼音}，URL 編碼）；X-TTS-Duration／X-TTS-Seconds：音訊長度／合成耗時"""
+    res, bad = _tts_request(payload, "/synthesize")
+    if bad:
+        return bad
+    code, data, headers = res
+    if code != 200:
+        try:
+            detail = json.loads(data).get("error", "")
+        except Exception:
+            detail = data[:200].decode(errors="replace")
+        return JSONResponse({"error": "tts_failed", "detail": detail}, status_code=502 if code >= 500 else code)
+    keep = {k: v for k, v in headers.items() if k.lower().startswith("x-tts-")}
+    return Response(content=data, media_type="audio/wav", headers=keep)
+
+
+@app.post("/v1/tts/convert")
+def tts_convert(payload: dict = Body(...)):
+    """{text, custom, model} → {spoken}：只做台灣念法轉換（檢查發音字典用）"""
+    res, bad = _tts_request(payload, "/convert")
+    if bad:
+        return bad
+    code, data, _ = res
+    try:
+        return JSONResponse(json.loads(data), status_code=code)
+    except Exception:
+        return JSONResponse({"error": "tts_failed"}, status_code=502)
 
 
 @app.post("/v1/admin/update")
@@ -1643,6 +2969,7 @@ def _update_worker():
     # **先收掉 Qwen worker 再換**：execv 保留同一個 PID，atexit 不會跑、worker 的看門狗也看不出主服務換了，
     # 不收的話舊 worker 會一直佔著埠號與約 7 GB 顯示記憶體，新服務的 worker 綁不到埠（2026-09-26 審查時發現）
     _qwen_stop(wait=20)
+    _tts_stop_all(wait=20)        # 文字轉語音的兩個 worker 同理（VoxCPM2 約 8 GB）
     # os.execv 直接替換行程映像，保留同一個 PID——systemd 看不出差別
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
@@ -2153,6 +3480,7 @@ if __name__ == "__main__":
         # 再確認幾個實際會被呼叫到的東西存在，避免「import 得起來但端點壞掉」。
         missing = [n for n in ("health", "status", "admin_update", "_diarize", "_diarize_legacy",
                                "_nemotron_diarize", "_transcribe_qwen", "_qwen_worker_main",
+                               "_tts_worker_main", "tts_speech", "tts_voice_upload", "_breezy_worker_main", "_tts_stop_all", "tts_voice_delete",
                                "_update_worker", "_update_pending_info")
                    if n not in globals()]
         if missing:
@@ -2177,4 +3505,8 @@ if __name__ == "__main__":
     import atexit
     _qwen_start(int(os.environ.get("JT_QWEN_PORT") or args.port + 11))
     atexit.register(_qwen_stop)
+    _TTS["port"] = int(os.environ.get("JT_TTS_PORT") or args.port + 12)   # worker 第一次用到才啟動
+    _BREEZY["port"] = int(os.environ.get("JT_BREEZY_PORT") or args.port + 13)
+    threading.Thread(target=_tts_idle_watch, daemon=True).start()
+    atexit.register(_tts_stop_all)
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

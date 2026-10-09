@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>jt-live-whisper</title>
+<!-- 分頁圖示：跟網站同一個 logo（github/docs/favicon.svg）。Safari 與 iPhone 加到主畫面用 PNG（icons/，WebUI 公開提供） -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22 width=%2264%22 height=%2264%22 role=%22img%22 aria-label=%22jt-live-whisper%22%3E %3Cdefs%3E %3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E %3Cstop offset=%220%22 stop-color=%22%232c3e50%22/%3E %3Cstop offset=%221%22 stop-color=%22%233498db%22/%3E %3C/linearGradient%3E %3C/defs%3E %3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22url(%23g)%22/%3E %3Cg stroke=%22%23fff%22 stroke-width=%224%22 stroke-linecap=%22round%22%3E %3Cline x1=%2216%22 y1=%2226%22 x2=%2216%22 y2=%2238%22/%3E %3Cline x1=%2225%22 y1=%2218%22 x2=%2225%22 y2=%2246%22/%3E %3Cline x1=%2234%22 y1=%2224%22 x2=%2234%22 y2=%2240%22/%3E %3Cline x1=%2243%22 y1=%2214%22 x2=%2243%22 y2=%2250%22/%3E %3Cline x1=%2252%22 y1=%2228%22 x2=%2252%22 y2=%2236%22/%3E %3C/g%3E %3C/svg%3E">
+<link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">
+<link rel="apple-touch-icon" href="/favicon.png">
 <style>
 :root {
   --bg:#f0f2f5;--bg2:#fff;--bg3:#f7f8fa;--card-bg:#fff;--section-bg:#f7f8fa;
@@ -195,7 +199,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
 @keyframes kwFullFlash{0%{background:rgba(255,60,60,.35)}8%{background:transparent}16%{background:rgba(255,193,7,.3)}24%{background:transparent}32%{background:rgba(255,60,60,.25)}40%{background:transparent}100%{background:transparent;opacity:0}}
 @keyframes kwTextPulse{0%{opacity:1;transform:scale(1.2)}15%{opacity:0.3}30%{opacity:1;transform:scale(1)}45%{opacity:0.3}60%{opacity:1;transform:scale(0.95)}100%{opacity:0;transform:scale(0.8)}}
 .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:var(--radius-sm);font-size:14px;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.25);animation:toastIn .3s ease}
-.toast-err{background:var(--red);color:#fff}.toast-ok{background:var(--green);color:#fff}
+.toast-err{background:var(--red);color:#fff}.toast-ok{background:var(--green);color:#fff}.toast-warn{background:var(--orange);color:#fff}
 @keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(-10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .flash-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:#fff;z-index:300;pointer-events:none;animation:flashFx .8s ease-out forwards}
 .dark .flash-overlay{background:#4a90d9}
@@ -214,6 +218,36 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
   .mode-toggle{font-size:11px;padding:4px 8px;white-space:nowrap}
   .new-btn{position:static;transform:none}
 }
+/* 文字轉語音（2026-10） */
+.tts-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:150;display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:70px 16px 90px}
+.tts-ov.on{display:flex}
+.tts-box{background:var(--card-bg);color:var(--text);border-radius:var(--radius);box-shadow:var(--shadow-lg);width:100%;max-width:720px;padding:22px 22px 18px;position:relative}
+.tts-box h3{margin:0 0 6px;font-size:18px;display:flex;align-items:center;gap:8px}
+.tts-box h3 svg{width:20px;height:20px}
+.tts-x{position:absolute;top:10px;right:12px;background:none;border:none;font-size:24px;line-height:1;color:var(--text-dim);cursor:pointer;padding:4px 8px}
+.tts-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tts-note{font-size:12px;color:var(--text-dim);line-height:1.6}
+.tts-warn{background:rgba(220,53,69,.08);color:var(--red);border:1px solid rgba(220,53,69,.25);border-radius:var(--radius-sm);padding:8px 12px;font-size:13px;margin:10px 0;line-height:1.6}
+.tts-divider{text-align:center;padding:10px 8px 6px;font-size:12px;color:var(--text-dim)}.sub-mode .tts-divider{display:none}
+.m-replay{margin-left:8px;flex-shrink:0;height:22px;padding:0 8px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text-dim);cursor:pointer;align-self:center}.m-replay:hover{color:var(--accent);border-color:var(--accent)}.m-replay svg{width:12px;height:12px}.sub-mode .m-replay{display:none}
+.csel-sm{display:inline-block;width:auto;min-width:96px;vertical-align:middle}.csel-sm .csel-display{padding:6px 30px 6px 10px;font-size:13px}.csel-sm .csel-display::after{right:10px}.csel-sm .csel-item{padding:6px 10px;font-size:13px}
+.tts-voice{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--border-light);border-radius:var(--radius-sm);margin-bottom:6px;font-size:13px}
+.tts-voice b{font-weight:600}
+.btn-ic{display:inline-flex;align-items:center;gap:4px}.btn-ic svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.tts-def{font-size:11px;background:var(--accent);color:#fff;border-radius:4px;padding:1px 6px}.tts-builtin{font-size:11px;background:var(--text-dim);color:#fff;border-radius:4px;padding:1px 6px}
+.tts-imp{border:1px dashed var(--input-border);border-radius:var(--radius-sm);padding:12px;margin:8px 0 14px}
+@media(max-width:640px){.tts-box{padding:18px 14px 14px}.tts-ov{padding:60px 8px 90px}}
+/* 文字轉語音（v2.27.0）：輸入來源選「文字內容朗讀／文字轉語音檔」時，辨識相關的區塊整組藏起來 */
+#ttsArea,#rTtsMode,#rTtsOut{display:none}
+.tts-on #ttsArea,.tts-on #rTtsMode,.tts-on #rTtsOut{display:block}
+.tts-on #fileArea,.tts-on #rAsr,.tts-on #rEngine,.tts-on #rDevices,.tts-on #rOffline,.tts-on #rOther,.tts-on #rKeyword,.tts-on #rForward{display:none!important}
+.tts-file-on #rTtsDev,.tts-file-on #rTtsSaveChk{display:none}
+#ttsArea textarea{width:100%;min-height:130px;resize:vertical}
+.tts-sel-file{display:none;margin:8px 0;padding:8px 12px;border-radius:var(--radius-sm);background:rgba(13,110,253,.06);border:1px solid rgba(13,110,253,.2);font-size:13px}
+.tts-sel-file.on{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ver-warn{position:sticky;top:0;z-index:60;background:#fff3cd;color:#664d03;border-bottom:1px solid #ffe69c;padding:10px 16px;font-size:13px;line-height:1.6;text-align:center}
+body.dark .ver-warn{background:#3a2f0b;color:#ffda6a;border-color:#665216}
+.tts-play-btn{display:block;margin:12px auto;padding:10px 18px}
 </style>
 </head>
 <body>
@@ -225,11 +259,11 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
 <div class="cfg-loading" id="cfgLoading"><div class="cfg-spinner"></div><div style="margin-top:12px;color:var(--text-dim);font-size:14px" id="cfgLoadingText">載入設定中...</div></div>
 <div class="card" id="cfgCard" style="opacity:0;transition:opacity .3s">
   <h2><svg viewBox="0 0 24 24" style="width:22px;height:22px;vertical-align:middle;margin-right:6px;fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 00-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 012-3.95A12.88 12.88 0 0122 2c0 2.72-.78 7.5-6 11.95A22 22 0 0112 15z"/><path d="M9 12H4s.55-3.03 2-4.5C7.5 6 10 5.5 10 5.5"/><path d="M12 15v5s3.03-.55 4.5-2c1.5-1.5 2-4.5 2-4.5"/></svg>開始使用</h2>
-  <div class="card-sub">設定完成後按下「開始」即可啟動即時辨識或離線處理</div>
+  <div class="card-sub">設定完成後按下「開始」即可啟動即時辨識、離線處理或文字朗讀</div>
   <!-- 輸入來源 -->
   <div class="sec">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M3 7V17C3 18.1046 3.89543 19 5 19H19C20.1046 19 21 18.1046 21 17V7" stroke="currentColor"/><path d="M1 7H23" stroke="currentColor" stroke-linecap="round"/><path d="M12 11V15M12 15L9 12.5M12 15L15 12.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg>輸入來源</div>
-    <div class="sec-hint">選擇即時擷取系統音訊，或讀入既有的音訊/影片檔案進行離線處理。</div>
+    <div class="sec-hint" id="srcHint">選擇即時擷取系統音訊、讀入既有的音訊/影片檔案進行離線處理，或把文字念成台灣華語。</div>
     <div class="fg"><label>來源</label><div class="csel" id="iSource" data-value=""></div></div>
     <div class="file-area" id="fileArea">
       <div class="fg"><label>recordings/ 目錄中的檔案（點選可多選）</label>
@@ -241,9 +275,21 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
         拖曳音訊/影片檔案到此處，或點按選擇檔案
       </div>
     </div>
+    <div id="ttsArea">
+      <div class="fg"><label>要念的文字 <span class="tts-note" id="ttsCount" style="font-weight:400">0 字</span></label><textarea id="iTtsText" placeholder="貼上要念的文字；或從下面選一個文字檔" oninput="ttsTextChg()"></textarea></div>
+      <div class="tts-sel-file" id="ttsSelFile"><span>將念這個檔案：<b id="ttsSelName"></b></span><button type="button" class="test-btn btn-ic" onclick="ttsClearFile()" style="height:28px"><svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>改用上面的文字</button></div>
+      <div class="fg"><label>或選一個文字檔 <span class="tts-note" style="font-weight:400">recordings/、logs/ 裡的 .txt、.md、.srt、.vtt；本工具的摘要只念「重點摘要」</span></label>
+        <input id="iTtsFileFilter" placeholder="輸入關鍵字篩選..." style="margin-bottom:8px" oninput="ttsRenderFiles()">
+        <div class="file-list" id="ttsFileList"><div style="padding:12px;color:var(--text-dim);text-align:center">載入中...</div></div>
+      </div>
+      <div class="upload-zone" id="ttsUploadZone" onclick="$('ttsUploadInput').click()">
+        <input type="file" id="ttsUploadInput" accept=".txt,.md,.srt,.vtt" onchange="if(this.files.length)ttsUpload(this.files)">
+        拖曳文字檔到此處，或點按選擇檔案
+      </div>
+    </div>
   </div>
   <!-- 語音辨識 -->
-  <div class="sec">
+  <div class="sec" id="rAsr">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor"/><path d="M5 10V11C5 14.866 8.13401 18 12 18C15.866 18 19 14.866 19 11V10" stroke="currentColor" stroke-linecap="round"/><path d="M12 18V22M12 22H9M12 22H15" stroke="currentColor" stroke-linecap="round"/></svg>語音辨識</div>
     <div class="sec-hint" id="asrHint">選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。場景的緩衝長度越長句子越完整，越短反應越即時。</div>
     <div class="fg"><label>功能模式</label><div class="csel" id="iMode" data-value=""></div></div>
@@ -253,13 +299,40 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
       <div class="fg" id="rScene"><label>場景</label><div class="csel" id="iScene" data-value=""></div></div>
     </div>
   </div>
+  <!-- 朗讀（v2.27.0）-->
+  <div class="sec" id="rTtsMode">
+    <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-linejoin="round"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" stroke="currentColor" stroke-linecap="round"/></svg>語音合成</div>
+    <div class="sec-hint">念法以台灣日常說法為準、教育部辭典為基礎（「和」念<span style="white-space:nowrap">ㄏㄢˋ</span>，可在發音字典改）。合成在 GPU 伺服器或 Apple Silicon Mac 上進行，資料不經雲端。聲音可以用內建的 8 個（AI 產生，不是真人），或匯入台灣華語錄音。</div>
+    <div class="fg"><label>功能模式</label><div class="csel" id="iTtsMode" data-value=""></div></div>
+    <div class="fg"><label>合成模型</label><div class="csel" id="iTtsModel" data-value=""></div><div class="tts-note" id="ttsModelNote"></div></div>
+    <div class="fg"><label>合成位置</label><div class="csel" id="iTtsWhere" data-value=""></div></div>
+    <div class="fg" id="rTtsSteps"><label>本機品質</label><div class="csel" id="iTtsSteps" data-value=""></div></div>
+    <div class="fg"><label>聲音</label><div class="csel" id="iTtsVoice" data-value=""></div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap" id="ttsAdminBtns"><button type="button" class="test-btn btn-ic" onclick="ttsVoiceDlg()" style="height:32px"><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg>管理聲音</button><button type="button" class="test-btn btn-ic" onclick="ttsDictDlg()" style="height:32px"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>發音字典</button></div></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <div class="fg" style="flex:1;min-width:180px"><label>語速</label><div class="csel" id="iTtsRate" data-value=""></div></div>
+      <div class="fg" style="flex:1;min-width:180px"><label>段落停頓</label><div class="csel" id="iTtsPause" data-value=""></div></div>
+    </div>
+    <div class="tts-note" id="ttsStatusNote"></div>
+  </div>
+  <!-- 朗讀的輸出（v2.27.0）-->
+  <div class="sec" id="rTtsOut">
+    <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M1 13.857V10.143C1 9.038 1.895 8.143 3 8.143H5.9C6.096 8.143 6.287 8.085 6.45 7.978L12.45 4.022C13.114 3.584 14 4.061 14 4.857V19.143C14 19.939 13.114 20.416 12.45 19.978L6.45 16.022C6.287 15.915 6.096 15.857 5.9 15.857H3C1.895 15.857 1 14.962 1 13.857Z" stroke="currentColor"/><path d="M17.5 7.5C17.5 7.5 19 9 19 11.5C19 14 17.5 15.5 17.5 15.5" stroke="currentColor" stroke-linecap="round"/></svg>朗讀輸出</div>
+    <div class="sec-hint" id="ttsOutHint">選擇從哪裡播放；也可以同時存成音訊檔（存在 recordings/）。從別台電腦用 WebUI、或這台沒有喇叭時選「瀏覽器」。</div>
+    <div class="fg" id="rTtsDev"><label>播放裝置</label><div class="csel" id="iTtsDevice" data-value=""></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px"><button type="button" class="test-btn btn-ic" onclick="ttsRescan()" style="height:32px"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>重新偵測</button><span id="ttsRescanMsg" style="font-size:12px;color:var(--text-dim)">接上耳機、換了喇叭之後按一下</span></div></div>
+    <div class="checks" style="align-items:center">
+      <label id="rTtsSaveChk"><input type="checkbox" id="iTtsSave"> 同時存成音訊檔</label>
+      <span style="display:inline-flex;align-items:center;gap:8px;font-size:13px">格式 <div class="csel csel-sm" id="iTtsFmt" data-value=""></div></span>
+    </div>
+  </div>
   <!-- 語言翻譯 -->
   <div class="sec" id="rEngine">
     <div class="sec-title" id="engTitle"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12Z" stroke="currentColor"/><path d="M13 2.05C13 2.05 16 6 16 12C16 18 13 21.95 13 21.95" stroke="currentColor"/><path d="M11 21.95C11 21.95 8 18 8 12C8 6 11 2.05 11 2.05" stroke="currentColor"/><path d="M2.63 15.5H21.37" stroke="currentColor"/><path d="M2.63 8.5H21.37" stroke="currentColor"/></svg>語言翻譯</div>
     <div class="sec-hint" id="engHint">要更好的翻譯品質，請搭配 LLM 伺服器與適當模型。轉錄模式不需翻譯引擎。</div>
     <div class="fg" id="engineRow"><label>翻譯引擎</label><div class="csel" id="iEngine" data-value=""></div></div>
     <div class="llm-area" id="llmArea">
-      <div class="row3"><div class="fg"><label>LLM 主機</label><input id="iLlmHost" placeholder="192.168.1.40:11434"></div><button class="test-btn" id="testBtn" onclick="testLlm()">測試連線</button></div>
+      <div class="row3"><div class="fg"><label>LLM 主機</label><input id="iLlmHost" placeholder="192.168.1.40:11434"></div><button class="test-btn btn-ic" id="testBtn" onclick="testLlm()"><svg viewBox="0 0 24 24"><path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>測試連線</button></div>
       <div id="testResult"></div>
       <div class="fg" id="llmModelRow" style="margin-top:12px"><label>LLM 模型</label><div class="csel" id="iLlmModel" data-value=""></div></div>
     </div>
@@ -271,7 +344,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
     <div class="fg" id="rRecSrc" style="display:none"><label>錄音來源</label><div class="csel" id="iRecSrc" data-value="both"></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">雙方會混成一個音軌；系統音訊是對方的聲音（電腦播放的），麥克風是你自己的</div></div>
     <div class="fg" id="rDevLb"><label>系統音訊（Loopback）</label><div class="csel" id="iDevice" data-value=""></div><div id="devAutoLb" style="margin-top:4px"></div><div id="devSckHint" style="margin-top:6px;display:none"></div></div>
     <div class="fg" id="rDevMic"><label>麥克風</label><div class="csel" id="iMicDev" data-value=""></div><div id="devAutoMic" style="margin-top:4px"></div></div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="test-btn" id="devRescan" onclick="rescanDevices()" style="height:32px">重新偵測</button><span id="devRescanMsg" style="font-size:12px;color:var(--text-dim)">接上耳機、換了麥克風之後按一下</span></div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button type="button" class="test-btn btn-ic" id="devRescan" onclick="rescanDevices()" style="height:32px"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/></svg>重新偵測</button><span id="devRescanMsg" style="font-size:12px;color:var(--text-dim)">接上耳機、換了麥克風之後按一下</span></div>
   </div>
   <!-- 離線處理 -->
   <div class="sec" id="rOffline" style="display:none">
@@ -334,7 +407,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
       <div class="checks">
         <label><input type="checkbox" id="iKwBrowser" checked> 瀏覽器通知</label>
         <label><input type="checkbox" id="iKwSound" checked> 音效提示</label>
-        <select id="iKwSoundStyle" style="padding:4px 8px;font-size:12px;background:var(--input-bg);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius-sm)"><option value="alert">警示音</option><option value="gentle">柔和音</option></select>
+        <div class="csel csel-sm" id="iKwSoundStyle" data-value=""></div>
         <label><input type="checkbox" id="iKwOverlay"> 懸浮字幕閃爍</label>
       </div>
       <div style="margin-top:8px"><button class="test-btn" onclick="saveKw()" style="display:inline-flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>儲存設定</button><span id="kwResult" style="margin-left:8px;font-size:12px"></span></div>
@@ -455,12 +528,49 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
   <div class="msgs" id="msgs"></div>
   <div class="bar"><div><button class="stop-btn" id="stopBtn" onclick="stop()">停止 <kbd>S</kbd></button><button class="stop-btn" id="pauseBtn" onclick="togglePause()" style="background:var(--orange);margin-left:8px">暫停 <kbd>P</kbd></button><span class="bar-info" id="bInfo"></span><span class="bar-info" id="bDevices" style="margin-left:8px"></span><span id="bBarBadges" style="margin-left:8px;display:inline-flex;gap:4px"><span class="sbadge sbadge-rec" id="bRec" style="display:none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg>錄音中</span><span class="sbadge sbadge-denoise" id="bDenoise" style="display:none"><svg viewBox="0 0 24 24"><path d="M2 12C2 6.5 6.5 2 12 2M22 12C22 17.5 17.5 22 12 22M8 12C8 9.8 9.8 8 12 8M16 12C16 14.2 14.2 16 12 16" stroke="currentColor" stroke-linecap="round"/></svg>降噪</span><span class="sbadge" id="bOvReopen" style="display:none;background:rgba(0,188,212,.12);color:#00bcd4;cursor:pointer" onclick="reopenOverlay()" title="重新開啟懸浮字幕視窗"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 14h4M11 14h7M6 18h12" stroke-linecap="round"/></svg>懸浮字幕</span></span></div><div><button class="mode-toggle" id="subBtn" onclick="toggleSubMode()">字幕模式 <kbd>T</kbd></button><button class="new-btn" id="newBtn" onclick="toEnd()">新訊息 ↓</button></div></div>
 </div>
+<!-- 文字轉語音的管理對話框（v2.27.0）：聲音、發音字典 -->
+<div class="tts-ov" id="ttsVoiceDlg" onclick="if(event.target===this)ttsDlgClose('ttsVoiceDlg')">
+  <div class="tts-box" role="dialog" aria-label="管理聲音">
+    <button class="tts-x" onclick="ttsDlgClose('ttsVoiceDlg')" aria-label="關閉">×</button>
+    <h3><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-linejoin="round"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" stroke="currentColor" stroke-linecap="round"/></svg>管理聲音</h3>
+    <div class="tts-note" style="margin-bottom:10px">內建 8 個聲音由 AI 依文字描述產生，不是真人錄音。也可以匯入自己的：合成出來的音色、口音、節奏都來自匯入的錄音（要男聲就匯入男聲的錄音；「分類」只是分組，不會改變聲音），所以一定要用<b>取得錄音者同意</b>的台灣華語錄音。試聽播的是錄音本身。</div>
+    <div id="ttsVoiceList"><div class="tts-note">還沒有聲音</div></div>
+    <div class="tts-imp">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">匯入聲音</div>
+      <div class="tts-note" style="margin-bottom:8px">一個人、安靜無回音、10～20 秒、平常語速的台灣華語錄音（WAV、MP3、M4A 都可以）；逐字稿要和錄音內容一字不差。</div>
+      <div class="fg"><label>錄音檔</label>
+        <div class="upload-zone" id="ttsVZone" onclick="$('ttsVFile').click()">
+          <input type="file" id="ttsVFile" accept="audio/*,.wav,.mp3,.m4a,.flac" onchange="ttsVFileChg()">
+          <span id="ttsVFileName">拖曳錄音檔到此處，或點按選擇（WAV、MP3、M4A、FLAC）</span>
+        </div></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="fg" style="flex:2;min-width:200px"><label>聲音名稱</label><input id="ttsVName" maxlength="40" placeholder="例如：主持人 Kevin"></div>
+        <div class="fg" style="flex:1;min-width:120px"><label title="只用來在聲音選單分組；聲音本身（男聲或女聲）由匯入的錄音決定，改這裡不會改變聲音">分類 <span class="tts-note" style="font-weight:400">分組用，不會改變聲音</span></label><div class="csel" id="ttsVGender" data-value=""></div></div>
+      </div>
+      <div class="fg"><label>逐字稿（一字不差）</label><textarea id="ttsVText" rows="3" style="resize:vertical" placeholder="錄音裡說的每一個字"></textarea></div>
+      <div class="fg"><label>錄音來源與同意</label><input id="ttsVSrc" maxlength="200" placeholder="誰錄的、何時簽署同意書"></div>
+      <div class="checks" style="margin-bottom:10px"><label><input type="checkbox" id="ttsVConsent"> 我已取得錄音者的書面同意，同意這段錄音用來產生合成語音</label></div>
+      <button class="test-btn btn-ic" onclick="ttsImport()"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>匯入</button><span id="ttsImpResult" style="margin-left:8px;font-size:12px"></span>
+    </div>
+  </div>
+</div>
+<div class="tts-ov" id="ttsDictDlg" onclick="if(event.target===this)ttsDlgClose('ttsDictDlg')">
+  <div class="tts-box" role="dialog" aria-label="發音字典">
+    <button class="tts-x" onclick="ttsDlgClose('ttsDictDlg')" aria-label="關閉">×</button>
+    <h3><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20V3H6.5A2.5 2.5 0 004 5.5v14z" stroke="currentColor" stroke-linejoin="round"/><path d="M8 7h8M8 11h6" stroke="currentColor" stroke-linecap="round"/></svg>發音字典</h3>
+    <div class="tts-note" style="margin-bottom:10px">一行一個「詞 = 注音」，一個字一個注音、以空白分開；優先於教育部辭典。單字（例如「和」）只用在辭典詞以外（「和平」「暖和」照辭典）。</div>
+    <div class="fg"><textarea id="ttsDict" rows="7" style="resize:vertical" placeholder="和 = ㄏㄢˋ&#10;伺服器 = ㄙˋ ㄈㄨˊ ㄑㄧˋ"></textarea></div>
+    <div class="tts-row" style="margin-bottom:6px"><div class="fg" style="flex:1;margin-bottom:0"><input id="ttsPrevText" maxlength="300" placeholder="輸入一句話，預覽會怎麼念（不合成）"></div><button class="test-btn btn-ic" onclick="ttsPreview()"><svg viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>預覽念法</button></div>
+    <div class="tts-note" id="ttsPrevOut" style="margin-bottom:10px"></div>
+    <button class="test-btn btn-ic" onclick="ttsSaveDict()"><svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>儲存字典</button><span id="ttsDictResult" style="margin-left:8px;font-size:12px"></span>
+  </div>
+</div>
 <script>
 const $=id=>document.getElementById(id),msgsEl=$('msgs'),dot=$('dot'),newBtn=$('newBtn');
 let cnt=0,aScr=true,ws=null,rTimer=null,startTime=null,timerIv=null,_discShown=false;
 let curCfg={mode:'',modeLabel:'',model:'',engine:'',asrLoc:'',record:false,denoise:false,mic:false};
 let _autoLb='',_autoMic='';
-let _lastStartBody=null,_allDevices=[],_isSwitching=false,_curDeviceId=null,_curMicDeviceId=null;
+let _lastStartBody=null,_allDevices=[],_isSwitching=false,_curDeviceId=null,_curMicDeviceId=null,_curPid=null;
 let _asrItemsCache=null,_asrLastVal='';
 let _recModels={},_cfgModels=[],_lastModel='';
 function _updateModelRec(mode){
@@ -499,7 +609,7 @@ function _updateModelRec(mode){
   else if(_cfgModels.some(m=>m.value===curVal&&limitTag(m)))cselSetValue($('iModel'),isGpu?'large-v3-turbo':recM);   // 同命令列：有 GPU 伺服器退伺服器預設
   else cselSetValue($('iModel'),curVal);
 }
-const _modeLabels={'en2zh':'英翻中字幕','zh2en':'中翻英字幕','ja2zh':'日翻中字幕','zh2ja':'中翻日字幕','ko2zh':'韓翻中字幕','zh2ko':'中翻韓字幕','en_zh':'英中雙向字幕','ja_zh':'日中雙向字幕','ko_zh':'韓中雙向字幕','en':'英文轉錄','zh':'中文轉錄','ja':'日文轉錄','ko':'韓文轉錄','nan':'台語轉錄','nan2en':'台翻英字幕','record':'純錄音'};
+const _modeLabels={'en2zh':'英翻中字幕','zh2en':'中翻英字幕','ja2zh':'日翻中字幕','zh2ja':'中翻日字幕','ko2zh':'韓翻中字幕','zh2ko':'中翻韓字幕','en_zh':'英中雙向字幕','ja_zh':'日中雙向字幕','ko_zh':'韓中雙向字幕','en':'英文轉錄','zh':'中文轉錄','ja':'日文轉錄','ko':'韓文轉錄','nan':'台語轉錄','nan2en':'台翻英字幕','record':'純錄音','tts':'文字朗讀','tts_file':'文字轉語音檔'};
 const _spkColors=['#ffa550','#64c8ff','#ff96b4','#b4e664','#bea0ff','#fff064','#64f0c8','#ffb4a0'];
 /* Custom Select */
 function cselInit(el){const d=document.createElement('div');d.className='csel-display';d.textContent='選擇...';const dr=document.createElement('div');dr.className='csel-drop';el.appendChild(d);el.appendChild(dr);d.addEventListener('click',e=>{e.stopPropagation();document.querySelectorAll('.csel.open').forEach(s=>{if(s!==el)s.classList.remove('open')});el.classList.toggle('open')})}
@@ -509,6 +619,10 @@ function cselAddItem(el,v,l){const dr=el.querySelector('.csel-drop');if(dr.query
 function cselVal(el){return el.dataset.value||''}
 document.addEventListener('click',()=>{document.querySelectorAll('.csel.open').forEach(s=>s.classList.remove('open'))});
 document.querySelectorAll('.csel').forEach(cselInit);
+// 原生 select 一律不用（2026-10-09 使用者：所有下拉清單都要用本程式樣式），固定選項的下拉在這裡填
+cselSetItems($('iTtsFmt'),[{value:'mp3',label:'MP3',tag:''},{value:'wav',label:'WAV',tag:''}]);cselSetValue($('iTtsFmt'),'mp3');
+cselSetItems($('ttsVGender'),[{value:'female',label:'女聲',tag:''},{value:'male',label:'男聲',tag:''},{value:'other',label:'其他',tag:''}]);cselSetValue($('ttsVGender'),'female');
+cselSetItems($('iKwSoundStyle'),[{value:'alert',label:'警示音',tag:''},{value:'gentle',label:'柔和音',tag:''}]);cselSetValue($('iKwSoundStyle'),'alert');
 /* Theme */
 function toggleTheme(){const d=document.body.classList.toggle('dark');$('tBtn').textContent=d?'淺色主題':'深色主題';localStorage.setItem('t',d?'d':'l')}
 if(localStorage.getItem('t')==='d'){document.body.classList.add('dark');$('tBtn').textContent='淺色主題'}
@@ -562,8 +676,10 @@ async function loadCfg(){
   const r=await fetch('/api/config',{headers:_authHeaders()}),c=await r.json();$('verLabel').textContent='v'+(c.version||'');const L=c.last||{};
   _cfgStep('載入輸入來源與辨識模式...');
   // Source
-  cselSetItems($('iSource'),[{value:'live',label:'即時音訊擷取',tag:''},{value:'file',label:'讀入音訊檔案（離線處理）',tag:''}]);
-  cselSetValue($('iSource'),'live');$('iSource').addEventListener('change',onSourceChg);
+  if(!(c.api_level>=2))_verWarn();
+  cselSetItems($('iSource'),[{value:'live',label:'即時音訊擷取',tag:''},{value:'file',label:'讀入音訊檔案（離線處理）',tag:''},{value:'tts',label:'文字內容朗讀',tag:''},{value:'tts_file',label:'文字轉語音檔',tag:''}]);
+  cselSetValue($('iSource'),['live','file','tts','tts_file'].includes(L.source)?L.source:'live');$('iSource').addEventListener('change',onSourceChg);
+  _ttsLast=L;ttsFill(c.tts);$('iTtsWhere').addEventListener('change',()=>{$('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none';ttsWarm()});$('iTtsModel').addEventListener('change',()=>{if(_ttsInfo)_ttsFillWhere(_ttsInfo,cselVal($('iTtsWhere')));ttsWarm()});
   // Mode
   const mG=[];let lg='',cg;c.modes.forEach(m=>{if(m.group!==lg){cg={label:m.group,items:[]};mG.push(cg);lg=m.group}cg.items.push({value:m.value,label:m.label,tag:tagFor(m.value,'en2zh',L.mode)})});
   cselSetItems($('iMode'),null,mG);cselSetValue($('iMode'),L.mode||'en2zh');
@@ -631,6 +747,7 @@ async function loadCfg(){
     $('rForward').style.display='';
     try{const fr=await fetch('/api/forward-config',{headers:_authHeaders()});if(fr.ok){const fc=await fr.json();_loadFwdConfig(fc)}}catch(e){}
   }
+  if(cselVal($('iSource'))!=='live')onSourceChg();
   $('cfgLoading').style.display='none';$('cfgCard').style.opacity='1';initCollapsible();
 }
 // 音訊裝置（v2.26.3）：麥克風只列真正的麥克風；重新偵測時保留原本選的，那個裝置不在了才改回自動偵測
@@ -695,7 +812,7 @@ async function requestSckPerm(){
   }catch(e){msg.textContent=e.message;showToast('授權失敗: '+e.message,'err')}
   btn.disabled=false;
 }
-function onSourceChg(){_devRowsVis();const isFile=cselVal($('iSource'))==='file';$('fileArea').classList.toggle('show',isFile);$('rDevices').style.display=isFile?'none':'';$('rScene').style.display=isFile?'none':'';$('rOffline').style.display=isFile?'':'none';$('rAsrLoc').style.display=isFile?'':'';$('iDenoise').parentElement.style.display=isFile?'none':'';$('iRec').parentElement.style.display=isFile?'none':'';$('iMic').parentElement.style.display=isFile?'none':'';$('asrHint').textContent=isFile?'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。':'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。場景的緩衝長度越長句子越完整，越短反應越即時。';if(isFile)loadFiles();_updateModelRec(cselVal($('iMode')))}
+function onSourceChg(){_devRowsVis();const isFile=cselVal($('iSource'))==='file';$('fileArea').classList.toggle('show',isFile);$('rDevices').style.display=isFile?'none':'';$('rScene').style.display=isFile?'none':'';$('rOffline').style.display=isFile?'':'none';$('rAsrLoc').style.display=isFile?'':'';$('iDenoise').parentElement.style.display=isFile?'none':'';$('iRec').parentElement.style.display=isFile?'none':'';$('iMic').parentElement.style.display=isFile?'none':'';$('asrHint').textContent=isFile?'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。':'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。場景的緩衝長度越長句子越完整，越短反應越即時。';if(isFile)loadFiles();_updateModelRec(cselVal($('iMode')));_ttsVis()}
 function onDiarizeChg(){$('rNumSpk').style.display=$('iDiarize').checked?'':'none'}
 function onSummarizeChg(){const on=$('iSummarize').checked;$('rSumModel').style.display=on?'':'none';$('iSumRounds').disabled=!on;$('rSumRoundsHint').style.display=on&&parseInt($('iSumRounds').value)>1?'':'none'}
 $('iSumRounds').addEventListener('change',onSummarizeChg);
@@ -783,6 +900,7 @@ async function fetchLlmModels(h){try{const r=await fetch('/api/test-llm',{method
 async function testLlm(){const h=$('iLlmHost').value.trim();$('testResult').innerHTML='<span style="color:var(--text-dim)">測試中...</span>';$('testBtn').disabled=true;_llmQueried=false;try{const r=await fetch('/api/test-llm',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify({host:h})});const d=await r.json();if(d.ok){$('testResult').innerHTML='<span class="test-ok">連線成功（'+d.server_type+'，'+d.models.length+' 個模型）</span>';if(d.models.length){const p=cselVal($('iLlmModel'));cselSetItems($('iLlmModel'),_llmItems(d.models,p));cselSetValue($('iLlmModel'),_pickLlm(d.models,p));_llmQueried=true;_updateSumModels(d.models)}}else{$('testResult').innerHTML='<span class="test-err">'+esc(d.error)+'</span>'}}catch(e){$('testResult').innerHTML='<span class="test-err">'+esc(e.message)+'</span>'}$('testBtn').disabled=false}
 /* Start/Stop */
 async function go(){
+  if(_isTts())return ttsGo();
   const mode=cselVal($('iMode')),isFile=cselVal($('iSource'))==='file';
   const asrLoc=cselVal($('iAsrLoc'))==='local'?'本機':'GPU 伺服器';
   const eng=cselVal($('iEngine')),needLlm=eng==='llm'&&!['en','zh','ja','ko','record'].includes(mode);
@@ -807,7 +925,7 @@ async function stop(){
   _stopConfirm=false;flash('停止',async()=>{const b=$('stopBtn');b.disabled=true;b.textContent='停止中...';await fetch('/api/stop',{method:'POST',headers:_authHeaders()})})
 }
 let _paused=false;
-function togglePause(){const next=!_paused;flash(next?'暫停':'繼續',()=>{_paused=next;if(curCfg.mode==='record'){if(next)_pauseAt=Date.now();else if(_pauseAt){_pausedMs+=Date.now()-_pauseAt;_pauseAt=0}_recRefresh()}$('pauseBtn').innerHTML=_paused?'繼續 <kbd>P</kbd>':'暫停 <kbd>P</kbd>';$('pauseBtn').style.background=_paused?'var(--green)':'var(--orange)';if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:_paused?'pause':'resume'}))})}
+function togglePause(){const next=!_paused;flash(next?'暫停':'繼續',()=>{_paused=next;if(curCfg.mode==='record'){if(next)_pauseAt=Date.now();else if(_pauseAt){_pausedMs+=Date.now()-_pauseAt;_pauseAt=0}_recRefresh()}_ttsPauseAudio(_paused);$('pauseBtn').innerHTML=_paused?'繼續 <kbd>P</kbd>':'暫停 <kbd>P</kbd>';$('pauseBtn').style.background=_paused?'var(--green)':'var(--orange)';if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:_paused?'pause':'resume'}))})}
 function _subModeLimit(){if(!$('pLive').classList.contains('sub-mode'))return;const ms=[...msgsEl.querySelectorAll('.m')];ms.forEach((m,i)=>{m.style.display=i>=ms.length-2?'':'none'})}
 function toggleSubMode(){const entering=!$('pLive').classList.contains('sub-mode');flash(entering?'字幕模式':'對話模式',()=>{const p=$('pLive');p.classList.toggle('sub-mode');$('subBtn').classList.toggle('active');$('subBtn').innerHTML=p.classList.contains('sub-mode')?'對話模式 <kbd>T</kbd>':'字幕模式 <kbd>T</kbd>';if(p.classList.contains('sub-mode')){_subModeLimit()}else{msgsEl.querySelectorAll('.m').forEach(m=>{m.style.display=''});requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight})}})}
 function showLive(){
@@ -833,8 +951,8 @@ function _showLiveIn(live){
   msgsEl.innerHTML='';cnt=0;_discShown=false;_discEl=null;_discDetail='';_outputFiles=[];_outputDirs=[];_recFiles={};$('sCount').textContent='0 句';
   // 新場次一定不是暫停（上一場停在暫停中時，以前畫面會留著「繼續」而程式其實在錄，v2.26.3）
   _paused=false;$('pauseBtn').innerHTML='暫停 <kbd>P</kbd>';$('pauseBtn').style.background='var(--orange)';
-  $('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('hSource').textContent=curCfg.isFile?'離線處理':'即時模式';$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
-  $('sModel').textContent=(curCfg.model?(curCfg.asrLoc+' '+curCfg.model):'');
+  const _ttsM=_isTtsMode(curCfg.mode);$('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('hSource').textContent=curCfg.isFile?'離線處理':'即時模式';$('hSource').style.display=_ttsM?'none':'';$('volBar').style.display=_ttsM?'none':'';$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
+  $('sModel').textContent=_ttsM?((curCfg.model||'VoxCPM2')+(curCfg.asrLoc?' · '+curCfg.asrLoc:'')):(curCfg.model?(curCfg.asrLoc+' '+curCfg.model):'');
   // 純錄音沒有轉錄：不顯示句數、模型、場景、降噪（v2.26.3）；右上的音量波形照畫
   const _isRecMode=curCfg.mode==='record';
   $('sCount').style.display=_isRecMode?'none':'';$('bModel').style.display=_isRecMode?'none':'';
@@ -844,7 +962,7 @@ function _showLiveIn(live){
   // 場景膠囊（即時模式才顯示）
   const _sceneLabels={'meeting':'會議 5s','training':'訓練 8s','presentation':'簡報 12s','subtitle':'字幕 3s'};
   const _sceneVal=cselVal($('iScene'))||'training';
-  if(!curCfg.isFile&&!_isRecMode){$('sScene').textContent=_sceneLabels[_sceneVal]||_sceneVal;$('bScene').style.display='inline-flex'}else{$('bScene').style.display='none'}
+  if(!curCfg.isFile&&!_isRecMode&&!_ttsM){$('sScene').textContent=_sceneLabels[_sceneVal]||_sceneVal;$('bScene').style.display='inline-flex'}else{$('bScene').style.display='none'}
   // 錄音/降噪移到底部
   $('bRec').style.display=!curCfg.isFile&&!_isRecMode&&curCfg.record?'inline-flex':'none';$('bDenoise').style.display=!curCfg.isFile&&!_isRecMode&&curCfg.denoise?'inline-flex':'none';$('bMic').style.display=!curCfg.isFile&&!_isRecMode&&curCfg.mic?'inline-flex':'none';
   $('bDiarize').style.display=curCfg.diarize?'inline-flex':'none';
@@ -861,14 +979,15 @@ function _showLiveIn(live){
   $('bOvReopen').style.display=curCfg.subtitle_overlay?'inline-flex':'none';
   // 裝置資訊（可點按膠囊，靜音/恢復）— 檔案模式不顯示
   let _dvh='';
-  if(!curCfg.isFile){
+  if(_ttsM&&curCfg.ttsOut){_dvh='<span class="sbadge" style="background:rgba(13,110,253,.1);color:var(--accent)">'+esc(curCfg.ttsOut)+'</span>'+(curCfg.ttsVoice?' <span class="sbadge" style="background:rgba(25,135,84,.1);color:var(--green)">聲音：'+esc(curCfg.ttsVoice)+'</span>':'')+' <span class="sbadge" style="background:rgba(108,117,125,.12);color:var(--text-dim)">語速 '+esc(curCfg.ttsRate)+' 倍</span>'}
+  if(!curCfg.isFile&&!_ttsM){
   if(_autoLb&&curCfg.recSrc!=='mic')_dvh+='<span class="dev-badge-wrap"><span class="sbadge dev-badge" id="devLbBadge" onclick="showDevPopup(this,\'lb\')" title="點按切換裝置或靜音" style="background:rgba(13,110,253,.1);color:var(--accent);cursor:pointer"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 13.9V10.1C1 9 1.9 8.1 3 8.1H5.9L12.4 4C13.1 3.6 14 4.1 14 4.9V19.1C14 19.9 13.1 20.4 12.4 20L6.5 16H3C1.9 16 1 15 1 13.9Z"/><path d="M17.5 7.5C17.5 7.5 19 9 19 11.5S17.5 15.5 17.5 15.5" stroke-linecap="round"/></svg> <span class="dev-name">'+_autoLb+'</span></span></span> ';
   if(_autoMic&&curCfg.recSrc!=='system')_dvh+='<span class="dev-badge-wrap"><span class="sbadge dev-badge" id="devMicBadge" onclick="showDevPopup(this,\'mic\')" title="點按靜音/恢復" style="background:rgba(25,135,84,.1);color:var(--green);cursor:pointer"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10V11C5 14.9 8.1 18 12 18S19 14.9 19 11V10" stroke-linecap="round"/></svg> <span class="dev-name">'+_autoMic+'</span></span></span>';
   }
   $('bDevices').innerHTML=_dvh;
   // 沒勾轉錄麥克風時，麥克風膠囊 disable
   if(!curCfg.mic&&curCfg.mode!=='record'&&$('devMicBadge')){const mb=$('devMicBadge');mb.style.opacity='.35';mb.style.cursor='default';mb.onclick=null}
-  $('pauseBtn').style.display=curCfg.isFile?'none':'';
+  $('pauseBtn').style.display=curCfg.isFile||curCfg.mode==='tts_file'?'none':'';
   // 唯讀模式隱藏控制按鈕
   if(_authRole==='read'){$('stopBtn').style.display='none';$('pauseBtn').style.display='none';$('bDevices').innerHTML=''}
   startTimer();const b=$('stopBtn');b.disabled=false;b.innerHTML='停止 <kbd>S</kbd>'}
@@ -899,7 +1018,7 @@ async function openOutputFolder(){
 // 結束卡片只有一張（v2.26.4）：以前「停止」與「程式結束」各出一張，純錄音也寫「辨識已停止」。
 // 停止的事件先到就先出卡片，程式結束的事件（帶結束碼）到了再更新它；檔案清單晚到也會補上
 let _discEl=null,_discTitle='',_discDetail='';
-function _stopTitle(){return curCfg.mode==='record'?'錄音已停止':'辨識已停止'}
+function _stopTitle(){return curCfg.mode==='record'?'錄音已停止':(_isTtsMode(curCfg.mode)?'朗讀已停止':'辨識已停止')}
 function showDisconnected(msg,replace){
   if(_discEl&&!replace)return;
   stopTimer();dot.classList.remove('on');
@@ -929,7 +1048,7 @@ function _renderDisc(){
       const href='/'+f.path.replace(/\\/g,'/')+(_authToken?'?token='+encodeURIComponent(_authToken):'');
       const isSummary=f.name.includes('摘要');
       const isSub=ext==='srt'||ext==='vtt';
-      const tag=isSummary?'摘要':(isSub?'字幕':(_audioExt.includes(ext)?'錄音':'逐字'));
+      const tag=isSummary?'摘要':(isSub?'字幕':(f.name.startsWith('朗讀_')?'語音':(_audioExt.includes(ext)?'錄音':'逐字')));
       const tagCls=isSummary?'disc-tag-sum':'disc-tag-trans';
       // 格式標籤
       let label=ext.toUpperCase();
@@ -938,7 +1057,8 @@ function _renderDisc(){
       h+='<a href="'+esc(href)+'" target="_blank" class="disc-file">'
         +'<span class="disc-tag '+tagCls+'">'+tag+'</span>'
         +'<span class="disc-label">'+esc(label)+'</span>'
-        +'</a>';
+        +'</a>'
+        ;
     });
     h+='</div>';
   }else if(curCfg.record||curCfg.mode==='record'){
@@ -946,9 +1066,10 @@ function _renderDisc(){
     const rf=Object.keys(_recFiles);
     h+='<div style="margin-top:6px;font-size:12px;color:var(--text-dim)">'+(rf.length?'錄音檔：'+rf.map(esc).join('、'):'錄音檔已儲存於 recordings/ 目錄')+'</div>';
   }
-  if(_outputDirs.length){
-    h+='<div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">';
-    h+='<button onclick="openOutputFolder()" style="padding:6px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);cursor:pointer;font-size:12px">開啟資料夾</button>';
+  const _rpBtn=_isTtsMode(curCfg.mode)&&_ttsLastBody&&_authRole!=='read'?'<button class="btn-ic" onclick="ttsReplay(0)" style="padding:6px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);cursor:pointer;font-size:12px">'+_TTS_IC.replay+(curCfg.mode==='tts_file'?'重新產生':'重新朗讀')+'</button>':'';
+  if(_outputDirs.length||_rpBtn){
+    h+='<div style="margin-top:10px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">'+_rpBtn;
+    if(_outputDirs.length)h+='<button onclick="openOutputFolder()" style="padding:6px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg2);color:var(--text);cursor:pointer;font-size:12px">開啟資料夾</button>';
     h+='<button onclick="tryBackToSetup()" style="padding:6px 16px;border:none;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-size:12px">回到設定</button>';
     h+='</div>';
   }else{
@@ -962,10 +1083,16 @@ function addMsg(ev){_msgQueue.push(ev);if(!_msgTimer)_msgTimer=setTimeout(_flush
 function _renderMsg(ev){dot.classList.add('on');if(cnt===0)$('bInfo').textContent='';cnt++;$('sCount').textContent=cnt+' 句';if(ev.rms!=null)pushVol(ev.rms);const isO=(ev.source==='loopback'||ev.source==='main');const d=document.createElement('div');d.className='m '+(isO?'o':'s');
   let asrBadge=ev.asr_time!=null?'<span class="b '+bc(ev.asr_time)+'">辨 '+ev.asr_time+'s</span> ':'';
   let trBadge=ev.translate_time!=null?'<span class="b '+bc(ev.translate_time)+'">譯 '+ev.translate_time+'s</span> ':'';
+  // 朗讀：合＝這一句合成花的時間（比句子本身短就是綠色）；等＝播放等合成的時間（第一句是按下開始後多久出聲，0 不顯示）
+  if(ev.tts_synth!=null){const r=ev.tts_secs>0?ev.tts_synth/ev.tts_secs:1;asrBadge='<span class="b '+(r<1?'bf':r<1.5?'bm':'bs')+'" title="這一句合成花的時間（這一句長 '+Number(ev.tts_secs).toFixed(1)+' 秒）">合 '+Number(ev.tts_synth).toFixed(1)+'s</span> ';
+    if(ev.tts_wait!=null&&ev.tts_wait>=0.1)asrBadge+='<span class="b '+(ev.tts_wait<0.5?'bf':ev.tts_wait<2?'bm':'bs')+'" title="播放等合成的時間：第一句是按下開始後多久出聲，之後是上一句念完還要等多久">等 '+Number(ev.tts_wait).toFixed(1)+'s</span> '}
+  const _rp=ev.tts_seq!=null&&curCfg.mode==='tts'&&_ttsLastBody&&_authRole!=='read';
   const spkHtml=ev.speaker?'<div><span class="m-spk" style="background:'+_spkColors[(ev.speaker-1)%8]+'">Speaker '+ev.speaker+'</span></div>':'';
   let h=spkHtml+'<div class="m-t">'+(ev.timestamp||'')+'</div>';
-  h+='<div class="m-s">'+asrBadge+'<span class="m-lang m-lang-src">'+esc(ev.src_lang||'')+'</span><span class="m-text">'+esc(ev.src_text)+'</span></div>';
+  h+='<div class="m-s">'+asrBadge+'<span class="m-lang m-lang-src">'+esc(ev.src_lang||'')+'</span><span class="m-text">'+esc(ev.src_text)+'</span>'
+    +(_rp?'<button type="button" class="m-replay btn-ic" title="從這一段開始重念">'+_TTS_IC.replay+'從這段念</button>':'')+'</div>';
   if(ev.dst_text)h+='<div class="m-d">'+trBadge+'<span class="m-lang m-lang-dst">'+esc(ev.dst_lang||'')+'</span><span class="m-text">'+esc(ev.dst_text)+'</span></div>';d.innerHTML=h;
+  if(_rp)d.querySelector('.m-replay').onclick=()=>ttsReplay(ev.tts_seq);
   msgsEl.appendChild(d);
   // 訊息上限 500 筆（避免 DOM 過多影響效能）
   const _mList=msgsEl.querySelectorAll('.m');
@@ -978,7 +1105,7 @@ function _renderMsg(ev){dot.classList.add('on');if(cnt===0)$('bInfo').textConten
   if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight})}
 /* WS */
 function conn(){const p=location.protocol==='https:'?'wss:':'ws:';const _wsUrl=p+'//'+location.host+'/ws'+(_authToken?'?token='+encodeURIComponent(_authToken):'');ws=new WebSocket(_wsUrl);ws.onopen=()=>{if(rTimer){clearInterval(rTimer);rTimer=null}};
-  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;dot.classList.remove('on');_discDetail=ev.detail||'';showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
+  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){if(ev.pid)_curPid=ev.pid;curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(_ttsReplayKeep!==null){_ttsReplayKeep=null}else if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){_ttsAudioReset();if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;if(ev.pid&&_curPid&&ev.pid!==_curPid)return;_ttsAudioReset();dot.classList.remove('on');_discDetail=ev.detail||'';showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='tts_info'){_ttsLiveInfo(ev)}else if(ev.type==='tts_audio'){_ttsOnAudio(ev)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
   ws.onclose=()=>{dot.classList.remove('on');if($('pLive').classList.contains('on')&&!_discShown){_discShown=true;showDisconnected('與伺服器的連線已中斷')}if(!rTimer)rTimer=setInterval(()=>{if(!ws||ws.readyState===WebSocket.CLOSED)conn()},3000)};ws.onerror=()=>ws.close()}
 // Tooltips
 const _tips={
@@ -1045,7 +1172,7 @@ const _tips={
   iFwdNctalkPass:'Nextcloud 應用程式密碼（設定 → 安全性 → 應用程式密碼，非登入密碼）',
   iFwdCustomUrl:'自訂 API 端點，字幕以 POST body（純文字）發送',
   iFwdCustomHeaders:'自訂 HTTP Headers，JSON 格式（如 Authorization）',
-  goBtn:'啟動即時辨識或離線處理',
+  goBtn:'啟動即時辨識、離線處理或文字朗讀',
   stopBtn:'停止目前的辨識工作（按兩次確認，快捷鍵 S）',
   pauseBtn:'暫停或繼續辨識（快捷鍵 P）',
   subBtn:'切換對話模式與字幕模式（快捷鍵 T）',
@@ -1123,13 +1250,13 @@ function _loadKwConfig(kc){
   if(kc.cooldown)$('iKwCooldown').value=kc.cooldown;
   if(kc.browser_notify!==undefined)$('iKwBrowser').checked=!!kc.browser_notify;
   if(kc.sound!==undefined)$('iKwSound').checked=!!kc.sound;
-  if(kc.sound_style)$('iKwSoundStyle').value=kc.sound_style;
+  if(kc.sound_style)cselSetValue($('iKwSoundStyle'),kc.sound_style);
   _kwSoundStyle=kc.sound_style||'alert';
   if(kc.overlay_flash!==undefined)$('iKwOverlay').checked=!!kc.overlay_flash;
 }
 async function saveKw(){
   const words=$('iKwWords').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  const cfg={enabled:$('iKwEnable').checked,keywords:words,cooldown:parseInt($('iKwCooldown').value)||30,browser_notify:$('iKwBrowser').checked,sound:$('iKwSound').checked,sound_style:$('iKwSoundStyle').value,overlay_flash:$('iKwOverlay').checked};
+  const cfg={enabled:$('iKwEnable').checked,keywords:words,cooldown:parseInt($('iKwCooldown').value)||30,browser_notify:$('iKwBrowser').checked,sound:$('iKwSound').checked,sound_style:cselVal($('iKwSoundStyle'))||'alert',overlay_flash:$('iKwOverlay').checked};
   try{const r=await fetch('/api/save-keyword',{method:'POST',headers:{..._authHeaders(),'Content-Type':'application/json'},body:JSON.stringify(cfg)});const d=await r.json();$('kwResult').innerHTML=d.ok?'<span style="color:var(--green)">已儲存（下次啟動生效）</span>':'<span style="color:var(--red)">'+esc(d.error)+'</span>'}catch(e){$('kwResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
 }
 // 瀏覽器通知權限
@@ -1190,7 +1317,7 @@ function _handleKeywordAlert(ev){
     new Notification('🔔 關鍵字：'+ev.keyword,{body:ev.context,tag:'kw-'+ev.keyword,requireInteraction:false});
   }
   // 音效
-  if(ev.sound){_kwSoundStyle=$('iKwSoundStyle')?$('iKwSoundStyle').value:'alert';_playKwBeep()}
+  if(ev.sound){_kwSoundStyle=$('iKwSoundStyle')?(cselVal($('iKwSoundStyle'))||'alert'):'alert';_playKwBeep()}
   // 訊息列高亮標記
   const badge=document.createElement('div');badge.className='kw-alert';badge.innerHTML='<span class="kw-alert-tag">🔔 '+esc(ev.keyword)+'</span> <span class="kw-alert-ctx">'+esc(ev.context)+'</span>';
   msgsEl.appendChild(badge);if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight});
@@ -1389,12 +1516,216 @@ async function switchDevice(type,deviceId,deviceName){
 }
 // 熱鍵：S=停止 P=暫停/繼續 T=切換字幕/對話
 document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
+  if($('ttsVoiceDlg').classList.contains('on')||$('ttsDictDlg').classList.contains('on'))return;   // 管理對話框開著：S／P 不可以停掉辨識
   if(!$('pLive').classList.contains('on'))return;
   if(e.key==='s'||e.key==='S')stop();
   else if(e.key==='p'||e.key==='P')togglePause();
   else if(e.key==='t'||e.key==='T')toggleSubMode();
 });
+
+/* ── 文字轉語音（v2.27.0）：輸入來源「文字內容朗讀／文字轉語音檔」。合成與字幕在主程式（translate_meeting.py --tts-file），
+   這裡只有設定、聲音管理、發音字典，以及「播放裝置＝瀏覽器」時依序播放每段 ── */
+function _isTts(src){src=src===undefined?cselVal($('iSource')):src;return src==='tts'||src==='tts_file'}
+function _isTtsMode(m){return m==='tts'||m==='tts_file'}
+// /api/tts 的請求一律帶密碼；送 FormData 時拿掉 _authHeaders 一律加的 JSON 型別（瀏覽器自己帶 boundary，否則 422）
+function _ttsFetch(path,opts){opts=Object.assign({},opts||{});const h=Object.assign({},_authHeaders(),opts.headers||{});if(opts.body instanceof FormData)delete h['Content-Type'];opts.headers=h;return fetch(path,opts)}
+let _ttsInfo=null,_ttsTextFiles=[],_ttsSelFile='',_ttsLast={};
+const _ttsRates=[{value:'0.8',label:'慢（0.8 倍）',tag:''},{value:'1',label:'正常（1 倍）',tag:''},{value:'1.2',label:'稍快（1.2 倍）',tag:''},{value:'1.5',label:'快（1.5 倍）',tag:''}];
+const _ttsPauseItems=[{value:'short',label:'短（0.2 秒）',tag:''},{value:'normal',label:'一般（0.5 秒）',tag:''},{value:'long',label:'長（1 秒）',tag:''}];
+function _ttsVis(){
+  const src=cselVal($('iSource')),on=_isTts(src),card=$('cfgCard');card.classList.toggle('tts-on',on);card.classList.toggle('tts-file-on',src==='tts_file');
+  if(!on)return;
+  cselSetItems($('iTtsMode'),[src==='tts_file'?{value:'file',label:'轉成語音檔（不播放）',tag:''}:{value:'read',label:'朗讀',tag:''}]);cselSetValue($('iTtsMode'),src==='tts_file'?'file':'read');
+  $('ttsOutHint').textContent=src==='tts_file'?'不播放，依序合成後存成音訊檔（存在 recordings/，完成後在結果裡下載）。':'選擇從哪裡播放；也可以同時存成音訊檔（存在 recordings/）。從別台電腦用 WebUI、或這台沒有喇叭時選「瀏覽器」。';
+  $('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none';
+  if(!_ttsTextFiles.length)ttsLoadFiles();ttsWarm()}
+// 選了朗讀就先叫醒合成程式（後端 10 分鐘內只叫一次；唯讀身分不能開始朗讀，也就不叫）
+function ttsWarm(){if(_authRole==='read'||!_ttsInfo||!_ttsInfo.installed)return;
+  _ttsFetch('/api/tts/warm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({where:cselVal($('iTtsWhere'))||'auto',model:cselVal($('iTtsModel'))||''})}).catch(()=>{})}
+function ttsFill(info,keep){
+  _ttsInfo=info||null;const note=$('ttsStatusNote');
+  if(!info||!info.installed){note.textContent=(info&&info.reason)||'文字轉語音元件還沒安裝完成';note.style.color='var(--red)';return}
+  const L=_ttsLast||{};
+  // 合成模型：預設的標「預設」；BreezyVoice 標台灣口音、較慢；不能用的反灰並寫原因
+  const ms=info.models||[],prevM=keep?cselVal($('iTtsModel')):(L.tts_model||''),defM=(ms.find(m=>m.default)||ms[0]||{}).value||'';
+  cselSetItems($('iTtsModel'),ms.map(m=>({value:m.value,label:m.label,tag:!m.available?((((m.locations||[])[0]||{}).reason)||'不能用').slice(0,40):(m.tag||''),disabled:!m.available})));
+  cselSetValue($('iTtsModel'),ms.some(m=>m.value===prevM&&m.available)?prevM:defM);
+  _ttsFillWhere(info,keep?cselVal($('iTtsWhere')):(L.tts_where||''));
+  cselSetItems($('iTtsSteps'),[{value:'6',label:'較快（6 步，偶爾念錯數字）',tag:''},{value:'10',label:'音質較好（10 步，慢約一半）',tag:''}]);
+  cselSetValue($('iTtsSteps'),String(keep?(cselVal($('iTtsSteps'))||info.mac_steps):(L.tts_steps||info.mac_steps||6)));
+  _ttsFillVoices(info,keep?cselVal($('iTtsVoice')):(L.tts_voice||''));
+  cselSetItems($('iTtsRate'),_ttsRates);const rv=keep?cselVal($('iTtsRate')):String(L.tts_rate||'1');cselSetValue($('iTtsRate'),_ttsRates.some(r=>r.value===rv)?rv:'1');
+  cselSetItems($('iTtsPause'),_ttsPauseItems);const pv=keep?cselVal($('iTtsPause')):(L.tts_pause||'normal');cselSetValue($('iTtsPause'),['short','normal','long'].includes(pv)?pv:'normal');
+  _ttsFillDevices(info,keep?cselVal($('iTtsDevice')):(L.tts_device||''));
+  if(!keep){$('iTtsSave').checked=!!L.tts_save;if(['mp3','wav'].includes(L.tts_save))cselSetValue($('iTtsFmt'),L.tts_save)}
+  const locs=_ttsLocs(),ok=locs.some(l=>l.available);
+  note.style.color=ok?'var(--text-dim)':'var(--red)';
+  note.textContent=ok?'':('現在沒有可以合成的地方：'+((locs[0]||{}).reason||''));
+  $('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none'}
+// 選的合成模型能在哪裡合成（BreezyVoice 只在 GPU 伺服器；舊後端沒有 models[].locations 時用最上層的）
+function _ttsModel(){return((_ttsInfo&&_ttsInfo.models)||[]).find(m=>m.value===cselVal($('iTtsModel')))||null}
+function _ttsLocs(){const m=_ttsModel();return(m&&m.locations)||(_ttsInfo&&_ttsInfo.locations)||[]}
+function _ttsFillWhere(info,prevW){
+  const locs=_ttsLocs(),firstOk=(locs.find(l=>l.available)||{}).value||'remote';
+  cselSetItems($('iTtsWhere'),locs.map(l=>({value:l.value,label:l.label,tag:l.available?'':(l.reason||'不能用').slice(0,40),disabled:!l.available})));
+  cselSetValue($('iTtsWhere'),locs.some(l=>l.value===prevW&&l.available)?prevW:firstOk);
+  const m=_ttsModel(),mn=$('ttsModelNote');mn.textContent=(m&&m.note)||'';
+  mn.style.color=m&&!m.default?'var(--orange)':'var(--text-dim)';
+  $('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none'}
+function _ttsFillVoices(info,prev){
+  const vs=info.voices||[],G=info.genders||{},grp={};
+  if(!vs.length){cselSetItems($('iTtsVoice'),[{value:'',label:'還沒有聲音：按「管理聲音」匯入',tag:'',disabled:true}]);cselSetValue($('iTtsVoice'),'','還沒有聲音：按「管理聲音」匯入');return}
+  vs.forEach(v=>{const g=G[v.gender]||'未標性別';(grp[g]=grp[g]||[]).push({value:v.id,label:v.name+'（'+v.duration+' 秒）',tag:v.id===info.voice?'預設':''})});
+  const order=['女聲','男聲','其他','未標性別'].filter(g=>grp[g]);
+  cselSetItems($('iTtsVoice'),null,order.map(g=>({label:g,items:grp[g]})));
+  cselSetValue($('iTtsVoice'),vs.some(v=>v.id===prev)?prev:(info.voice||vs[0].id))}
+function _ttsFillDevices(info,prev){
+  const ds=info.output_devices||[],def=ds.find(d=>d.default);
+  let items=ds.map(d=>({value:String(d.id),label:'['+d.id+'] '+d.name,tag:''}));
+  if(ds.length)items.unshift({value:'default',label:'系統預設'+(def?'（'+def.name+'）':''),tag:''});
+  items.push({value:'browser',label:'瀏覽器（開著這個網頁的電腦）',tag:ds.length?'':'這台沒有喇叭'});
+  cselSetItems($('iTtsDevice'),items);
+  cselSetValue($('iTtsDevice'),items.some(i=>i.value===prev)?prev:(ds.length?'default':'browser'))}
+async function ttsRefresh(refresh){try{const r=await _ttsFetch('/api/tts/status'+(refresh?'?refresh=1':''));const d=await r.json();if(r.ok&&d.ok){ttsFill(d,true);return d}}catch(e){}return null}
+async function ttsRescan(){const m=$('ttsRescanMsg');m.textContent='偵測中...';const d=await ttsRefresh(true);m.textContent=d?'已重新偵測，找到 '+(d.output_devices||[]).length+' 個播放裝置':'偵測失敗'}
+// 要念的文字：貼上的文字，或 recordings/、logs/ 的文字檔（選了檔案就念檔案；開始打字就改用打的文字）
+function ttsTextChg(){const t=$('iTtsText').value;$('ttsCount').textContent=t.length+' 字';if(t.trim()&&_ttsSelFile)ttsClearFile()}
+function ttsClearFile(){_ttsSelFile='';$('ttsSelFile').classList.remove('on');ttsRenderFiles()}
+async function ttsLoadFiles(){try{const r=await fetch('/api/files?kind=text',{headers:_authHeaders()});const d=await r.json();_ttsTextFiles=d.files||[]}catch(e){_ttsTextFiles=[]}ttsRenderFiles()}
+function _ttsPickFile(path){_ttsSelFile=path;$('ttsSelName').textContent=path;$('ttsSelFile').classList.add('on');ttsRenderFiles()}
+function ttsRenderFiles(){
+  const fl=$('ttsFileList'),kw=($('iTtsFileFilter').value||'').toLowerCase();fl.innerHTML='';
+  const list=kw?_ttsTextFiles.filter(f=>f.name.toLowerCase().includes(kw)):_ttsTextFiles;
+  if(!list.length){fl.innerHTML='<div style="padding:12px;color:var(--text-dim);text-align:center">'+(kw?'無符合的檔案':'recordings/、logs/ 沒有文字檔')+'</div>';return}
+  list.forEach(f=>{const div=document.createElement('div');div.className='file-item'+(_ttsSelFile===f.path?' sel':'');
+    div.innerHTML='<input type="radio" name="ttsFileRadio"'+(_ttsSelFile===f.path?' checked':'')+'> <span class="file-name">'+esc(f.path)+'</span><span class="file-size">'+f.size+' KB</span>';
+    div.addEventListener('click',()=>_ttsPickFile(f.path));fl.appendChild(div)})}
+async function ttsUpload(files){for(const f of files){const fd=new FormData();fd.append('file',f);try{const r=await _ttsFetch('/api/upload-file',{method:'POST',body:fd});const d=await r.json();
+    if(d.ok){showToast(d.name+' 上傳成功','ok');await ttsLoadFiles();_ttsPickFile(d.rel)}else showToast('上傳失敗：'+d.error,'err')}catch(e){showToast('上傳失敗：'+e.message,'err')}}
+  $('ttsUploadInput').value=''}
+(()=>{const z=$('ttsUploadZone');if(!z)return;z.addEventListener('dragover',e=>{e.preventDefault();z.classList.add('drag')});z.addEventListener('dragleave',()=>z.classList.remove('drag'));
+  z.addEventListener('drop',e=>{e.preventDefault();z.classList.remove('drag');if(e.dataTransfer.files.length)ttsUpload(e.dataTransfer.files)})})();
+// 開始
+async function ttsGo(){
+  const src=cselVal($('iSource')),text=$('iTtsText').value;
+  if(!text.trim()&&!_ttsSelFile){showToast('請貼上要念的文字，或選一個文字檔','err');return}
+  if(!_ttsInfo||!_ttsInfo.installed){showToast((_ttsInfo&&_ttsInfo.reason)||'文字轉語音元件還沒安裝完成','err');return}
+  const where=cselVal($('iTtsWhere')),loc=_ttsLocs().find(l=>l.value===where),mObj=_ttsModel();
+  if(!loc||!loc.available){showToast('這個合成位置現在不能用：'+((loc&&loc.reason)||''),'err');return}
+  const voice=cselVal($('iTtsVoice'));if(!voice){showToast('還沒有聲音：按「管理聲音」匯入一段取得同意的台灣華語錄音','err');return}
+  try{const st=await(await fetch('/api/status',{headers:_authHeaders()})).json();if(st.running){showToast('已有處理正在執行中，請先停止再重新啟動','err');return}}catch(e){}
+  const fileOnly=src==='tts_file',dev=fileOnly?'none':(cselVal($('iTtsDevice'))||'default');
+  const b={source:src,tts_model:cselVal($('iTtsModel')),tts_voice:voice,tts_rate:parseFloat(cselVal($('iTtsRate'))||'1'),tts_pause:cselVal($('iTtsPause'))||'normal',tts_where:where,
+    tts_steps:parseInt(cselVal($('iTtsSteps'))||'6',10),tts_device:dev,tts_save:(fileOnly||$('iTtsSave').checked)?(cselVal($('iTtsFmt'))||'mp3'):'',
+    subtitle_overlay:$('iOvEnable')&&$('iOvEnable').checked};
+  if(_ttsSelFile)b.tts_file=_ttsSelFile;else b.tts_text=text;
+  const _disp=id=>(($(id).querySelector('.csel-display')||{}).textContent||'').trim();
+  const vObj=(_ttsInfo.voices||[]).find(v=>v.id===voice),fmt=(b.tts_save||'').toUpperCase();
+  const ttsOut=fileOnly?('存成 '+fmt+' 檔'):('播放：'+(dev==='browser'?'瀏覽器':_disp('iTtsDevice').replace(/^\[-?\d+\]\s*/,''))+(fmt?'＋存成 '+fmt:''));
+  curCfg={mode:src,modeLabel:_modeLabels[src],model:mObj?mObj.label.replace(/（.*$/,''):'VoxCPM2',asrLoc:loc.label,engine:'',isFile:false,tts:true,ttsVoice:vObj?vObj.name:_disp('iTtsVoice'),
+    ttsRate:String(b.tts_rate),ttsOut:ttsOut,record:false,denoise:false,mic:false,subtitle_overlay:b.subtitle_overlay};
+  _ttsLastBody=JSON.parse(JSON.stringify(b));_ttsLastCfg=Object.assign({},curCfg);_ttsReplayKeep=null;
+  $('goBtn').disabled=true;$('goBtn').textContent='啟動中...';
+  await _ttsLaunch(b);
+  $('goBtn').disabled=false;$('goBtn').textContent='開始'}
+async function _ttsLaunch(b){
+  _ttsAudioReset();_ttsPlay.owner=b.tts_device==='browser';
+  try{const r=await fetch('/api/start',{method:'POST',headers:_authHeaders(),body:JSON.stringify(b)});const d=await r.json();
+    if(d.status==='started'){_lastStartBody=null;_curPid=d.pid||null;if(_ttsReplayKeep!==null)_ttsContinueLive(_ttsReplayKeep);else showLive();$('hMode').textContent=curCfg.modeLabel}
+    else{_ttsReplayKeep=null;showToast('無法開始：'+(d.error||('HTTP '+r.status)),'err')}}catch(e){_ttsReplayKeep=null;showToast('啟動失敗: '+e.message,'err')}}
+// 重念：原本的字幕留著，加一條分隔線接著念（2026-10-09 使用者：按「從這段念」整個畫面清空再開始「怪怪的」）
+function _ttsContinueLive(seq){
+  if(_discEl){_discEl.remove();_discEl=null}
+  _discShown=false;_discDetail='';_outputFiles=[];_outputDirs=[];
+  const b=$('stopBtn');b.disabled=false;b.innerHTML='停止 <kbd>S</kbd>';b.style.background='';
+  _paused=false;$('pauseBtn').innerHTML='暫停 <kbd>P</kbd>';$('pauseBtn').style.background='var(--orange)';
+  const dv=document.createElement('div');dv.className='tts-divider';dv.textContent=seq>0?'— 從第 '+(seq+1)+' 段重念 —':'— 重新朗讀 —';msgsEl.appendChild(dv);
+  msgsEl.scrollTop=msgsEl.scrollHeight;dot.classList.add('on');startTimer()}
+// 重念：同樣的文字與設定，從第 seq 段（0 起算）念到最後；正在念就先停（等它存完檔）再開始
+let _ttsLastBody=null,_ttsLastCfg=null,_ttsReplaying=false,_ttsReplayKeep=null;
+async function ttsReplay(seq){
+  if(!_ttsLastBody||_ttsReplaying)return;_ttsReplaying=true;
+  const st=async()=>{try{return(await(await fetch('/api/status',{headers:_authHeaders()})).json()).running}catch(e){return false}};
+  try{
+    if(await st()){_ttsAudioReset();$('bInfo').textContent='停止目前的朗讀...';
+      await fetch('/api/stop',{method:'POST',headers:_authHeaders()});
+      for(let k=0;k<240&&await st();k++)await new Promise(r=>setTimeout(r,250))}
+    curCfg=Object.assign({},_ttsLastCfg);_ttsReplayKeep=seq||0;
+    await _ttsLaunch(Object.assign({},_ttsLastBody,{tts_start:(seq||0)+1}))
+  }finally{_ttsReplaying=false}}
+function _ttsLiveInfo(ev){$('sModel').textContent=(ev.model_label||'VoxCPM2').replace(/（.*$/,'')+' · '+ev.provider;$('bModel').style.display='inline-flex';
+  $('bInfo').textContent='聲音 '+ev.voice+'・語速 '+ev.rate+' 倍・'+(ev.output||'')+(ev.save?'・存成 '+ev.save.toUpperCase():'')+'・共 '+ev.segments+' 段'}
+// 播放裝置＝瀏覽器：主程式每合成好一段就送 tts_audio，這裡依序播放；開始播哪一段就回報，主程式那時才送出那段字幕（字幕跟聲音同步）
+const _ttsPlay={job:'',q:[],next:0,total:0,playing:false,owner:false,audio:null,timer:null};
+function _ttsAudioReset(){const p=_ttsPlay;if(p.audio){try{p.audio.pause()}catch(e){}}clearTimeout(p.timer);Object.assign(p,{job:'',q:[],next:0,total:0,playing:false,audio:null,timer:null});const b=$('ttsPlayBlocked');if(b)b.remove()}
+function _ttsSendPos(seq){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify({action:'tts_pos',job:_ttsPlay.job,seq:seq}))}
+function _ttsOnAudio(ev){const p=_ttsPlay;if(!p.owner)return;if(ev.job!==p.job){_ttsAudioReset();p.owner=true;p.job=ev.job}p.total=ev.total;p.q[ev.seq]=ev;_ttsPump()}
+async function _ttsPump(){
+  const p=_ttsPlay;if(p.playing||_paused)return;const s=p.next,ev=p.q[s];if(!ev)return;p.playing=true;
+  let url;try{const r=await _ttsFetch('/api/tts/live/'+p.job+'/'+s);if(!r.ok)throw new Error('HTTP '+r.status);url=URL.createObjectURL(await r.blob())}catch(e){p.playing=false;showToast('取不到第 '+(s+1)+' 段音訊：'+e.message,'err');return}
+  const a=new Audio(url);p.audio=a;let sent=false;
+  a.onplay=()=>{if(!sent){sent=true;_ttsSendPos(s)}};
+  a.onended=()=>{URL.revokeObjectURL(url);p.timer=setTimeout(()=>{p.playing=false;p.next=s+1;if(p.next>=p.total)_ttsSendPos(p.total);else _ttsPump()},s+1<p.total?Math.round((ev.gap||0)*1000):0)};
+  try{await a.play()}catch(e){p.playing=false;if(e.name==='NotAllowedError')_ttsBlocked();else showToast('播放失敗：'+e.message,'err')}}
+function _ttsBlocked(){if($('ttsPlayBlocked'))return;const b=document.createElement('button');b.id='ttsPlayBlocked';b.className='go-btn tts-play-btn';b.textContent='瀏覽器擋下自動播放：點這裡開始朗讀';b.onclick=()=>{b.remove();_ttsPump()};msgsEl.appendChild(b)}
+function _ttsPauseAudio(paused){const p=_ttsPlay;if(!p.owner)return;if(paused){if(p.audio)p.audio.pause();clearTimeout(p.timer)}else if(p.audio&&p.audio.paused&&!p.audio.ended&&p.playing){p.audio.play().catch(()=>{})}else{p.playing=false;_ttsPump()}}
+// 管理聲音（管理者）
+const _TTS_IC={replay:'<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/></svg>',play:'<svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg>',star:'<svg viewBox="0 0 24 24"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>',trash:'<svg viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>'};
+function ttsDlgClose(id){$(id).classList.remove('on');const a=$('ttsSampleAudio');if(a)a.pause()}
+async function ttsVoiceDlg(){$('ttsVoiceDlg').classList.add('on');await ttsRefresh(false);const G=(_ttsInfo||{}).genders;if(G){const cur=cselVal($('ttsVGender'))||'female';cselSetItems($('ttsVGender'),Object.keys(G).map(g=>({value:g,label:G[g],tag:''})));cselSetValue($('ttsVGender'),G[cur]?cur:Object.keys(G)[0])}_ttsRenderVoices()}
+function _ttsRenderVoices(){
+  const box=$('ttsVoiceList'),info=_ttsInfo||{},vs=info.voices||[],G=info.genders||{};
+  if(!vs.length){box.innerHTML='<div class="tts-note" style="margin-bottom:8px">還沒有聲音：在下面匯入一段台灣華語錄音</div>';return}
+  box.innerHTML='';vs.forEach(v=>{const d=document.createElement('div');d.className='tts-voice';
+    const gTip='只用來在聲音選單分組；聲音本身（男聲或女聲）由匯入的錄音決定，改這裡不會改變聲音';
+    d.innerHTML='<b>'+esc(v.name)+'</b>'+(v.builtin?'<span class="tts-builtin" title="'+esc(v.source||'')+'">內建</span>':'')+(v.id===info.voice?'<span class="tts-def">預設</span>':'')
+      +(v.builtin?'':'<span class="tts-note" title="'+gTip+'">分類</span><div class="csel csel-sm" data-a="gender" title="'+gTip+'"></div>')
+      +'<span class="tts-note">'+v.duration+' 秒・'+(v.builtin?'AI 產生，不是真人錄音':'來源：'+esc(v.source||''))+'</span><span style="flex:1"></span>'
+      +'<button class="test-btn btn-ic" data-a="play">'+_TTS_IC.play+'試聽</button>'+(v.id===info.voice?'':'<button class="test-btn btn-ic" data-a="def">'+_TTS_IC.star+'設為預設</button>')+(v.builtin?'':'<button class="test-btn btn-ic" data-a="del">'+_TTS_IC.trash+'<span>刪除</span></button>');
+    const gs=d.querySelector('[data-a=gender]');if(gs){cselInit(gs);cselSetItems(gs,Object.keys(G).map(g=>({value:g,label:G[g],tag:''})));if(G[v.gender])cselSetValue(gs,v.gender);else cselSetValue(gs,'','未標性別');gs.addEventListener('change',()=>ttsSetGender(v.id,cselVal(gs)))}
+    d.querySelector('[data-a=play]').onclick=()=>ttsSample(v.id);
+    const dd=d.querySelector('[data-a=def]');if(dd)dd.onclick=()=>ttsSetDefault(v.id);
+    const dl=d.querySelector('[data-a=del]');if(dl)dl.onclick=e=>ttsDelVoice(v.id,e.currentTarget);box.appendChild(d)})}
+async function ttsSample(id){let a=$('ttsSampleAudio');if(!a){a=document.createElement('audio');a.id='ttsSampleAudio';document.body.appendChild(a)}
+  try{const r=await _ttsFetch('/api/tts/voices/'+id+'/sample');if(!r.ok)throw new Error('HTTP '+r.status);if(a.src.startsWith('blob:'))URL.revokeObjectURL(a.src);a.src=URL.createObjectURL(await r.blob());await a.play()}catch(e){showToast('試聽失敗：'+e.message,'err')}}
+async function ttsSetGender(id,g){const r=await _ttsFetch('/api/tts/voices/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({gender:g})});const d=await r.json();if(!d.ok){showToast(d.error,'err');return}await ttsRefresh(false);_ttsRenderVoices()}
+async function ttsSetDefault(id){const r=await _ttsFetch('/api/tts/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({voice:id})});const d=await r.json();if(!d.ok){showToast(d.error,'err');return}await ttsRefresh(false);cselSetValue($('iTtsVoice'),id);_ttsRenderVoices()}
+async function ttsDelVoice(id,btn){const t=btn.querySelector('span')||btn;if(btn.dataset.sure!=='1'){btn.dataset.sure='1';t.textContent='確定刪除？';setTimeout(()=>{if(btn.isConnected){btn.dataset.sure='';t.textContent='刪除'}},3000);return}
+  const r=await _ttsFetch('/api/tts/voices/'+id,{method:'DELETE'});const d=await r.json();if(!d.ok){showToast(d.error,'err');return}
+  showToast(d.gpu==='deleted'?'已刪除（GPU 伺服器上的那份也刪了）':d.gpu==='pending'?'已刪除；GPU 伺服器現在連不上，下次連上時會自動刪掉伺服器上的那份':'已刪除',d.gpu==='pending'?'warn':'ok');
+  await ttsRefresh(false);_ttsRenderVoices()}
+function ttsVFileChg(){const f=$('ttsVFile').files[0];$('ttsVFileName').textContent=f?f.name+'（'+(f.size/1048576).toFixed(1)+' MB）':'拖曳錄音檔到此處，或點按選擇（WAV、MP3、M4A、FLAC）'}
+(()=>{const z=$('ttsVZone');if(!z)return;['dragenter','dragover'].forEach(e=>z.addEventListener(e,ev=>{ev.preventDefault();z.classList.add('drag')}));['dragleave','drop'].forEach(e=>z.addEventListener(e,ev=>{ev.preventDefault();z.classList.remove('drag')}));
+  z.addEventListener('drop',ev=>{if(ev.dataTransfer.files.length){$('ttsVFile').files=ev.dataTransfer.files;ttsVFileChg()}})})();
+async function ttsImport(){
+  const f=$('ttsVFile').files[0],res=$('ttsImpResult');const bad=m=>{res.textContent=m;res.style.color='var(--red)'};
+  if(!f)return bad('請選擇錄音檔');if(!$('ttsVName').value.trim())return bad('請填聲音名稱');if(!$('ttsVText').value.trim())return bad('請填逐字稿');
+  if(!$('ttsVSrc').value.trim())return bad('請填錄音來源');if(!$('ttsVConsent').checked)return bad('請先確認已取得錄音者同意');
+  const fd=new FormData();fd.append('file',f);fd.append('name',$('ttsVName').value);fd.append('transcript',$('ttsVText').value);fd.append('source',$('ttsVSrc').value);fd.append('gender',cselVal($('ttsVGender'))||'female');fd.append('consent','1');
+  res.textContent='匯入中...';res.style.color='var(--text-dim)';
+  try{const r=await _ttsFetch('/api/tts/voices',{method:'POST',body:fd});const d=await r.json();if(!d.ok)return bad(d.error||('HTTP '+r.status));
+    res.textContent='已匯入「'+d.voice.name+'」';res.style.color='var(--green)';
+    $('ttsVFile').value='';ttsVFileChg();$('ttsVName').value='';$('ttsVText').value='';$('ttsVSrc').value='';$('ttsVConsent').checked=false;
+    await ttsRefresh(false);cselSetValue($('iTtsVoice'),d.voice.id);_ttsRenderVoices()}catch(e){bad('匯入失敗：'+e.message)}}
+// 發音字典（管理者）
+async function ttsDictDlg(){$('ttsDictDlg').classList.add('on');$('ttsDictResult').textContent='';
+  try{const r=await _ttsFetch('/api/tts/status');const d=await r.json();$('ttsDict').value=Object.entries(d.custom||{}).map(([k,v])=>k+' = '+v).join('\n')}catch(e){}}
+function _ttsParseDict(){const out={},bad=[];$('ttsDict').value.split('\n').forEach(l=>{l=l.trim();if(!l||l.startsWith('#'))return;const i=l.indexOf('=');if(i<1){bad.push(l);return}out[l.slice(0,i).trim()]=l.slice(i+1).trim()});return[out,bad]}
+async function ttsSaveDict(){
+  const[custom,bad]=_ttsParseDict(),res=$('ttsDictResult');
+  if(bad.length){res.textContent='看不懂這幾行（要寫成「詞 = 注音」）：'+bad.join('、');res.style.color='var(--red)';return}
+  const r=await _ttsFetch('/api/tts/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({custom:custom})});const d=await r.json();
+  if(!d.ok){res.textContent=d.error;res.style.color='var(--red)';return}res.textContent='已儲存';res.style.color='var(--green)'}
+async function ttsPreview(){
+  const t=$('ttsPrevText').value.trim(),o=$('ttsPrevOut');if(!t){o.textContent='請先輸入一句話';return}
+  const[custom]=_ttsParseDict();o.textContent='轉換中（第一次可能要等合成服務啟動約 30 秒）...';
+  try{const r=await _ttsFetch('/api/tts/convert',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t,custom:custom,where:cselVal($('iTtsWhere'))||'auto',model:cselVal($('iTtsModel'))||''})});const d=await r.json();
+    o.textContent=d.ok?('送進模型的文字：'+d.spoken+'（{ } 裡是改用台灣念法的字；其他字轉成簡體再送，模型幾乎只學過簡體，比較不會念錯）'):(d.error||('HTTP '+r.status))}catch(e){o.textContent='預覽失敗：'+e.message}}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){['ttsVoiceDlg','ttsDictDlg'].forEach(id=>{if($(id).classList.contains('on'))ttsDlgClose(id)})}});
+// 網頁比執行中的 WebUI 新（只換了檔案、WebUI 沒重開）：說清楚，不要亂報錯（2026-10-09 Mac「無法取得文字轉語音狀態」）
+function _verWarn(){if($('verWarn'))return;const d=document.createElement('div');d.id='verWarn';d.className='ver-warn';
+  d.textContent='程式已經更新，但執行中的 WebUI 還是舊版：請停止 WebUI（在執行它的終端機按 Ctrl+C）後再啟動一次，新功能才能用';document.body.insertBefore(d,document.body.firstChild)}
 </script>
 </body>
 </html>

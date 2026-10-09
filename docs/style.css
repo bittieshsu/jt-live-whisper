@@ -114,6 +114,9 @@ section.alt{background:#fff;border-top:1px solid var(--line);border-bottom:1px s
 .card:hover{box-shadow:0 8px 24px rgba(15,23,42,.09);transform:translateY(-2px)}
 .card h3{font-size:18px;margin:0 0 8px;display:flex;align-items:center;gap:9px}
 .card p{margin:0;font-size:14.5px;color:var(--body)}
+.ck{margin:0;padding:0 0 0 1.15em;font-size:14.5px;color:var(--body);line-height:1.7}
+.ck li{margin:5px 0}
+.ck li::marker{color:var(--blue)}
 .ic{width:34px;height:34px;border-radius:9px;display:inline-grid;place-items:center;flex:0 0 auto;color:var(--blue);background:rgba(52,152,219,.12)}
 .badge{width:34px;height:34px;border-radius:9px;display:inline-grid;place-items:center;font-weight:800;color:#fff;background:linear-gradient(135deg,var(--blue),var(--teal));flex:0 0 auto}
 .grid .card:nth-child(6n+2) .ic{color:#1abc9c;background:rgba(26,188,156,.14)}
@@ -283,6 +286,17 @@ footer a{color:#7fd3ff}
 .fl-cite{stroke:var(--amber);stroke-dasharray:6 5}
 .fl-head-cite{fill:var(--amber)}
 .fl-cite-t{font-size:13px;font-weight:700;fill:#b9770e}
+/* 資料與合規頁的資料流向圖（tools/site_compliance.py 產生） */
+.cp-lan{fill:#eef5fc;stroke:var(--blue);stroke-width:1.5}
+.cp-node{fill:#fff;stroke:var(--blue);stroke-width:1.8}
+.cp-onode{fill:#fff;stroke:#cbd5e1;stroke-width:1.5}
+.cp-no{font-size:12.5px;font-weight:700;fill:#c0392b}
+.cp-maybe{font-size:12.5px;font-weight:700;fill:#b9770e}
+.cp-in{font-size:12.5px;font-weight:700;fill:#1e8449}
+.cp-no-line{stroke:#c0392b;stroke-dasharray:6 5}
+.cp-maybe-line{stroke:var(--amber);stroke-dasharray:6 5}
+.cp-in-line{stroke:#27ae60}
+.cp-h{fill:#94a3b8}.cp-h-no{fill:#c0392b}.cp-h-maybe{fill:var(--amber)}.cp-h-in{fill:#27ae60}
 /* 首頁招牌標題輪播：四句疊在同一格，高度取最高的一句，切換時版面不跳動 */
 .rot-set{display:grid}
 .rot-item{grid-area:1/1;opacity:0;transform:translateY(10px);transition:opacity .6s ease,transform .6s ease;pointer-events:none}

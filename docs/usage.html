@@ -27,6 +27,7 @@
       <a class="nav-page" href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a>
       <a class="nav-page" href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a>
       <a class="nav-page" href="usage.html" aria-current="page"><span class="zh">安裝與使用</span><span class="en">Docs</span></a>
+      <a class="nav-page" href="compliance.html"><span class="zh">資料與合規</span><span class="en">Compliance</span></a>
       <span class="nav-sep" aria-hidden="true"></span>
       <a class="btn btn-ghost btn-sm" href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a>
       <a class="btn btn-ghost btn-sm" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
@@ -77,6 +78,7 @@
             <tr><td><span class="zh"><strong>最小</strong></span><span class="en"><strong>Minimal</strong></span></td><td>~3 GB</td><td><span class="zh">venv + 1 個 Whisper 模型 + 基本套件</span><span class="en">venv + 1 Whisper model + basics</span></td></tr>
             <tr><td><span class="zh"><strong>推薦</strong></span><span class="en"><strong>Recommended</strong></span></td><td>~8 GB</td><td><span class="zh">加上 HuggingFace 快取（離線處理用）</span><span class="en">+ HuggingFace cache (offline processing)</span></td></tr>
             <tr><td><span class="zh"><strong>完整</strong></span><span class="en"><strong>Full</strong></span></td><td>~14 GB</td><td><span class="zh">全部 Whisper 模型 + 快取 + Moonshine</span><span class="en">All Whisper models + cache + Moonshine</span></td></tr>
+            <tr><td><span class="zh">朗讀（選配）</span><span class="en">Text-to-speech (optional)</span></td><td>~4 GB</td><td><span class="zh">只有 Apple Silicon Mac（記憶體 16 GB 以上）：VoxCPM2 3.2 GB + 台灣念法資源 0.6 GB</span><span class="en">Apple Silicon Macs only (16 GB+): VoxCPM2 3.2 GB + Taiwanese pronunciation data 0.6 GB</span></td></tr>
           </tbody>
         </table></div>
       </div>
@@ -87,6 +89,8 @@
           <tbody>
             <tr><td><span class="zh"><strong>最小</strong></span><span class="en"><strong>Minimal</strong></span></td><td>~5 GB</td><td><span class="zh">PyTorch + 1 個模型</span><span class="en">PyTorch + 1 model</span></td></tr>
             <tr><td><span class="zh"><strong>完整</strong></span><span class="en"><strong>Full</strong></span></td><td>~12 GB</td><td><span class="zh">PyTorch + 全部 5 個模型 + 講者辨識套件</span><span class="en">PyTorch + all 5 models + diarization</span></td></tr>
+            <tr><td><span class="zh">朗讀（選配）</span><span class="en">Text-to-speech (optional)</span></td><td>~11 GB</td><td><span class="zh">獨立 Python 環境 5.2 GB + VoxCPM2 4.7 GB + g2pW 0.6 GB；安裝時要 20 GB 可用空間</span><span class="en">Separate Python env 5.2 GB + VoxCPM2 4.7 GB + g2pW 0.6 GB; 20 GB free needed during install</span></td></tr>
+            <tr><td><span class="zh">BreezyVoice（選配）</span><span class="en">BreezyVoice (optional)</span></td><td>~8 GB</td><td><span class="zh">獨立 Python 環境 5.5 GB + 模型 2.2 GB；安裝時要 16 GB 可用空間</span><span class="en">Separate Python env 5.5 GB + model 2.2 GB; 16 GB free needed during install</span></td></tr>
           </tbody>
         </table></div>
       </div>
@@ -207,6 +211,22 @@ cd C:\jt-live-whisper
 <pre>./start.sh --summarize logs/英翻中_逐字稿_20260101_120000.txt</pre>
 
     <p class="note" style="margin-top:16px"><span class="zh"><strong>即時模式快捷鍵：</strong><code>Ctrl+C</code> 停止轉錄 · <code>Ctrl+P</code> 暫停 / 繼續。</span><span class="en"><strong>Live-mode shortcuts:</strong> <code>Ctrl+C</code> stop · <code>Ctrl+P</code> pause / resume.</span></p>
+    <div class="cmd-label" style="margin-top:28px"><span class="zh">文字轉語音：台灣華語朗讀（v2.27.0）</span><span class="en">Taiwanese Mandarin text-to-speech (v2.27.0)</span></div>
+<pre><span class="c"># GPU 伺服器（NVIDIA）：執行 ./install.sh 設定 GPU 伺服器時回答「是」，或在伺服器上</span>
+cd ~/jt-whisper-server &amp;&amp; venv/bin/python3 server.py --tts-setup
+<span class="c"># Apple Silicon Mac 本機：./install.sh 問「要在這台 Mac 安裝文字轉語音嗎？」時回答「是」</span>
+<span class="c"># 選用 BreezyVoice（台灣口音，但合成速度慢，不適合即時；只在 GPU 伺服器）：安裝或升級時問到「是否加裝 BreezyVoice？」回答 y，或在伺服器上</span>
+cd ~/jt-whisper-server &amp;&amp; venv/bin/python3 server.py --breezy-setup
+
+<span class="c"># 命令列（WebUI「輸入來源」選「文字內容朗讀」也可以）</span>
+./start.sh --tts-list                                    <span class="c"># 列出聲音與播放裝置</span>
+./start.sh --tts-text '今天下午三點半開會。'               <span class="c"># 用系統預設的喇叭念</span>
+./start.sh --tts-file 講稿.txt --tts-rate 1.2 --tts-save mp3
+./start.sh --tts-file 講稿.txt --tts-device none --tts-save wav   <span class="c"># 不播放，只存檔</span>
+./start.sh --tts-file 講稿.txt --tts-model breezyvoice --tts-device none --tts-save mp3   <span class="c"># 用 BreezyVoice 轉成語音檔</span></pre>
+    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh"><b>內建 8 個聲音</b>（女聲、男聲各 4 個，AI 依文字描述產生、不是真人錄音），裝好就能念。也可以匯入自己的：管理者在 WebUI「輸入來源」選「文字內容朗讀」→「管理聲音」，匯入一段 10～20 秒、一個人、安靜的台灣華語錄音與一字不差的逐字稿，並勾選「已取得錄音者的書面同意」。念法以台灣日常說法為準、教育部《重編國語辭典修訂本》為基礎，「發音字典」可以加自訂發音、預覽送進模型的文字。升級後要重新啟動 WebUI。</span><span class="en"><b>8 built-in voices</b> (4 female, 4 male, AI-generated, not real people) work out of the box. To use your own, an admin chooses "文字內容朗讀" (read text aloud) as the WebUI input source, opens "管理聲音" (manage voices), imports a 10-20 second, single-speaker, quiet Taiwanese Mandarin recording with an exact transcript, and confirms the speaker's written consent. Readings follow everyday Taiwanese usage, built on Taiwan's Ministry of Education dictionary; "發音字典" (pronunciation dictionary) adds custom pronunciations with a preview. Restart the WebUI after upgrading.</span></p>
+    <p style="font-size:13.5px;color:var(--muted);margin:6px 0 0"><span class="zh">合成模型預設 VoxCPM2（為了速度與效能，GPU 伺服器與 Apple Silicon Mac 都能跑）；BreezyVoice 台灣口音道地，但合成時間約音訊長度的 1.2～2.5 倍，不適合即時，設定頁的選單會標「台灣口音・較慢」。</span><span class="en">VoxCPM2 is the default model for speed and efficiency (runs on the GPU server and Apple Silicon Macs); BreezyVoice has a native Taiwanese accent but takes about 1.2-2.5x the audio length to synthesize, so it is not suited to live reading and is labeled as slower in the settings.</span></p>
+
 
     <div class="cmd-label" style="margin-top:28px"><span class="zh">伺服器模式（無桌面主機，Linux）</span><span class="en">Server mode (headless Linux)</span></div>
 <pre><span class="c"># 以下都在安裝資料夾裡執行（預設 ~/Apps/jt-live-whisper）</span>
@@ -475,6 +495,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
         <tr><td>Intel</td><td>8 GB+</td><td><span class="zh">離線處理為主；即時建議搭 GPU 伺服器</span><span class="en">Offline-focused; pair a GPU server for live</span></td></tr>
       </tbody>
     </table></div>
+    <p class="note" style="margin-top:14px"><span class="zh">本機朗讀（文字轉語音，v2.27.0）只在 Apple Silicon、記憶體 16 GB 以上提供：合成時另需約 7～10 GB 記憶體，磁碟約 4 GB（模型 3.2 GB、台灣念法資源 0.6 GB）；Intel Mac 不支援，改用 GPU 伺服器合成。</span><span class="en">Local text-to-speech (v2.27.0) is offered only on Apple Silicon Macs with 16 GB+: synthesis needs about 7-10 GB more memory and about 4 GB of disk (model 3.2 GB, Taiwanese pronunciation data 0.6 GB). Intel Macs use the GPU server instead.</span></p>
 
     <div class="cmd-label" style="margin-top:18px">Windows</div>
     <div class="tbl-wrap"><table>
@@ -488,6 +509,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
       </tbody>
     </table></div>
     <p class="note" style="margin-top:14px"><span class="zh"><strong>Windows + NVIDIA GPU 是最簡單的高效能方案</strong>：不需額外硬體或伺服器，安裝後直接用 large-v3-turbo，即時與離線都有 CUDA 加速。最低建議 6 GB VRAM。</span><span class="en"><strong>Windows + NVIDIA GPU is the simplest high-performance setup</strong>: no extra hardware, CUDA for both live and offline. 6 GB VRAM minimum.</span></p>
+    <p class="note" style="margin-top:10px"><span class="zh">朗讀（文字轉語音，v2.27.0）在 Windows／Linux 本機不提供（只有 CPU 太慢），由 GPU 伺服器合成，本機不另外佔空間。</span><span class="en">Text-to-speech (v2.27.0) is not offered locally on Windows or Linux (CPU-only is too slow); the GPU server synthesizes it, so no extra local disk is needed.</span></p>
 
     <div class="cmd-label" style="margin-top:18px">Linux</div>
     <div class="tbl-wrap"><table>
@@ -509,6 +531,7 @@ curl -s http://localhost:8978/health   <span class="c"># 1~3 分鐘後 "qwen": {
       </tbody>
     </table></div>
     <p class="note" style="margin-top:14px"><span class="zh">要啟用 Qwen3-ASR（實驗）時需再多約 7~9 GB 顯示記憶體常駐、約 14 GB 磁碟，建議 16 GB 以上的顯示卡（見上方「Qwen3-ASR」）。本機跑則見該節的執行位置表。</span><span class="en">Enabling Qwen3-ASR (experimental) needs ~7–9 GB more resident VRAM and ~14 GB disk; a 16 GB+ GPU is recommended (see "Qwen3-ASR" above). For local use see the table in that section.</span></p>
+    <p class="note" style="margin-top:10px"><span class="zh">要啟用文字轉語音（台灣華語朗讀）時需再多約 9.5 GB 記憶體（第一次用到才啟動、閒置 30 分鐘自動釋放）、約 11 GB 磁碟（安裝時要 20 GB 可用空間）；顯示卡驅動要支援 CUDA 12.8 以上（DGX Spark 要 CUDA 13）。選用的 BreezyVoice 再加約 7 GB 記憶體、8 GB 磁碟。Apple Silicon Mac 也可以在本機合成（記憶體 16 GB 以上）。</span><span class="en">Text-to-speech needs about 9.5 GB more memory (started on first use, released after 30 idle minutes) and about 11 GB of disk; the driver must support CUDA 12.8+ (CUDA 13 on DGX Spark). The optional BreezyVoice adds about 7 GB of memory and 8 GB of disk. Apple Silicon Macs (16 GB+) can also synthesize locally.</span></p>
 
     <div class="cmd-label" style="margin-top:18px"><span class="zh">LLM 伺服器（選配，翻譯 / 摘要）</span><span class="en">LLM server (optional)</span></div>
     <div class="tbl-wrap"><table>
@@ -540,6 +563,7 @@ cd C:\jt-live-whisper
       <a href="index.html"><span class="zh">首頁</span><span class="en">Home</span></a> ·
       <a href="features.html"><span class="zh">功能詳解</span><span class="en">Features</span></a> ·
       <a href="sop.html"><span class="zh">完整手冊</span><span class="en">Manual</span></a> ·
+      <a href="compliance.html"><span class="zh">資料與合規</span><span class="en">Compliance</span></a> ·
       <a href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" rel="noopener">GitHub</a>
     </div>
   </div>

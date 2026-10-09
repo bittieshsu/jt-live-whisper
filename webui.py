@@ -144,8 +144,10 @@ try:
     _ZH_INPUT_MODES as _TM_ZH_MODES,
     _EN_INPUT_MODES as _TM_EN_MODES,
     _KO_INPUT_MODES as _TM_KO_MODES,
+    _tts_output_devices as _tm_tts_output_devices,
 )
 except Exception:
+    _tm_tts_output_devices = None
     _tm_parse_llm_host = None
     _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
                             ("qwen2.5:14b", "品質好，較省記憶體（約需 9GB）")]
@@ -398,8 +400,12 @@ async def _ip_allowlist(request, call_next):
 # ─── 靜態檔案服務（logs/ 子目錄，供 WebUI 開啟逐字稿/摘要 HTML）───
 # v2.22.2 前是 app.mount(StaticFiles)——**完全不經授權**，區網內知道檔名（時間戳可推）就能讀逐字稿與摘要。
 # 改成路由：read 權限；瀏覽器點連結帶不了標頭，所以**只有這條**接受 ?token=。
+# recordings/（錄音、朗讀存的音訊檔）同一條：結束卡片一直有這些檔案的連結，卻從來沒有路由（點了是 404，v2.27.0 才發現）
 @app.get("/logs/{rel:path}")
+@app.get("/recordings/{rel:path}")
 async def serve_logs(request: Request, rel: str):
+    route = getattr(request.scope.get("route"), "path", "") or request.url.path
+    top = "recordings" if route.startswith("/recordings") else "logs"
     token = ""
     if not _is_local(request) and _webui_passwords["read"]:
         # 逐字稿 HTML 用相對路徑載入同資料夾的音檔，那個請求帶不了 ?token=：
@@ -408,13 +414,13 @@ async def serve_logs(request: Request, rel: str):
                  or request.cookies.get("jtlw_logs", ""))
         if not (_pw_match(token, _webui_passwords["read"]) or _pw_match(token, _webui_passwords["admin"])):
             return JSONResponse({"ok": False, "error": "需要密碼"}, status_code=403)
-    logs_dir = (BASE_DIR / "logs").resolve()
+    logs_dir = (BASE_DIR / top).resolve()
     target = (logs_dir / rel).resolve()
     if logs_dir not in target.parents or not target.is_file():
         return JSONResponse({"ok": False, "error": "找不到檔案"}, status_code=404)
     from fastapi.responses import FileResponse
     resp = FileResponse(str(target))
-    if token and request.query_params.get("token"):
+    if token and request.query_params.get("token") and top == "logs":
         resp.set_cookie("jtlw_logs", token, path="/logs", httponly=True, samesite="strict")
     return resp
 
@@ -465,6 +471,17 @@ def _tcp_receiver():
                     line = line.strip()
                     if '"finishing"' in line:
                         _note_finishing()
+                    if line.startswith('{"type": "started"'):
+                        # 標上這一次的行程編號（跟結束事件的 pid 同一個來源：WebUI 啟動的那個行程；Windows 的 venv
+                        # python.exe 是啟動器，子程式自己的 PID 不一樣）。換下一次（重念）時前端用它忽略上一次晚到的結束事件
+                        p = _proc
+                        if p is not None:
+                            try:
+                                ev = json.loads(line)
+                                ev["pid"] = p.pid
+                                line = json.dumps(ev, ensure_ascii=False)
+                            except ValueError:
+                                pass
                     if line and _event_queue:
                         try:
                             _event_queue.put_nowait(line)
@@ -613,6 +630,65 @@ def _stop_proc():
         pass
 
 
+# ─── Ctrl+C 結束 WebUI ─────────────────────────────────────────
+# 2026-10-09 Mac 實機：朗讀中按 Ctrl+C，WebUI 怎麼按都結束不了。第一次 Ctrl+C 的處理函式在 _stop_proc 裡拿著 _proc_lock
+# 等子程式存檔；畫面上沒有任何訊息，使用者再按 → Python 在**同一條執行緒**再跑一次處理函式 → 又去拿同一把鎖 → 永遠等不到
+# （Mac 上疊了約 20 層）。所以：第二次 Ctrl+C 一律立刻結束、絕不碰 _proc_lock；子程式已經收到停止信號，會自己在背景存完檔
+# （v2.26.4 實測過：WebUI 先結束時，轉檔照樣完成）。第一次按就要說「正在停止」，不然一定會被連按
+_STOPPING = [False]
+
+
+def _say(msg):
+    """在信號處理函式裡印訊息：主執行緒剛好在寫 stdout 時，print 會丟「reentrant call」，不可以讓它中斷結束流程"""
+    try:
+        print(msg, flush=True)
+    except Exception:
+        pass
+
+
+def _force_exit_now():
+    """第二次 Ctrl+C：不等存檔、不拿 _proc_lock，立刻結束 WebUI。子程式還沒收到停止信號的話先送一個，讓它自己存完檔"""
+    p = _proc
+    try:
+        if p is not None and not getattr(p, "_user_stop", False) and p.poll() is None:
+            p._user_stop = True
+            os.kill(p.pid, signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGINT)
+    except Exception:
+        pass
+    _say("  已結束 WebUI；正在進行的錄音或朗讀會在背景自己存完檔")
+    os._exit(0)
+
+
+def _sigint_handler(sig, frame):
+    """uvicorn 啟動前、結束後（它會把收到的 Ctrl+C 轉交給這裡）用的 Ctrl+C 處理"""
+    if _STOPPING[0]:
+        _force_exit_now()
+    _STOPPING[0] = True
+    _say("\n  正在停止...（再按一次 Ctrl+C 立刻結束）")
+    _stop_proc()
+    _say("  WebUI 已停止")
+    os._exit(0)
+
+
+class _WebUIServer(uvicorn.Server):
+    """uvicorn 執行中收到的 Ctrl+C：第一次照 uvicorn 正常結束（停掉子程式、等存檔），但要先說一聲；第二次立刻結束"""
+
+    def handle_exit(self, sig, frame):
+        if sig == signal.SIGINT and (self.should_exit or _STOPPING[0]):
+            _force_exit_now()
+        if not self.should_exit:
+            _say("\n  正在停止 WebUI...（再按一次 Ctrl+C 立刻結束）")
+        super().handle_exit(sig, frame)
+
+
+def _uvicorn_config(**kw):
+    """結束時等還沒回完的請求最多 3 秒（預設會一直等，而且 warning 等級什麼都不印，看起來就像當掉）；舊版 uvicorn 沒有這個參數"""
+    import inspect
+    if "timeout_graceful_shutdown" in inspect.signature(uvicorn.Config.__init__).parameters:
+        kw["timeout_graceful_shutdown"] = 3
+    return uvicorn.Config(**kw)
+
+
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
 
 
@@ -711,7 +787,7 @@ def _start_proc(args: list):
             print(f"  按 Ctrl+C 可結束 WebUI 伺服器")
             if _event_queue:
                 try:
-                    _event_queue.put_nowait(json.dumps({"type": "disconnected",
+                    _event_queue.put_nowait(json.dumps({"type": "disconnected", "pid": p.pid,
                         "message": msg, "rc": rc, "user_stop": user_stop, "detail": detail}))
                 except Exception:
                     pass
@@ -974,13 +1050,31 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.26.18",
+        "last": last, "version": "2.27.0",
+        # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
+        # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
+        "api_level": 2,
+        "tts": _tts_info(admin=False),
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
 
 
 # ─── 路由 ────────────────────────────────────────────────────
+# 分頁圖示（v2.27.0 以前沒有：分頁顯示空白圖示、瀏覽器自動要的 /favicon.ico 一律 404）。
+# 公開的 logo，不需要密碼（來源 IP 限制照樣適用）；icons/ 第一次升級可能還沒到，沒有就 404
+@app.get("/favicon.ico")
+@app.get("/favicon.png")
+async def favicon(request: Request):
+    from fastapi.responses import FileResponse
+    ext = "ico" if request.url.path.endswith(".ico") else "png"
+    p = BASE_DIR / "icons" / f"jt-live-whisper.{ext}"
+    if not p.is_file():
+        return JSONResponse({"ok": False, "error": "找不到圖示"}, status_code=404)
+    return FileResponse(str(p), media_type="image/x-icon" if ext == "ico" else "image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     html_path = BASE_DIR / "webui.html"
@@ -1308,11 +1402,22 @@ async def api_open_folder(request: Request):
 
 @app.get("/api/files")
 async def api_files(request: Request):
-    """列出 recordings/ 目錄下的音訊/影片檔案"""
+    """列出 recordings/ 目錄下的音訊/影片檔案；kind=text 時列 recordings/ 與 logs/ 的文字檔（朗讀用）"""
     err = _check_auth(request, "read")
     if err:
         return JSONResponse({"ok": False, "error": err}, status_code=403)
     rec_dir = BASE_DIR / "recordings"
+    if request.query_params.get("kind") == "text":
+        files = []
+        for d in (rec_dir, BASE_DIR / "logs"):
+            if d.is_dir():
+                for f in d.iterdir():
+                    if f.is_file() and f.suffix.lower() in _TEXT_EXTS:
+                        st = f.stat()
+                        files.append({"name": f.name, "dir": d.name, "size": round(st.st_size / 1024, 1),
+                                      "path": f"{d.name}/{f.name}", "mtime": st.st_mtime})
+        files.sort(key=lambda x: x["mtime"], reverse=True)
+        return JSONResponse({"files": files[:300]})
     files = []
     if rec_dir.is_dir():
         exts = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".webm", ".avi"}
@@ -1331,12 +1436,13 @@ from fastapi import UploadFile, File as FastFile
 # v2.22.2 前這個端點**完全沒有授權**，且直接用用戶端送來的檔名組路徑：
 # 檔名是 "../../translate_meeting.py" 或絕對路徑時會寫到 recordings/ 外面（任意檔案覆寫 → 可執行任意程式碼）；
 # 也沒有大小上限（整檔讀進記憶體）。盤點測試當時沒抓到，是因為它往下 30 行掃到了下一個端點的 _check_auth。
-_UPLOAD_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".webm", ".avi"}
+_TEXT_EXTS = {".txt", ".md", ".srt", ".vtt"}         # 朗讀用的文字檔（v2.27.0）
+_UPLOAD_EXTS = {".mp3", ".wav", ".m4a", ".flac", ".ogg", ".mp4", ".mkv", ".webm", ".avi"} | _TEXT_EXTS
 _UPLOAD_MAX_MB = int(os.environ.get("JTLW_WEBUI_MAX_UPLOAD_MB", "4096"))
 
 
 def _safe_upload_name(name):
-    """只取檔名本身（去掉任何目錄成分，含 Windows 的反斜線），副檔名必須是音訊/影片。
+    """只取檔名本身（去掉任何目錄成分，含 Windows 的反斜線），副檔名必須是音訊／影片或朗讀用的文字檔。
     不合格回傳 None。"""
     base = os.path.basename((name or "").replace("\\", "/")).strip()
     if not base or base in (".", "..") or base.startswith("."):
@@ -1348,13 +1454,13 @@ def _safe_upload_name(name):
 
 @app.post("/api/upload-file")
 async def api_upload_file(request: Request, file: UploadFile = FastFile(...)):
-    """上傳音訊/影片檔案到 recordings/"""
+    """上傳音訊／影片檔案（離線處理）或文字檔（朗讀，v2.27.0）到 recordings/"""
     err = _check_auth(request, "admin")
     if err:
         return JSONResponse({"ok": False, "error": err}, status_code=403)
     name = _safe_upload_name(file.filename)
     if not name:
-        return JSONResponse({"ok": False, "error": "檔名或副檔名不允許（只接受音訊／影片檔）"},
+        return JSONResponse({"ok": False, "error": "檔名或副檔名不允許（只接受音訊／影片檔，或朗讀用的 .txt／.md／.srt／.vtt）"},
                             status_code=400)
     rec_dir = (BASE_DIR / "recordings").resolve()
     rec_dir.mkdir(exist_ok=True)
@@ -1383,7 +1489,7 @@ async def api_upload_file(request: Request, file: UploadFile = FastFile(...)):
         dest.unlink(missing_ok=True)
         return JSONResponse({"ok": False, "error": str(e)}, status_code=413)
     return JSONResponse({"ok": True, "name": dest.name, "size": round(size / 1048576, 1),
-                         "path": str(dest)})
+                         "path": str(dest), "rel": f"recordings/{dest.name}"})
 
 
 @app.post("/api/sck-permission")
@@ -1535,12 +1641,41 @@ async def api_start(request: Request, body: dict = {}):
         if _perr:
             return JSONResponse({"status": "error", "error": f"LLM 主機：{_perr}"}, status_code=400)
         body["llm_host"] = f"{_h}:{_p}"
-    args = _build_args(body)
+    if body.get("source") in ("tts", "tts_file"):
+        if _tts is None:
+            return JSONResponse({"status": "error", "error": _TTS_MISSING}, status_code=503)
+        try:
+            args = _tts_args(body)
+        except ValueError as e:
+            return JSONResponse({"status": "error", "error": str(e)}, status_code=400)
+        if body.get("tts_device") == "browser":
+            try:
+                TTS_POS_FLAG.unlink()
+            except OSError:
+                pass
+    else:
+        args = _build_args(body)
     pid = await asyncio.to_thread(_start_proc, args)
     # 儲存前次使用的設定到 config.json
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
-        cfg["webui_last"] = {
+        prev_last = cfg.get("webui_last") or {}
+        if body.get("source") in ("tts", "tts_file"):
+            # 朗讀只更新朗讀的那幾項，原本辨識的設定（模式、模型、裝置…）照舊保留
+            prev_last.update({"source": body["source"], "tts_voice": body.get("tts_voice") or "",
+                              "tts_rate": body.get("tts_rate") or 1.0, "tts_pause": body.get("tts_pause") or "normal",
+                              "tts_where": body.get("tts_where") or "auto", "tts_device": body.get("tts_device") or "",
+                              "tts_save": body.get("tts_save") or "", "tts_steps": body.get("tts_steps") or 6,
+                              "tts_model": body.get("tts_model") or ""})
+            cfg["webui_last"] = prev_last
+            if "subtitle_overlay" in body:
+                so = cfg.get("subtitle_overlay", {})
+                so["enabled"] = body["subtitle_overlay"]
+                cfg["subtitle_overlay"] = so
+            _write_config(cfg)
+            return {"status": "started", "pid": pid, "args": args}
+        cfg["webui_last"] = {**{k: v for k, v in prev_last.items() if k.startswith("tts_")},
+            "source": body.get("source") or ("file" if body.get("input_files") else "live"),
             "mode": body.get("mode"), "model": body.get("model"),
             "scene": body.get("scene"), "engine": body.get("engine"),
             "llm_model": body.get("llm_model"), "llm_host": body.get("llm_host"),
@@ -1652,6 +1787,339 @@ def _ws_level(ws):
     return "read" if _pw_match(token, _webui_passwords["read"]) else None
 
 
+# ─── 文字轉語音（v2.27.0，jtlw_tts/；規格 specs/2026-10-08_TTS開發規格_v2.md）──────────
+# 朗讀是主程式的一個模式（輸入來源「文字內容朗讀／文字轉語音檔」→ /api/start → translate_meeting.py --tts-file）。
+# 這裡只剩：設定頁要的資訊（聲音、合成位置、播放裝置）、聲音管理與發音字典（管理者）、
+# 瀏覽器播放時每段的音檔與播放位置回報。查狀態、試聽：讀取；匯入／刪除／改性別、預設與字典：管理者
+try:
+    import jtlw_tts as _tts
+    _tts_import_err = ""
+except Exception as _e:          # 第一次 --upgrade 跑的是舊腳本舊清單，拿不到新加的 jtlw_tts/；第二次才會到
+    _tts = None
+    _tts_import_err = f"{type(_e).__name__}: {_e}"
+_TTS_MISSING = "文字轉語音元件還沒安裝完成：請再執行一次升級（" + (r".\install.ps1 -Upgrade" if os.name == "nt"
+                                                                  else "./install.sh --upgrade") + "）"
+TTS_POS_FLAG = BASE_DIR / ".webui_tts_pos"   # translate_meeting.py 的 _TTS_POS_FLAG：瀏覽器播到第幾段
+_TTS_LIVE_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def _tts_cfg():
+    try:
+        return json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _tts_fail(e):
+    return JSONResponse({"ok": False, "error": e.message, "code": e.code}, status_code=e.status)
+
+
+def _tts_info(admin, refresh=False):
+    """設定頁「文字內容朗讀」要的全部資訊。合成位置分開回報能不能用（不能用的說明原因，前端反灰）"""
+    if _tts is None:
+        return {"installed": False, "reason": _TTS_MISSING, "detail": _tts_import_err}
+    cfg = _tts_cfg()
+    s = _tts.settings(cfg)
+    rw = cfg.get("remote_whisper") or {}
+    # 每個合成模型各自回報合成位置能不能用（BreezyVoice 只在 GPU 伺服器）；最上層的 locations 是預設模型的（舊前端照讀）
+    models = []
+    for key, m in _tts.MODELS.items():
+        mlocs = []
+        for where, label in (("remote", "GPU 伺服器" + (f"（{rw.get('host')}）" if rw.get("host") else "")),
+                             ("mlx", "本機（Apple Silicon）")):
+            prov, why = _tts.pick_provider(cfg, refresh=refresh, where=where, model=key)
+            mlocs.append({"value": where, "label": label, "available": prov is not None, "reason": why})
+        models.append({"value": key, "label": m["label"], "tag": m["tag"], "note": m["note"], "default": key == _tts.DEFAULT_MODEL,
+                       "available": any(x["available"] for x in mlocs), "locations": mlocs})
+    locs = next(m["locations"] for m in models if m["default"])
+    voices = [_tts.public_voice(v) for v in _tts.list_voices()]
+    try:
+        devices = _tm_tts_output_devices() if _tm_tts_output_devices else []
+    except Exception:
+        devices = []
+    out = {"installed": True, "locations": locs,
+           "models": models,
+           "voices": voices, "voice": _tts.default_voice_id(cfg),
+           "provider": s["provider"], "mac_steps": s["mac_steps"], "genders": _tts.GENDERS,
+           "pauses": list(_tts.PAUSES), "rate_range": [_tts.RATE_MIN, _tts.RATE_MAX],
+           "output_devices": devices, "max_chars": s["max_chars"], "text_exts": list(_tts.TEXT_EXTS)}
+    if admin:
+        out["custom"] = s["custom"]
+    return out
+
+
+@app.get("/api/tts/status")
+def api_tts_status(request: Request):
+    err = _check_auth(request, "read")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    return {"ok": True, **_tts_info(_check_auth(request, "admin") is None, request.query_params.get("refresh") == "1")}
+
+
+@app.get("/api/tts/voices/{vid}/sample")
+def api_tts_voice_sample(request: Request, vid: str):
+    """試聽：參考錄音本身（合成出來的音色就是它）"""
+    err = _check_auth(request, "read")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    try:
+        return FileResponse(_tts.get_voice(vid)["wav"], media_type="audio/wav")
+    except _tts.TTSError as e:
+        return _tts_fail(e)
+
+
+@app.get("/api/tts/live/{job}/{seq}")
+def api_tts_live(request: Request, job: str, seq: int):
+    """瀏覽器播放：朗讀中的第 seq 段（主程式寫在 tts_tmp/live_<job>/，朗讀結束就刪）"""
+    err = _check_auth(request, "read")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None or not _TTS_LIVE_RE.match(job) or not 0 <= seq < 100000:
+        return JSONResponse({"ok": False, "error": "找不到這一段"}, status_code=404)
+    p = Path(_tts.engine.TMP_DIR) / f"live_{job}" / f"{seq}.wav"
+    if not p.is_file():
+        return JSONResponse({"ok": False, "error": "找不到這一段"}, status_code=404)
+    return FileResponse(str(p), media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/tts/voices")
+async def api_tts_voice_add(request: Request, file: UploadFile = FastFile(...)):
+    """管理者匯入參考錄音（multipart：file、name、transcript、source、gender、consent=1）"""
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    form = await request.form()
+    import tempfile
+    data = await file.read(20 * 1048576 + 1)
+    if len(data) > 20 * 1048576:
+        return JSONResponse({"ok": False, "error": "參考錄音超過 20 MB"}, status_code=413)
+    fd, tmp = tempfile.mkstemp(suffix=Path(file.filename or "").suffix[:8] or ".bin")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        meta = await asyncio.to_thread(_tts.import_voice, tmp, form.get("name"), form.get("transcript"),
+                                       form.get("source"), form.get("consent") in ("1", "true", "on"),
+                                       form.get("gender") or "")
+    except _tts.TTSError as e:
+        return _tts_fail(e)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    cfg = _tts_cfg()
+    t = cfg.setdefault("tts", {})
+    if not _tts.get_voice(t.get("voice"), missing_ok=True):      # 第一個聲音直接當預設
+        t["voice"] = meta["id"]
+        _write_config(cfg)
+    return {"ok": True, "voice": _tts.public_voice(meta)}
+
+
+@app.post("/api/tts/voices/{vid}")
+def api_tts_voice_update(request: Request, vid: str, body: dict = {}):
+    """管理者：改聲音的性別（v2.27.0 之前匯入的沒有這個欄位）"""
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    try:
+        _tts.set_voice_gender(vid, str(body.get("gender") or ""))
+    except _tts.TTSError as e:
+        return _tts_fail(e)
+    return {"ok": True}
+
+
+@app.delete("/api/tts/voices/{vid}")
+def api_tts_voice_delete(request: Request, vid: str):
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    cfg = _tts_cfg()
+    try:
+        gpu = _tts.delete_voice(vid, cfg)           # GPU 伺服器上快取的那份一起刪（連不上就記下來、之後補刪）
+    except _tts.TTSError as e:
+        return _tts_fail(e)
+    if (cfg.get("tts") or {}).get("voice") == vid:
+        cfg["tts"]["voice"] = ""
+        _write_config(cfg)
+    return {"ok": True, "gpu": gpu}
+
+
+@app.post("/api/tts/settings")
+def api_tts_settings(request: Request, body: dict = {}):
+    """管理者：預設聲音、發音字典（{詞: 注音}）、合成位置（auto／remote／mlx）、Mac 擴散步數（6／10）"""
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    from jtlw_tts.tw_reading import _tts_custom
+    cfg = _tts_cfg()
+    t = dict(cfg.get("tts") or {})
+    if "voice" in body:
+        if body["voice"] and not _tts.get_voice(body["voice"], missing_ok=True):
+            return JSONResponse({"ok": False, "error": "找不到這個聲音"}, status_code=404)
+        t["voice"] = body["voice"] or ""
+    if "custom" in body:
+        if not isinstance(body["custom"] or {}, dict):
+            return JSONResponse({"ok": False, "error": "發音字典格式不對（要是 {詞: 注音}）"}, status_code=400)
+        custom = {str(k).strip(): str(v).strip() for k, v in (body["custom"] or {}).items() if str(k).strip()}
+        _, bad = _tts_custom(custom)
+        if bad:
+            return JSONResponse({"ok": False, "error": "這幾個詞的注音字數和詞的字數不同（一個字一個注音，以空白分開）："
+                                 + "、".join(bad)}, status_code=400)
+        t["custom"] = custom
+    if "provider" in body:
+        if body["provider"] not in ("auto", "remote", "mlx"):
+            return JSONResponse({"ok": False, "error": "合成位置只能是 auto、remote、mlx"}, status_code=400)
+        t["provider"] = body["provider"]
+    if "mac_steps" in body:
+        try:
+            steps = int(body["mac_steps"])
+        except (TypeError, ValueError):
+            steps = None
+        if steps not in (6, 10):
+            return JSONResponse({"ok": False, "error": "Mac 擴散步數只能是 6 或 10"}, status_code=400)
+        t["mac_steps"] = steps
+    cfg["tts"] = t
+    _write_config(cfg)
+    return {"ok": True}
+
+
+# 選了「文字內容朗讀／文字轉語音檔」就先在背景叫醒 GPU 伺服器的合成程式（第一次啟動約 30 秒；2026-10-09 使用者：
+# 「選完後就要先在背後啟動服務 節省時間」）。用預覽念法的介面念兩個字就會啟動它；10 分鐘內只叫一次
+_TTS_WARM = {}                  # 合成模型 → {"at": 上次叫的時間, "running": 叫醒中}（兩個模型各自一個 worker）
+_TTS_WARM_LOCK = threading.Lock()
+
+
+def _tts_warm_run(where, model):
+    try:
+        prov, _ = _tts.pick_provider(_tts_cfg(), where=where, model=model)
+        if prov is not None and getattr(prov, "kind", "") == "remote":
+            prov.convert("暖機", {})
+    except Exception:
+        pass
+    finally:
+        _TTS_WARM[model]["running"] = False
+
+
+@app.post("/api/tts/warm")
+def api_tts_warm(request: Request, body: dict = {}):
+    """管理者：背景叫醒合成程式（不等它好）。回 started＝這次有叫"""
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    where = body.get("where") if body.get("where") in ("auto", "remote", "mlx") else "auto"
+    model = body.get("model") if body.get("model") in _tts.MODELS else _tts.DEFAULT_MODEL
+    with _TTS_WARM_LOCK:
+        w = _TTS_WARM.setdefault(model, {"at": -1e9, "running": False})
+        if w["running"] or time.monotonic() - w["at"] < 600:
+            return {"ok": True, "started": False}
+        w.update(running=True, at=time.monotonic())
+    threading.Thread(target=_tts_warm_run, args=(where, model), daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.post("/api/tts/convert")
+def api_tts_convert(request: Request, body: dict = {}):
+    """管理者：預覽送進模型的文字（檢查發音字典），不合成"""
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    if _tts is None:
+        return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
+    cfg = _tts_cfg()
+    where = body.get("where") if body.get("where") in ("auto", "remote", "mlx") else None
+    model = body.get("model") if body.get("model") in _tts.MODELS else None
+    prov, why = _tts.pick_provider(cfg, where=where, model=model)
+    if not prov:
+        return JSONResponse({"ok": False, "error": why}, status_code=503)
+    text = str(body.get("text") or "").strip()[:300]
+    if not text:
+        return JSONResponse({"ok": False, "error": "沒有文字"}, status_code=400)
+    custom = body.get("custom") if isinstance(body.get("custom"), dict) else _tts.settings(cfg)["custom"]
+    try:
+        return {"ok": True, "spoken": prov.convert(text, custom)}
+    except _tts.TTSError as e:
+        return _tts_fail(e)
+
+
+def _tts_args(body):
+    """朗讀的啟動參數（輸入來源 tts／tts_file）。貼上的文字先寫成檔案（命令列放不下、Windows 的編碼也麻煩）"""
+    src = body.get("source")
+    args = []
+    text_file = (body.get("tts_file") or "").strip()
+    if text_file:
+        p = Path(text_file)
+        p = p if p.is_absolute() else BASE_DIR / p
+        p = p.resolve()
+        ok_dirs = [(BASE_DIR / "recordings").resolve(), (BASE_DIR / "logs").resolve()]
+        if not any(str(p).startswith(str(d) + os.sep) for d in ok_dirs) or not p.is_file():
+            raise ValueError("只能朗讀 recordings/ 或 logs/ 裡的文字檔")
+        if _tts is not None and p.suffix.lower() not in _tts.TEXT_EXTS:
+            raise ValueError("只能朗讀 .txt／.md／.srt／.vtt")
+        args += ["--tts-file", str(p)]
+    else:
+        text = str(body.get("tts_text") or "")
+        if not text.strip():
+            raise ValueError("沒有要朗讀的文字：請貼上文字，或選一個文字檔")
+        d = BASE_DIR / "tts_tmp"
+        d.mkdir(exist_ok=True)
+        if _tts is not None:
+            _tts.sweep_tmp()          # 以前貼上的文字（主程式讀完就不需要了），超過一天的刪掉
+        p = d / f"input_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}.txt"
+        p.write_text(text, encoding="utf-8")
+        args += ["--tts-file", str(p)]
+    model = body.get("tts_model") or ""
+    if model and (_tts is None or model not in _tts.MODELS):
+        raise ValueError(f"沒有這個合成模型：{model}")
+    if model and model != _tts.DEFAULT_MODEL:
+        args += ["--tts-model", model]
+    if body.get("tts_voice"):
+        args += ["--tts-voice", str(body["tts_voice"])]
+    try:
+        rate = float(body.get("tts_rate") or 1.0)
+    except (TypeError, ValueError):
+        rate = 1.0
+    args += ["--tts-rate", f"{rate:g}"]
+    if body.get("tts_pause") in ("short", "normal", "long"):
+        args += ["--tts-pause", body["tts_pause"]]
+    if body.get("tts_where") in ("auto", "remote", "mlx"):
+        args += ["--tts-provider", body["tts_where"]]
+    if str(body.get("tts_steps")) in ("6", "10"):
+        args += ["--tts-steps", str(body["tts_steps"])]
+    if body.get("tts_start") not in (None, "", 1, "1"):
+        try:
+            n = int(body["tts_start"])
+        except (TypeError, ValueError):
+            raise ValueError("從第幾段開始念要是數字")
+        if n < 1:
+            raise ValueError("從第幾段開始念要從 1 起算")
+        args += ["--tts-start", str(n)]
+    if src == "tts_file":
+        args += ["--tts-device", "none", "--tts-save", body.get("tts_save") if body.get("tts_save") in ("mp3", "wav")
+                 else "mp3"]
+    else:
+        dev = str(body.get("tts_device") if body.get("tts_device") not in (None, "") else "default")
+        if dev not in ("default", "browser") and not dev.isdigit():
+            raise ValueError("播放裝置不對")
+        args += ["--tts-device", dev]
+        if body.get("tts_save") in ("mp3", "wav"):
+            args += ["--tts-save", body["tts_save"]]
+    if body.get("subtitle_overlay"):
+        args.append("--subtitle-overlay")
+    return args
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     # v2.22.2 前這裡自己寫一套授權：(1) 拿 token 直接比對設定檔裡的**雜湊**（正確密碼被拒、雜湊本身反而能登入）；
@@ -1671,7 +2139,7 @@ async def websocket_endpoint(ws: WebSocket):
             data = await ws.receive_text()
             try:
                 msg = json.loads(data)
-                if msg.get("action") in ("stop", "mute", "pause", "resume") and level != "admin":
+                if msg.get("action") in ("stop", "mute", "pause", "resume", "tts_pos") and level != "admin":
                     await ws.send_text(json.dumps({"type": "error", "error": "需要管理密碼"}))
                     continue
                 if msg.get("action") == "stop":
@@ -1693,6 +2161,11 @@ async def websocket_endpoint(ws: WebSocket):
                     # 暫停／繼續（v2.26.3）：寫入／刪除旗標檔，translate_meeting.py 看到變化才切換。
                     # 以前送 SIGUSR1：Windows 沒有這個訊號（暫停在 Windows 一直沒作用），而且是「切換」，漏一次就永遠相反
                     _set_pause_flag(msg.get("action") == "pause")
+                elif msg.get("action") == "tts_pos":
+                    # 瀏覽器播放的朗讀：播到第幾段（主程式看這個決定字幕出哪段、預先合成到哪裡）
+                    job = str(msg.get("job", ""))
+                    if _TTS_LIVE_RE.match(job):
+                        TTS_POS_FLAG.write_text(f"{job} {int(msg.get('seq', 0))}", encoding="utf-8")
             except Exception:
                 pass
     except WebSocketDisconnect:
@@ -1882,21 +2355,17 @@ def main():
     if not args.no_browser and not _no_gui():
         threading.Timer(1.0, lambda: webbrowser.open(f"{scheme}://localhost:{args.port}")).start()
 
-    # Ctrl+C 強制退出（uvicorn 可能攔截 SIGINT）
-    def _sigint_handler(sig, frame):
-        print("\n  正在停止...")
-        _stop_proc()
-        print("  WebUI 已停止")
-        os._exit(0)
+    # Ctrl+C：uvicorn 執行中由 _WebUIServer.handle_exit 處理，前後由 _sigint_handler（見上面「Ctrl+C 結束 WebUI」）
     signal.signal(signal.SIGINT, _sigint_handler)
 
     try:
-        uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="warning", **ssl_kw)
+        _WebUIServer(_uvicorn_config(app=app, host="0.0.0.0", port=args.port, log_level="warning", **ssl_kw)).run()
     except KeyboardInterrupt:
         pass
     finally:
+        _STOPPING[0] = True             # 這裡在等存檔時再按 Ctrl+C → 立刻結束，不可以再進 _stop_proc
         _stop_proc()
-        print("\n  WebUI 已停止")
+        _say("\n  WebUI 已停止")
         os._exit(0)
 
 

@@ -808,6 +808,7 @@ case "$LINUX_ACTION" in
             if [ "$LINUX_MODE" = "server" ] || [ -f "$SERVICE_FILE" ]; then _mode_flag="--server"; fi
             echo ""
             echo -e "  ${C_WHITE}檢查新版的相依套件...${NC}"
+            export JTLW_FROM_UPGRADE=1          # 升級時回答過「不裝 BreezyVoice」就不再問（install.sh 的 _rw_offer_breezy）
             exec bash "$SCRIPT_DIR/install-linux.sh" $_mode_flag
         fi
         exit 0
