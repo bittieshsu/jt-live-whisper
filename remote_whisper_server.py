@@ -606,9 +606,46 @@ def _tts_build_moe_main():
     print(f"教育部辭典對照檔：{len(lines)} 個詞 → {dst}")
 
 
+_TTS_EN_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+                "sixteen seventeen eighteen nineteen").split()
+_TTS_EN_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+_TTS_EN_MONEY = re.compile(r"(?<![A-Za-z])(NT|US)?\$\s?(\d[\d,]*(?:\.\d+)?)")
+_TTS_EN_DOTTED = re.compile(r"(?<![\w.])([vV]?)(\d+(?:\.\d+){2,})(?![\w]|\.\d)")
+_TTS_EN_COMMA = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+)(?![\d,]|\.\d)")
+
+
+def _tts_en_int(n):
+    """英文的整數念法（0～999,999,999,999）"""
+    if n < 20:
+        return _TTS_EN_ONES[n]
+    if n < 100:
+        return _TTS_EN_TENS[n // 10] + ("-" + _TTS_EN_ONES[n % 10] if n % 10 else "")
+    if n < 1000:
+        return _TTS_EN_ONES[n // 100] + " hundred" + (" " + _tts_en_int(n % 100) if n % 100 else "")
+    for div, name in ((10 ** 9, "billion"), (10 ** 6, "million"), (1000, "thousand")):
+        if n >= div:
+            return _tts_en_int(n // div) + " " + name + (" " + _tts_en_int(n % div) if n % div else "")
+
+
+def _tts_en_text(text):
+    """英文句子送進模型前（v2.28.0 雙向口譯）：不套台灣念法、不把數字換成中文（_tts_numbers 會把 1,250,000 換成一百二十五萬）。
+    2026-10-10 GPU 實測三種聲音各 4 句：1,250,000 被念成 150,000、IP 與版本號偶爾念錯 →
+    千分位的數字寫成英文、金額改成「數字＋幣別」、IP／版本號一段一段用 dot 連起來；其他照原文（模型念得對）"""
+    t = " ".join(str(text).split())
+    t = _TTS_EN_MONEY.sub(lambda m: f"{m.group(2)} " + {"NT": "NT dollars", "US": "US dollars"}.get(m.group(1) or "", "dollars"), t)
+    t = _TTS_EN_DOTTED.sub(lambda m: ("version " if m.group(1) else "") + " dot ".join(m.group(2).split(".")), t)
+
+    def comma(m):
+        n = int(m.group(1).replace(",", ""))
+        return _tts_en_int(n) if n < 10 ** 12 else m.group(1)
+    return _TTS_EN_COMMA.sub(comma, t)
+
+
 def _tts_worker_main():
-    """只聽 127.0.0.1。POST /synthesize {text, voice_wav, voice_text, custom, steps, cfg} → audio/wav（48 kHz 單聲道）；
-    POST /convert {text, custom} → {spoken}（送進模型的文字，除錯與測試用）"""
+    """只聽 127.0.0.1。POST /synthesize {text, voice_wav, voice_text, custom, steps, cfg, lang} → audio/wav（48 kHz 單聲道）；
+    POST /synthesize_stream（同上）→ 邊合成邊送 16-bit PCM（audio/L16，X-TTS-SR 取樣率，送完關連線；雙向口譯用，v2.28.0）；
+    POST /convert {text, custom} → {spoken}（送進模型的文字，除錯與測試用）。
+    lang＝en：英文句子，不套台灣念法與中文數字念法（_tts_en_text）"""
     import http.server
     import io
     import signal
@@ -652,7 +689,7 @@ def _tts_worker_main():
                 else self._send(503, {"ok": False, "loading": True})
 
         def do_POST(self):
-            if self.path not in ("/synthesize", "/convert"):
+            if self.path not in ("/synthesize", "/synthesize_stream", "/convert"):
                 return self._send(404, {"error": "not found"})
             if not state["ready"]:
                 return self._send(503, {"error": state["error"] or "文字轉語音模型載入中"})
@@ -662,15 +699,17 @@ def _tts_worker_main():
                 if not text:
                     return self._send(400, {"error": "沒有文字"})
                 with lock:                      # 一次一件（主服務本來就排隊，這裡是保險）
-                    sp = _tts_spoken(R, text, req.get("custom"))
+                    sp = _tts_en_text(text) if req.get("lang") == "en" else _tts_spoken(R, text, req.get("custom"))
                     if self.path == "/convert":
                         return self._send(200, {"spoken": sp})
+                    kw = dict(text=sp, prompt_wav_path=req["voice_wav"], prompt_text=req["voice_text"],
+                              reference_wav_path=req["voice_wav"], cfg_value=float(req.get("cfg") or 2.0),
+                              inference_timesteps=int(req.get("steps") or 10), normalize=False)
                     t0 = time.monotonic()
+                    if self.path == "/synthesize_stream":
+                        return self._stream(kw, sp, t0)
                     try:
-                        wav = R["model"].generate(
-                            text=sp, prompt_wav_path=req["voice_wav"], prompt_text=req["voice_text"],
-                            reference_wav_path=req["voice_wav"], cfg_value=float(req.get("cfg") or 2.0),
-                            inference_timesteps=int(req.get("steps") or 10), normalize=False)
+                        wav = R["model"].generate(**kw)
                     finally:
                         R["torch"].cuda.empty_cache()
                 buf = io.BytesIO()
@@ -681,6 +720,38 @@ def _tts_worker_main():
                     "X-TTS-Seconds": f"{time.monotonic() - t0:.3f}"})
             except Exception as e:
                 self._send(500, {"error": f"{type(e).__name__}: {e}"})
+
+        def _stream(self, kw, sp, t0):
+            """第一段合成出來就送（不用等整句）。沒有 Content-Length：送完關連線（HTTP/1.0）。
+            標頭送出後才出錯的話只能斷線，用戶端看到的是音訊比預期短"""
+            import itertools
+            import numpy as np
+            gen = R["model"].generate_streaming(**kw)
+            try:
+                first = next(gen)
+            except Exception:
+                R["torch"].cuda.empty_cache()
+                raise                           # 還沒送標頭：照一般錯誤回 500
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/L16")
+            self.send_header("X-TTS-SR", str(R["sr"]))
+            self.send_header("X-TTS-Spoken", urllib.parse.quote(sp))
+            self.send_header("X-TTS-First", f"{time.monotonic() - t0:.3f}")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                for chunk in itertools.chain([first], gen):
+                    pcm = (np.clip(np.asarray(chunk, dtype=np.float32).reshape(-1), -1, 1) * 32767).astype("<i2")
+                    self.wfile.write(pcm.tobytes())
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass                            # 用戶端取消（例如靜音）：停止合成
+            except Exception as e:              # 標頭已經送出：不可以再寫錯誤回應（會混進音訊），只能斷線（音訊比預期短）
+                print(f"[文字轉語音] 串流合成中途失敗：{type(e).__name__}: {e}", file=sys.stderr, flush=True)
+                self.close_connection = True
+            finally:
+                gen.close()
+                R["torch"].cuda.empty_cache()
 
     # 先綁埠號再載入（比照 Qwen worker：同一個埠已有 worker 時立刻失敗，不會白白載一份模型）
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), _H)
@@ -1217,7 +1288,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.27.0"
+SERVER_VERSION = "2.28.0"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。
@@ -1899,14 +1970,30 @@ def _tts_stop_all(wait=0.0):
         _tts_stop(wait=wait, w=w)
 
 
+def _tts_idle_check(w):
+    """閒置 TTS_IDLE 秒就關掉 worker。**拿到 run_lock 才關、關完才放**：請求也是先拿 run_lock 再確認 worker 在，
+    兩邊不會交錯（以前只看「鎖沒被拿走」就關，關的那 20 秒內進來的請求會等到一個正在結束的 worker、回「worker 結束」，
+    朗讀產生 0 位元組；2026-10-10 守門用短閒置時間時抓到，正式機閒置 30 分鐘後的第一個請求也可能碰到）。回傳有沒有關"""
+    if not _tts_ready(w) or time.time() - w["last_used"] <= TTS_IDLE:
+        return False
+    if not w["run_lock"].acquire(blocking=False):
+        return False
+    try:
+        if not _tts_ready(w) or time.time() - w["last_used"] <= TTS_IDLE:
+            return False
+        print(f"[{w['name']}] 閒置 {int(TTS_IDLE // 60)} 分鐘，關閉 worker")
+        _tts_stop(wait=20, w=w)
+        return True
+    finally:
+        w["run_lock"].release()
+
+
 def _tts_idle_watch():
     """閒置 TTS_IDLE 秒就關掉 worker，把記憶體還給共用 GPU（下次用到再啟動）"""
     while True:
         time.sleep(30)
         for w in _TTS_WORKERS.values():
-            if _tts_ready(w) and not w["run_lock"].locked() and time.time() - w["last_used"] > TTS_IDLE:
-                print(f"[{w['name']}] 閒置 {int(TTS_IDLE // 60)} 分鐘，關閉 worker")
-                _tts_stop(wait=20, w=w)
+            _tts_idle_check(w)
 
 
 def _tts_voice_paths(sha):
@@ -2421,6 +2508,14 @@ def _transcribe_faster(wav_path, model_size, language, noisy=False):
     return segments, full_text, round(info.duration, 1), round(time.monotonic() - t0, 1)
 
 
+def _detect_language_faster(wav_path, model_size):
+    """只判斷語言、不辨識（雙向語音口譯，v2.28.0）：faster-whisper 的 transcribe 不給語言時，回傳之前就先判斷好語言，
+    產生器不去跑就不會辨識。回傳 (語言, 機率)"""
+    m = _get_model_faster(model_size)
+    _, info = m.transcribe(wav_path, language=None, beam_size=1, without_timestamps=True, vad_filter=False)
+    return info.language, float(info.language_probability or 0)
+
+
 def _transcribe_faster_stream(wav_path, model_size, language, noisy=False):
     """faster-whisper 串流版，yield (segment_dict, duration) per segment"""
     m = _get_model_faster(model_size)
@@ -2628,7 +2723,8 @@ def tts_health():
     avail = _tts_mem_available_gb()
     out = _tts_model_health(_TTS)
     out.update(idle_seconds=TTS_IDLE, mem_available_gb=round(avail, 1) if avail is not None else None,
-               models={k: _tts_model_health(w) for k, w in _TTS_WORKERS.items()})
+               models={k: _tts_model_health(w) for k, w in _TTS_WORKERS.items()},
+               langs=["zh", "en"], stream=True)          # v2.28.0：英文句子、串流合成（雙向口譯），只有 VoxCPM2
     return out
 
 
@@ -2710,8 +2806,14 @@ def _tts_request(payload, worker_path):
     if len(text) > TTS_MAX_CHARS:
         return None, JSONResponse({"error": "text_too_long",
                                    "detail": f"一次最多 {TTS_MAX_CHARS} 字，請先切句"}, status_code=400)
-    body = {"text": text, "custom": payload.get("custom") or {}}
-    if worker_path == "/synthesize":
+    lang = str(payload.get("lang") or "zh")
+    if lang not in ("zh", "en"):
+        return None, JSONResponse({"error": "invalid_lang", "detail": "lang 只有 zh、en"}, status_code=400)
+    if (lang == "en" or worker_path == "/synthesize_stream") and w is not _TTS:
+        return None, JSONResponse({"error": "unsupported", "detail": f"英文與串流合成只有 VoxCPM2（{w['name']} 不支援）"},
+                                  status_code=400)
+    body = {"text": text, "custom": payload.get("custom") or {}, "lang": lang}
+    if worker_path in ("/synthesize", "/synthesize_stream"):
         sha = str(payload.get("voice") or "")
         wav, txt = _tts_voice_paths(sha) if _SHA_RE.match(sha) else (None, None)
         if not wav or not os.path.exists(wav) or not os.path.exists(txt):
@@ -2719,10 +2821,12 @@ def _tts_request(payload, worker_path):
         with open(txt, encoding="utf-8") as f:
             body.update(voice_wav=wav, voice_text=f.read(), steps=payload.get("steps") or 10,
                         cfg=payload.get("cfg") or 2.0)
-    err = _tts_ensure(w=w)
-    if err:
-        return None, JSONResponse({"error": "tts_unavailable", "detail": err}, status_code=503)
-    with w["run_lock"]:
+    if worker_path == "/synthesize_stream":
+        return _tts_stream_open(body, w)
+    with w["run_lock"]:                         # 先拿鎖再確認 worker 在（閒置關閉也要拿這把鎖，見 _tts_idle_check）
+        err = _tts_ensure(w=w)
+        if err:
+            return None, JSONResponse({"error": "tts_unavailable", "detail": err}, status_code=503)
         w["last_used"] = time.time()
         try:
             code, data, headers = _tts_worker_post(worker_path, body, 300, w)
@@ -2748,6 +2852,119 @@ def tts_speech(payload: dict = Body(...)):
         return JSONResponse({"error": "tts_failed", "detail": detail}, status_code=502 if code >= 500 else code)
     keep = {k: v for k, v in headers.items() if k.lower().startswith("x-tts-")}
     return Response(content=data, media_type="audio/wav", headers=keep)
+
+
+def _tts_stream_open(body, w):
+    """串流合成：拿到 worker 的第一段才回應（這之前出錯照一般錯誤回），之後一段一段轉送。
+    合成程式一次一段：鎖拿到送完為止。成功時回 (200, (產生器, 收尾), 標頭)：
+    用戶端中途斷線（按停止、網路斷）時 Starlette 只取消外層迭代、不關這個同步產生器，它的 finally 不會跑
+    （還沒開始跑就斷線時連 close() 都不會進 finally）→ 鎖永遠不放、這台的合成全部卡住。
+    所以呼叫端一定要用 BackgroundTask 跑「收尾」（回應結束、含斷線都會跑），比照辨識的串流（transcribe）"""
+    import http.client
+    import socket
+    w["run_lock"].acquire()                     # 先拿鎖再確認 worker 在（同 _tts_request）
+    err = _tts_ensure(w=w)
+    if err:
+        w["run_lock"].release()
+        return None, JSONResponse({"error": "tts_unavailable", "detail": err}, status_code=503)
+    w["last_used"] = time.time()
+    conn = None
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", w["port"], timeout=300)
+        conn.request("POST", "/synthesize_stream", json.dumps(body), {"Content-Type": "application/json"})
+        sock = conn.sock                    # getresponse 之後 conn.sock 會變 None（Connection: close，連線交給回應）
+        r = conn.getresponse()
+        if r.status != 200:
+            data = r.read()
+            conn.close()
+            w["last_used"] = time.time()
+            w["run_lock"].release()
+            return (r.status, data, dict(r.getheaders())), None
+    except Exception as e:
+        if conn is not None:
+            conn.close()
+        w["run_lock"].release()
+        return (502, json.dumps({"error": f"{w['name']} worker 沒有回應（{type(e).__name__}）"}).encode(), {}), None
+
+    released, rel_lock = [False], threading.Lock()
+
+    def release():
+        """只放一次（產生器跑完、收尾都會叫）。先 shutdown：另一條執行緒還卡在 read 的話會立刻讀到結尾，
+        worker 寫不出去就停止合成（它自己也有一把鎖，下一句會等它停好）"""
+        with rel_lock:
+            if released[0]:
+                return
+            released[0] = True
+        try:
+            sock.shutdown(socket.SHUT_RDWR)     # 讀的執行緒立刻讀到結尾、自己關掉回應（這裡不碰 r，免得兩條執行緒同時關）
+        except OSError:
+            pass
+        conn.close()
+        w["last_used"] = time.time()
+        w["run_lock"].release()
+
+    chunks = queue.Queue()
+
+    def reader():
+        try:
+            while True:
+                b = r.read(9600)                # 48 kHz 16-bit 約 0.1 秒
+                if not b:
+                    break
+                chunks.put(b)
+        except (OSError, ValueError):           # worker 斷線、收尾時 shutdown
+            pass
+        finally:
+            r.close()
+            chunks.put(None)
+    threading.Thread(target=reader, name="tts-stream-read", daemon=True).start()
+
+    def gen():
+        """每 0.5 秒至少交回一次（沒有新的就交空的，uvicorn 不會送出空區塊）：用戶端斷線時 Starlette 取消串流要等 next() 回來，
+        直接在這裡讀 worker 的話，GPU 忙、兩段之間停很久時就要等那麼久才能放鎖"""
+        try:
+            while True:
+                try:
+                    b = chunks.get(timeout=0.5)
+                except queue.Empty:
+                    yield b""
+                    continue
+                if b is None:
+                    break
+                yield b
+        finally:
+            release()
+    g = gen()
+
+    def cleanup():
+        try:
+            g.close()
+        except ValueError:                      # generator already executing：斷線時讀的那條執行緒還在 read
+            pass
+        release()
+    return (200, (g, cleanup), dict(r.getheaders())), None
+
+
+@app.post("/v1/tts/stream")
+def tts_stream(payload: dict = Body(...)):
+    """跟 /v1/tts/speech 一樣的參數，邊合成邊送 16-bit 單聲道 PCM（audio/L16；X-TTS-SR 取樣率）。
+    只有 VoxCPM2；雙向口譯用（v2.28.0），第一段約 0.3 秒就送出、不用等整句"""
+    res, bad = _tts_request(payload, "/synthesize_stream")
+    if bad:
+        return bad
+    code, data, headers = res
+    if code != 200:
+        try:
+            detail = json.loads(data).get("error", "")
+        except Exception:
+            detail = data[:200].decode(errors="replace")
+        return JSONResponse({"error": "tts_failed", "detail": detail}, status_code=502 if code >= 500 else code)
+    keep = {k: v for k, v in headers.items() if k.lower().startswith("x-tts-")}
+    g, cleanup = data
+
+    async def _cleanup_async():
+        await run_in_threadpool(cleanup)
+    return StreamingResponse(g, media_type="audio/L16", headers=keep, background=BackgroundTask(_cleanup_async))
 
 
 @app.post("/v1/tts/convert")
@@ -3043,6 +3260,7 @@ async def transcribe(
     language: str = Form("en"),
     stream: str = Form("false"),
     noisy: str = Form("false"),
+    reject_lang: str = Form(""),
 ):
     """接收音訊檔，回傳辨識結果（stream=true 時串流 NDJSON）。
     noisy=1/true：用戶端音源分析判定為低音量錄音，套用寬鬆參數。
@@ -3298,6 +3516,17 @@ async def transcribe(
         if not await _wait_turn_async(lane, ticket, request):
             return JSONResponse(status_code=499, content={"error": "client_disconnected"})
 
+        # 雙向語音口譯（v2.28.0）：念給使用者聽的中文會被「系統音訊」錄回去，那一路固定用英文辨識，Whisper 會把中文變成
+        # 意思相近的英文、又翻一次 → 用戶端送 reject_lang=zh：先判斷語言，是中文就不辨識、回空的並標 rejected
+        if reject_lang and _backend == "faster-whisper":
+            try:
+                det, prob = await asyncio.to_thread(_detect_language_faster, tmp.name, model)
+            except Exception as e:
+                det, prob = "", 0.0
+                print(f"[警告] 判斷語言失敗（照常辨識）：{e}")
+            if det == reject_lang and prob >= 0.5:
+                return {"text": "", "segments": [], "language": det, "language_probability": round(prob, 3),
+                        "rejected": True, "model": model, "duration": 0, "processing_time": 0, "device": _device}
         # 用 asyncio.to_thread 避免阻塞 event loop
         try:
             if _backend == "openai-whisper":

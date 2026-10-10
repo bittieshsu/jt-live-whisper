@@ -585,7 +585,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.27.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.28.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -614,7 +614,7 @@ if ($Upgrade) {
                        "jtlw_api/keys.py","jtlw_api/log.py","jtlw_api/store.py","jtlw_api/tls.py",
                        "jtlw_api/schemas/jtlw-api-v1.schema.json",
                        # 文字轉語音（v2.27.0）：第一次 -Upgrade 跑舊腳本、拿不到，第二次才會到
-                       "jtlw_tts/__init__.py","jtlw_tts/__main__.py","jtlw_tts/engine.py","jtlw_tts/tw_reading.py",
+                       "jtlw_tts/__init__.py","jtlw_tts/__main__.py","jtlw_tts/engine.py","jtlw_tts/tw_reading.py","jtlw_tts/interp.py",
                        # 內建聲音（2026-10-09，8 個，VoxCPM2 依文字描述產生、不是真人錄音）
                        "jtlw_tts/voices/b00000000001/voice.json","jtlw_tts/voices/b00000000001/ref.wav",
                        "jtlw_tts/voices/b00000000002/voice.json","jtlw_tts/voices/b00000000002/ref.wav",
@@ -624,6 +624,8 @@ if ($Upgrade) {
                        "jtlw_tts/voices/b00000000006/voice.json","jtlw_tts/voices/b00000000006/ref.wav",
                        "jtlw_tts/voices/b00000000007/voice.json","jtlw_tts/voices/b00000000007/ref.wav",
                        "jtlw_tts/voices/b00000000008/voice.json","jtlw_tts/voices/b00000000008/ref.wav",
+                       "jtlw_tts/voices/b00000000009/voice.json","jtlw_tts/voices/b00000000009/ref.wav",
+                       "jtlw_tts/voices/b00000000010/voice.json","jtlw_tts/voices/b00000000010/ref.wav",
                        # 捷徑的 logo 圖示（v2.26.2，tools/build_icons.py 產生）
                        "icons/jt-live-whisper.png","icons/jt-live-whisper.ico","icons/jt-live-whisper.icns")
 

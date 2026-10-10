@@ -30,6 +30,7 @@ VOICES_DIR = os.path.join(ROOT, "tts_voices")
 # 跟著程式發佈與升級；不能刪除、不能改分類。沒有設定聲音時用第一個
 BUILTIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices")
 DEFAULT_BUILTIN = "b00000000001"
+DEFAULT_EN_BUILTIN = "b00000000010"        # 念給對方聽的預設英文聲音：男聲（2026-10-10 使用者試聽後選定）
 TMP_DIR = os.path.join(ROOT, "tts_tmp")
 DATA_DIR = os.path.join(ROOT, "tts_data")       # Apple Silicon 本機：moe_words.tsv、G2PWModel、bert-base-chinese
 MLX_MODEL = "mlx-community/VoxCPM2-8bit"
@@ -88,14 +89,15 @@ def _wav_seconds(path):
         return w.getnframes() / float(w.getframerate())
 
 
-def list_voices():
-    """內建的在前（依編號），自己匯入的接在後面（依匯入時間）"""
+def list_voices(lang="zh"):
+    """內建的在前（依編號），自己匯入的接在後面（依匯入時間）。
+    lang：zh＝朗讀用（沒標語言的都算），en＝雙向口譯念英文用的（v2.28.0 內建 2 個 AI 英文聲音），None＝全部"""
     out = {}
     for base in (BUILTIN_DIR, VOICES_DIR):
         if os.path.isdir(base):
             for vid in os.listdir(base):
                 v = get_voice(vid, missing_ok=True)
-                if v and v["id"] not in out:
+                if v and v["id"] not in out and (lang is None or (v.get("lang") or "zh") == lang):
                     out[v["id"]] = v
     return sorted(out.values(), key=lambda v: (not v.get("builtin"), v.get("created", "") if not v.get("builtin") else v["id"]))
 
@@ -127,8 +129,18 @@ def default_voice_id(cfg):
     return DEFAULT_BUILTIN if get_voice(DEFAULT_BUILTIN, missing_ok=True) else ""
 
 
+def default_en_voice_id():
+    """雙向口譯念英文給對方聽的預設聲音：內建的英文男聲（2026-10-10 實測：台灣華語聲音念英文時 IP、版本號較常念錯；
+    三種試聽後使用者選男聲）。沒有它（第一次升級還拿不到）就用其他內建的英文聲音"""
+    vs = [v for v in list_voices("en") if v.get("builtin")]
+    if any(v["id"] == DEFAULT_EN_BUILTIN for v in vs):
+        return DEFAULT_EN_BUILTIN
+    return vs[0]["id"] if vs else ""
+
+
 def public_voice(v):
     out = {k: v.get(k) for k in ("id", "name", "source", "duration", "created", "transcript")}
+    out["lang"] = v.get("lang") or "zh"
     out["gender"] = v.get("gender") if v.get("gender") in GENDERS else ""
     out["builtin"] = bool(v.get("builtin"))
     return out
@@ -309,10 +321,13 @@ class RemoteProvider:
         if json.loads(resp).get("voice") != voice["sha"]:
             raise TTSError("voice_upload_failed", "GPU 伺服器算出的聲音編號和本機不同（版本不一致？）", 502)
 
-    def synth(self, text, voice, custom, steps=None):
-        """一段（≤300 字）→ (WAV 位元組, 送進模型的文字)"""
+    def synth(self, text, voice, custom, steps=None, lang="zh"):
+        """一段（≤300 字）→ (WAV 位元組, 送進模型的文字)。lang＝en：英文句子（雙向口譯），不套台灣念法"""
         self._ensure_voice(voice)
-        payload = json.dumps({"text": text, "voice": voice["sha"], "custom": custom or {}, "model": self.model}).encode()
+        body = {"text": text, "voice": voice["sha"], "custom": custom or {}, "model": self.model}
+        if lang != "zh":
+            body["lang"] = lang                 # v2.27.0 的伺服器不認得 lang：只在英文時送
+        payload = json.dumps(body).encode()
         for attempt in (1, 2):
             # 第一次可能要啟動 worker（約 30 秒）＋合成
             code, body, headers = _http("POST", self.base + "/v1/tts/speech", payload,
@@ -326,6 +341,38 @@ class RemoteProvider:
             raise TTSError("synth_failed", "GPU 伺服器合成失敗：" + _err_detail(body), status)
         sp = {k.lower(): v for k, v in headers.items()}.get("x-tts-spoken", "")
         return body, urllib.parse.unquote(sp)
+
+    def synth_stream(self, text, voice, lang="zh", block=9600, custom=None):
+        """串流合成（雙向口譯，v2.28.0 起的伺服器）：一段一段產生 (PCM, 取樣率)，第一段約 0.3～0.6 秒就出來。
+        伺服器太舊（沒有 /v1/tts/stream）時丟 TTSError（呼叫端改用 synth）"""
+        import http.client
+        self._ensure_voice(voice)
+        host, port = self.base[len("http://"):].rsplit(":", 1)
+        conn = http.client.HTTPConnection(host, int(port), timeout=120)
+        try:
+            conn.request("POST", "/v1/tts/stream", json.dumps({"text": text, "voice": voice["sha"], "lang": lang,
+                                                                "custom": custom or {}, "model": self.model}),
+                         {"Content-Type": "application/json"})
+            r = conn.getresponse()
+            if r.status != 200:
+                body = r.read()
+                if r.status == 404 and b"voice_not_found" in body:     # 伺服器端的聲音被清掉了：重傳再來一次
+                    conn.close()
+                    self._ensure_voice(voice)
+                    yield from self.synth_stream(text, voice, lang, block, custom)
+                    return
+                raise TTSError("synth_failed", "GPU 伺服器串流合成失敗：" + (_err_detail(body) or f"HTTP {r.status}"),
+                               503 if r.status in (404, 405) else 502)
+            sr = int(r.getheader("X-TTS-SR") or 48000)
+            while True:
+                b = r.read(block)
+                if not b:
+                    break
+                if len(b) % 2:                  # 16-bit：湊成整數個樣本
+                    b += r.read(1)
+                yield b, sr
+        finally:
+            conn.close()
 
     def delete_voice(self, sha):
         """刪掉伺服器快取的參考錄音（v2.27.0 第一版的伺服器沒有這個端點：回 405，當成失敗、之後補刪）"""
@@ -398,11 +445,11 @@ class MlxProvider:
                 MlxProvider._text = text
             return MlxProvider._model, MlxProvider._text
 
-    def synth(self, text, voice, custom, steps=None):
+    def synth(self, text, voice, custom, steps=None, lang="zh"):
         import numpy as np
-        from .tw_reading import _tts_spoken
+        from .tw_reading import _tts_en_text, _tts_spoken
         model, R = self._load()
-        sp = _tts_spoken(R, text, custom)
+        sp = _tts_en_text(text) if lang == "en" else _tts_spoken(R, text, custom)
         with self._lock:
             parts = [np.array(r.audio, dtype=np.float32).reshape(-1) for r in model.generate(
                 text=sp, ref_audio=voice["wav"], prompt_audio=voice["wav"], prompt_text=voice["transcript"],

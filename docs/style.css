@@ -304,3 +304,24 @@ footer a{color:#7fd3ff}
 .rot .ln{display:block}
 @media(max-width:480px){.hero h1.rot{font-size:28px}body.lang-en .hero h1.rot{font-size:26px}}
 @media(prefers-reduced-motion:reduce){.rot-item{transition:none;transform:none}}
+
+/* 合規頁的 ISO 對照表（2026-10-10）：第一欄是「編號＋名稱」，要能換行；英文正式名稱小字另起一行 */
+table.iso{min-width:760px}
+table.iso td:first-child{white-space:normal;width:26%;min-width:190px}
+table.iso td{width:37%}
+.iso-en{display:block;margin-top:3px;color:var(--muted);font-size:12.5px;line-height:1.5}
+.iso-note{margin:0 0 14px;color:var(--muted);font-size:13.5px}
+/* 手機：三欄表要左右滑很久，改成每個控制項一張卡片，欄名放在內容上方 */
+@media(max-width:680px){
+  table.iso{min-width:0}
+  table.iso thead{display:none}
+  table.iso tr{display:block;padding:14px 16px;border-bottom:1px solid var(--line)}
+  table.iso tr:last-child{border-bottom:none}
+  table.iso td,table.iso td:first-child{display:block;width:auto;min-width:0;padding:0;border:none}
+  table.iso td+td{margin-top:10px}
+  table.iso td:nth-child(2)::before,table.iso td:nth-child(3)::before{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:2px}
+  table.iso td:nth-child(2)::before{content:"本工具箱提供的"}
+  table.iso td:nth-child(3)::before{content:"你的組織要做的"}
+  body.lang-en table.iso td:nth-child(2)::before{content:"What the toolbox provides"}
+  body.lang-en table.iso td:nth-child(3)::before{content:"What your organization does"}
+}

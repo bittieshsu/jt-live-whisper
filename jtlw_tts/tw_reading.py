@@ -67,6 +67,41 @@ _TTS_MAX_WORD = 8
 _TTS_SENT_END = "。！？!?；;\n"
 
 
+_TTS_EN_ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+                "sixteen seventeen eighteen nineteen").split()
+_TTS_EN_TENS = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()
+_TTS_EN_MONEY = re.compile(r"(?<![A-Za-z])(NT|US)?\$\s?(\d[\d,]*(?:\.\d+)?)")
+_TTS_EN_DOTTED = re.compile(r"(?<![\w.])([vV]?)(\d+(?:\.\d+){2,})(?![\w]|\.\d)")
+_TTS_EN_COMMA = re.compile(r"(?<![\d.,])(\d{1,3}(?:,\d{3})+)(?![\d,]|\.\d)")
+
+
+def _tts_en_int(n):
+    """英文的整數念法（0～999,999,999,999）"""
+    if n < 20:
+        return _TTS_EN_ONES[n]
+    if n < 100:
+        return _TTS_EN_TENS[n // 10] + ("-" + _TTS_EN_ONES[n % 10] if n % 10 else "")
+    if n < 1000:
+        return _TTS_EN_ONES[n // 100] + " hundred" + (" " + _tts_en_int(n % 100) if n % 100 else "")
+    for div, name in ((10 ** 9, "billion"), (10 ** 6, "million"), (1000, "thousand")):
+        if n >= div:
+            return _tts_en_int(n // div) + " " + name + (" " + _tts_en_int(n % div) if n % div else "")
+
+
+def _tts_en_text(text):
+    """英文句子送進模型前（v2.28.0 雙向口譯）：不套台灣念法、不把數字換成中文（_tts_numbers 會把 1,250,000 換成一百二十五萬）。
+    2026-10-10 GPU 實測三種聲音各 4 句：1,250,000 被念成 150,000、IP 與版本號偶爾念錯 →
+    千分位的數字寫成英文、金額改成「數字＋幣別」、IP／版本號一段一段用 dot 連起來；其他照原文（模型念得對）"""
+    t = " ".join(str(text).split())
+    t = _TTS_EN_MONEY.sub(lambda m: f"{m.group(2)} " + {"NT": "NT dollars", "US": "US dollars"}.get(m.group(1) or "", "dollars"), t)
+    t = _TTS_EN_DOTTED.sub(lambda m: ("version " if m.group(1) else "") + " dot ".join(m.group(2).split(".")), t)
+
+    def comma(m):
+        n = int(m.group(1).replace(",", ""))
+        return _tts_en_int(n) if n < 10 ** 12 else m.group(1)
+    return _TTS_EN_COMMA.sub(comma, t)
+
+
 def _tts_syl(b):
     """教育部注音（ㄌㄜˋ、˙ㄇㄣ、ㄒㄧ）→ 注音＋聲調數字（ㄌㄜ4、ㄇㄣ5、ㄒㄧ1），與 g2pW 的格式相同"""
     if b.startswith("˙"):

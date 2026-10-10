@@ -30,6 +30,7 @@ api_data/
 # WebUI 的靜音與暫停旗標（執行中暫存）
 .mute_*
 .webui_pause
+.webui_interp_*
 
 # IDE
 .vscode/

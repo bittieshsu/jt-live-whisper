@@ -145,9 +145,15 @@ try:
     _EN_INPUT_MODES as _TM_EN_MODES,
     _KO_INPUT_MODES as _TM_KO_MODES,
     _tts_output_devices as _tm_tts_output_devices,
+    _INTERP_MAC_NEED as _TM_INTERP_MAC_NEED,
+    _INTERP_WIN_NO as _TM_INTERP_WIN_NO,
+    _INTERP_VIRTUAL as _TM_INTERP_VIRTUAL,
 )
 except Exception:
     _tm_tts_output_devices = None
+    _TM_INTERP_MAC_NEED = "需要先安裝 BlackHole 2ch"
+    _TM_INTERP_WIN_NO = "Windows 暫不支援「念給對方聽」"
+    _TM_INTERP_VIRTUAL = re.compile(r"blackhole|virtual", re.I)
     _tm_parse_llm_host = None
     _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
                             ("qwen2.5:14b", "品質好，較省記憶體（約需 9GB）")]
@@ -1050,7 +1056,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.27.0",
+        "last": last, "version": "2.28.0",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2,
@@ -1627,6 +1633,17 @@ def _build_args(body: dict) -> list:
     mic_device = body.get("mic_device")
     if mic_device is not None and mic_device != "" and rec_source != "system":
         args.extend(["--mic-device", str(mic_device)])
+    # 雙向語音口譯（v2.28.0）：只有英中雙向即時模式；裝置與聲音由主程式檢查（找不到就說明並結束，不會默默不念）
+    if mode == "en_zh" and not input_files:
+        for k, flag in (("me", "--speak-me"), ("them", "--speak-them")):
+            if body.get(f"interp_{k}"):
+                args.extend([flag, str(body.get(f"interp_{k}_dev") or "default")])
+                if body.get(f"interp_{k}_voice"):
+                    args.extend([f"{flag}-voice", str(body[f"interp_{k}_voice"])])
+        if body.get("interp_them") and body.get("interp_intro") is False:
+            args.extend(["--interp-intro", "none"])
+        if body.get("interp_them") and body.get("interp_passthrough"):
+            args.append("--passthrough")
     return args
 
 
@@ -1690,6 +1707,8 @@ async def api_start(request: Request, body: dict = {}):
             "summary_rounds": body.get("summary_rounds", 1),
             "gen_srt": not body.get("no_srt", False),
             "gen_vtt": not body.get("no_vtt", False),
+            **{k: body.get(k) for k in ("interp_me", "interp_me_dev", "interp_me_voice", "interp_them", "interp_them_dev",
+                                        "interp_them_voice", "interp_intro", "interp_passthrough") if k in body},
         }
         # 同步字幕轉發、關鍵字通知、懸浮字幕的啟用狀態（避免不勾但沒按儲存，下次還是啟用）
         if "fwd_enabled" in body:
@@ -1728,8 +1747,22 @@ async def api_switch_device(request: Request, body: dict = {}):
         start_body["device"] = device_id
     # 廣播切換中事件
     await broadcast(json.dumps({"type": "switching", "message": "正在切換音訊裝置..."}))
+    # 雙向語音口譯在 Linux 自動建立的虛擬麥克風：舊的程式不要移除、新的程式接手（會議軟體選的麥克風才一直有效）
+    keep = bool(start_body.get("interp_them")) and str(start_body.get("interp_them_dev") or "") == "auto"
+    if keep:
+        try:
+            INTERP_KEEP.write_text("switch", encoding="utf-8")
+        except OSError:
+            keep = False
     # 停止目前程序（純錄音要等舊的那段轉檔存好，放執行緒裡等，不卡住事件迴圈）
-    await asyncio.to_thread(_stop_proc)
+    try:
+        await asyncio.to_thread(_stop_proc)
+    finally:
+        if keep:
+            try:
+                INTERP_KEEP.unlink()
+            except OSError:
+                pass
     await asyncio.sleep(0.5)
     # 用新設定重新啟動
     try:
@@ -1814,6 +1847,18 @@ def _tts_fail(e):
     return JSONResponse({"ok": False, "error": e.message, "code": e.code}, status_code=e.status)
 
 
+def _interp_them_info(devices):
+    """念給對方聽在這台能不能用、要先裝什麼（v2.28.0，2026-10-10 使用者：「要特別標示需要安裝 blackhole」、Windows 暫不支援）。
+    說明文字用主程式那一份（命令列、互動選單、WebUI 同一句話）"""
+    if sys.platform.startswith("linux"):
+        return {"supported": True, "auto": True, "note": "Linux 自動建立虛擬麥克風，不用安裝"}
+    if sys.platform == "darwin":
+        return {"supported": True, "auto": False, "need": _TM_INTERP_MAC_NEED,
+                "found": any(_TM_INTERP_VIRTUAL.search(d.get("name") or "") for d in devices),
+                "found_note": "已偵測到 BlackHole 2ch：會議軟體的麥克風改選「BlackHole 2ch」，結束後記得改回來"}
+    return {"supported": False, "note": _TM_INTERP_WIN_NO}
+
+
 def _tts_info(admin, refresh=False):
     """設定頁「文字內容朗讀」要的全部資訊。合成位置分開回報能不能用（不能用的說明原因，前端反灰）"""
     if _tts is None:
@@ -1840,6 +1885,10 @@ def _tts_info(admin, refresh=False):
     out = {"installed": True, "locations": locs,
            "models": models,
            "voices": voices, "voice": _tts.default_voice_id(cfg),
+           # 雙向語音口譯（v2.28.0）：念英文給對方聽的聲音、Linux 可以自動建立虛擬麥克風
+           "en_voices": [_tts.public_voice(v) for v in _tts.list_voices("en")], "en_voice": _tts.default_en_voice_id(),
+           "interp_auto_sink": sys.platform.startswith("linux"),
+           "interp_them": _interp_them_info(devices),
            "provider": s["provider"], "mac_steps": s["mac_steps"], "genders": _tts.GENDERS,
            "pauses": list(_tts.PAUSES), "rate_range": [_tts.RATE_MIN, _tts.RATE_MAX],
            "output_devices": devices, "max_chars": s["max_chars"], "text_exts": list(_tts.TEXT_EXTS)}
@@ -2008,6 +2057,38 @@ def _tts_warm_run(where, model):
         pass
     finally:
         _TTS_WARM[model]["running"] = False
+
+
+INTERP_CMD = BASE_DIR / ".webui_interp_cmd"   # translate_meeting.py 的 _INTERP_CMD_FILE（一行一個指令）
+INTERP_KEEP = BASE_DIR / ".webui_interp_keep"  # translate_meeting.py 的 _INTERP_KEEP_FILE（切換裝置時虛擬麥克風不要移除）
+
+
+@app.post("/api/interp")
+def api_interp(request: Request, body: dict = {}):
+    """管理者：雙向語音口譯的控制（v2.28.0）。{action: cancel, id}＝取消還沒念的那句；{action: mute, lane: me|them, on}＝靜音某個方向。
+    寫進指令檔，主程式每 0.2 秒讀一次（跟暫停旗標同一種做法：Windows 沒有可用的信號）"""
+    err = _check_auth(request, "admin")
+    if err:
+        return JSONResponse({"ok": False, "error": err}, status_code=403)
+    act = body.get("action")
+    if act == "cancel":
+        try:
+            line = f"cancel {int(body.get('id'))}"
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "error": "id 要是數字"}, status_code=400)
+    elif act == "mute" and body.get("lane") in ("me", "them"):
+        line = f"mute {body['lane']} {1 if body.get('on') else 0}"
+    else:
+        return JSONResponse({"ok": False, "error": "action 只有 cancel、mute"}, status_code=400)
+    p = _proc                                   # 不拿 _proc_lock：停止時它可能被拿著好幾分鐘（等存檔）
+    if p is None or p.poll() is not None:
+        return JSONResponse({"ok": False, "error": "沒有在執行"}, status_code=409)
+    try:
+        with open(INTERP_CMD, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError as e:
+        return JSONResponse({"ok": False, "error": f"寫不進指令檔：{e}"}, status_code=500)
+    return {"ok": True}
 
 
 @app.post("/api/tts/warm")

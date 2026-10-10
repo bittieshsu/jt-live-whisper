@@ -619,6 +619,11 @@ def _force_exit(code=0):
     # 結束懸浮字幕子程序（os._exit 不會觸發 atexit）
     global _overlay_proc_ref
     _webui_flush()                      # os._exit 也不會跑 atexit 的送完事件
+    if _interp_modules:                 # 雙向口譯在 Linux 建的虛擬麥克風（atexit 不會跑，第二次 Ctrl+C／WebUI 強制停止走這裡）
+        try:
+            _interp_linux_cleanup()
+        except Exception:
+            pass
     if _overlay_proc_ref is not None:
         try:
             _overlay_proc_ref.terminate()
@@ -2512,7 +2517,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.27.0"
+APP_VERSION = "2.28.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -2870,7 +2875,7 @@ def _start_webui_pause_watch():
 # --webui 啟動時透過 TCP socket 將事件推送到 webui.py
 # 不啟用時 _webui_send() 是 no-op，零效能影響
 _webui_queue = None  # queue.Queue，啟用時才建立
-_WEBUI_PORT = 19780
+_WEBUI_PORT = int(os.environ.get("JTLW_WEBUI_EVENT_PORT") or 19780)   # 環境變數只給測試用（e2e 不跟別的 WebUI 搶 19780）
 
 
 def _webui_send_realtime_results(log_path=None, rec_paths=None):
@@ -6132,10 +6137,11 @@ def _remote_whisper_transcribe_once(rw_cfg, wav_path, model, language,
     return segments, duration, proc_time, device
 
 
-def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout=120):
+def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout=120, reject_lang=None):
     """POST 記憶體中的 WAV bytes 到伺服器 /v1/audio/transcriptions
     （即時模式用，每次 ~160KB 不需進度回報）
-    回傳 (segments, full_text, proc_time)"""
+    回傳 (segments, full_text, proc_time)。reject_lang（雙向語音口譯，v2.28.0）：伺服器先判斷語言，是這個語言就不辨識、
+    丟 _AudioRejected（舊伺服器不認得這個欄位，照常辨識）"""
     host = rw_cfg["host"]
     port = rw_cfg.get("whisper_port", REMOTE_WHISPER_DEFAULT_PORT)
     url = f"http://{host}:{port}/v1/audio/transcriptions"
@@ -6167,6 +6173,12 @@ def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout
         f"{language}\r\n"
     )
 
+    if reject_lang:
+        body_parts.append(
+            f"--{boundary}\r\n"
+            f"Content-Disposition: form-data; name=\"reject_lang\"\r\n\r\n"
+            f"{reject_lang}\r\n"
+        )
     body_parts.append(f"--{boundary}--\r\n")
 
     body = b""
@@ -6183,10 +6195,16 @@ def _remote_whisper_transcribe_bytes(rw_cfg, wav_bytes, model, language, timeout
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read().decode())
 
+    if data.get("rejected"):
+        raise _AudioRejected(data.get("language") or reject_lang)
     segments = data.get("segments", [])
     full_text = data.get("text", "").strip()
     proc_time = data.get("processing_time", 0)
     return segments, full_text, proc_time
+
+
+class _AudioRejected(Exception):
+    """GPU 伺服器判斷這段是 reject_lang 的語言、沒有辨識（雙向語音口譯：系統音訊錄到自己念的中文）"""
 
 
 def _remote_diarize(rw_cfg, wav_path, segments, num_speakers=None,
@@ -9016,9 +9034,13 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
     # ── 提取音訊並寫入暫存 WAV（原始取樣率，讓 faster-whisper 正確 resample）──
     import tempfile as _tempfile
     _tmp_wav_dir = _tempfile.gettempdir()
+    _fw_wav_seq = [0]                   # 每段遞增（同雙向模式的 _wav_counter）
 
     def extract_wav_file():
-        """提取環形緩衝，寫入暫存 WAV 檔，回傳檔案路徑和 RMS。"""
+        """提取環形緩衝，寫入暫存 WAV 檔，回傳檔案路徑和 RMS。
+        每一段用自己的檔名：最多同時 2 段在辨識（_MAX_CONCURRENT_TRANSCRIPTIONS），以前都寫同一個 jt_fw_<pid>.wav——
+        Windows 第二段寫不進去（Permission denied，那一段辨識失敗）、Linux／macOS 直接蓋掉前一段正在讀的檔
+        （辨識到錯的音訊、前一段刪檔時連這一段也刪掉），2026-10-10 守門抓到"""
         with ring_lock:
             pos = ring_write_pos
             buf_copy = ring_buffer.copy()
@@ -9026,7 +9048,8 @@ def run_stream_local_whisper(capture_id: int, translator, model_name: str,
         rms = float(np.sqrt(np.mean(ordered ** 2)))
         ordered = _denoise(ordered, sd_samplerate)
         pcm = (ordered * 32767).clip(-32768, 32767).astype(np.int16)
-        tmp_path = os.path.join(_tmp_wav_dir, f"jt_fw_{os.getpid()}.wav")
+        _fw_wav_seq[0] += 1
+        tmp_path = os.path.join(_tmp_wav_dir, f"jt_fw_{os.getpid()}_{_fw_wav_seq[0]}.wav")
         with wave.open(tmp_path, "wb") as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
@@ -9417,14 +9440,16 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                               use_mlx: bool = False,
                               mic_translate: bool = True,
                               denoise: bool = False,
-                              mic_remote_cfg: dict = None):
+                              mic_remote_cfg: dict = None,
+                              interp=None):
     """雙向即時翻譯：兩路音訊串流 → 共用 faster-whisper/mlx-whisper → 各自翻譯 → 交錯輸出。
     lb_device_id: 系統音訊（BlackHole / WASAPI Loopback）
     mic_device_id: 麥克風
     translator_lb: 系統音訊翻譯器（翻譯方向依模式決定，純轉錄模式為 None）
     translator_mic: 麥克風翻譯器（mic_translate=True 時使用，False 時為 None）
     use_mlx: True 時使用 mlx-whisper GPU 加速（僅 Apple Silicon）
-    mic_translate: True=麥克風也翻譯（雙向模式），False=麥克風只轉錄（--mic 模式）"""
+    mic_translate: True=麥克風也翻譯（雙向模式），False=麥克風只轉錄（--mic 模式）
+    interp: 雙向語音口譯（_interp_build 建好、還沒啟動的 Interpreter；v2.28.0）"""
     import numpy as np
 
     bidi_cfg = _BIDI_LABELS[mode]  # {"loopback": (...), "mic": (...)}
@@ -9759,6 +9784,24 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
     pause_event = threading.Event()
     global _webui_pause_event; _webui_pause_event = pause_event
     print_lock = threading.Lock()
+    if interp is not None:
+        from jtlw_tts import interp as _I
+        interp.audio.pause_ev = pause_event          # 暫停時語音也停
+        interp.on_event = lambda e: _interp_event(e, print_lock)
+        interp.start()
+        threading.Thread(target=_interp_watch_cmds, args=(interp, stop_event), daemon=True).start()
+        threading.Thread(target=interp.warm, daemon=True).start()      # 先叫醒 GPU 的合成程式
+        if getattr(interp, "passthrough", None) is not None:
+            interp.passthrough.start()
+        _names = {"me": "念給我聽（中文）", "them": "念給對方聽（英文）"}
+        _how = "GPU 伺服器串流合成" if interp.streaming else getattr(interp.provider, "label", "")
+        print(f"{C_DIM}語音口譯：{'、'.join(_names[k] for k in interp.lanes)}｜{_how}｜"
+              f"念過的句子 20 秒內被錄回來會自動略過；請戴耳機{RESET}")
+        if _I.THEM in interp.lanes:
+            print(f"{C_DIM}  會議軟體的麥克風請改選虛擬麥克風；結束後記得改回來"
+                  f"{'（同時送出你的原聲，念英文時調小）' if getattr(interp, 'passthrough', None) else ''}{RESET}")
+    _interp_intro_done = [interp is None or not getattr(interp, "intro", None)]
+    _pt = getattr(interp, "passthrough", None) if interp is not None else None
     setup_terminal_raw_input()
     kp_thread = threading.Thread(
         target=keypress_listener_thread,
@@ -9811,6 +9854,8 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         else:
             audio = audio.flatten()
         _push_rms(float(np.sqrt(np.mean(audio ** 2))))
+        if _pt is not None:
+            _pt.push(audio, mic_sr)
         if recorder_mic:
             recorder_mic.write(audio)
         n = len(audio)
@@ -10166,9 +10211,13 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                 _log_prefix = "◀ " if source == "loopback" else "▶ "
                 with open(log_path, "a", encoding="utf-8") as log_f:
                     log_f.write(f"[{timestamp}] {_log_prefix}[{src_label}] {src_text}\n\n")
+                _iid = None
+                if interp is not None and source == "mic" and label_override == "EN" and _pt is None:
+                    _iid = _interp_say("them", src_text, src_text)   # 我直接講英文：照原文念給對方（同時送出原聲時對方已經聽到了，不再念一次）
                 _webui_send({"type": "transcription", "source": source,
                              "src_lang": src_label, "src_text": src_text,
-                             "asr_time": round(asr_elapsed, 1), "timestamp": timestamp})
+                             "asr_time": round(asr_elapsed, 1), "timestamp": timestamp,
+                             **({"interp_id": _iid} if _iid else {})})
                 continue
             if not result:
                 if not isinstance(result, _TranslateFailed):
@@ -10189,12 +10238,23 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
             with open(log_path, "a", encoding="utf-8") as log_f:
                 log_f.write(f"[{timestamp}] {_log_prefix}[{src_label}] {src_text}\n")
                 log_f.write(f"[{timestamp}] {_log_prefix}[{dst_label}] {result}\n\n")
+            _iid = None
+            if interp is not None and not isinstance(result, _TranslateFailed) and result != "（翻譯失敗）":
+                _iid = _interp_say("me" if source == "loopback" else "them", result, src_text)
             _webui_send({"type": "transcription", "source": source,
                          "src_lang": src_label, "src_text": src_text,
                          "dst_lang": dst_label, "dst_text": result,
                          "asr_time": round(asr_elapsed, 1),
                          "translate_time": round(elapsed, 1),
-                         "timestamp": timestamp})
+                         "timestamp": timestamp,
+                         **({"interp_id": _iid} if _iid else {})})
+
+    def _interp_say(lane, text, src):
+        """排進口譯；給對方的第一句之前先念開場說明"""
+        if lane == "them" and not _interp_intro_done[0]:
+            _interp_intro_done[0] = True
+            interp.speak("them", interp.intro)
+        return interp.speak(lane, text, src)
 
     def translate_and_print(seq, src_text, translator, pending, next_seq, lock, source, asr_elapsed=0):
         with _active_trans_lock:
@@ -10239,7 +10299,7 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
 
     _slow_warned = [False]
 
-    def transcribe_chunk(seq, wav_path, lang, pending_res, res_lock, use_remote=False):
+    def transcribe_chunk(seq, wav_path, lang, pending_res, res_lock, use_remote=False, reject_lang=None):
         with _active_lock:
             _active_transcriptions[0] += 1
         try:
@@ -10255,9 +10315,15 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                     with open(wav_path, "rb") as _rf:
                         _wav_bytes = _rf.read()
                     _segs, _full, _pt = _remote_whisper_transcribe_bytes(
-                        mic_remote_cfg, _wav_bytes, model_name, _rl, timeout=30)
+                        mic_remote_cfg, _wav_bytes, model_name, _rl, timeout=30, reject_lang=reject_lang)
                     with res_lock:
                         pending_res[seq] = (_segs, _full, _pt, _rl)
+                    return
+                except _AudioRejected as _rj:
+                    # 雙向語音口譯：系統音訊錄到的是念給我聽的中文（GPU 伺服器判斷語言），不辨識、不翻
+                    _webui_send({"type": "interp", "state": "echo", "lane": "me", "text": f"（系統音訊是{_rj}：自己念的）"})
+                    with res_lock:
+                        pending_res[seq] = _TRANSCRIBE_FAILED
                     return
                 except Exception as _re:
                     # 遠端失敗 → 降級本機辨識
@@ -10376,6 +10442,11 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                     continue
                 if is_duplicate(line, recent):
                     continue
+                if interp is not None and interp.guard.is_echo(line, during="me" if source == "loopback" else None):
+                    # 自己念出來的聲音被錄回來（耳機漏音、系統音訊錄到、對方沒有回音消除）：不翻、不念
+                    _webui_send({"type": "interp", "state": "echo", "lane": "me" if source == "loopback" else "them",
+                                 "text": line})
+                    continue
                 recent.append(line.lower().strip())
                 seq = trans_seq[0]; trans_seq[0] += 1
                 if translator is None or _skip_this:
@@ -10421,6 +10492,14 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                 s.close()
             except Exception:
                 pass
+        # 口譯：先移除虛擬裝置（很快；pacat 跟著結束），執行緒與播放最後才收（最慢）：
+        # WebUI 停止 4 秒沒有心跳就送 SIGTERM，第二次進信號處理會直接 _force_exit，錄音要先存好
+        if interp is not None:
+            interp.stop(wait=0)                 # 先通知停（不等），之後裝置被移除的錯誤就不會當成失敗印出來
+            if _interp_linux_cleanup():
+                pass                            # WebUI 切換裝置：虛擬麥克風留給重新啟動的程式，會議軟體不用改
+            elif "them" in interp.lanes:
+                print(f"\n  {C_WARN}語音口譯已停止：會議軟體的麥克風請改回原本的麥克風，否則對方聽不到你{RESET}", flush=True)
         if recorder_lb:
             p1 = recorder_lb.close()
             print(f"\n  {C_OK}錄音已儲存: {p1}{RESET}", flush=True)
@@ -10430,6 +10509,11 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         if recorder_lb or recorder_mic:
             print(f"  {C_DIM}提示: 可再次執行本程式，選擇「讀入檔案」匯入錄音檔，產生逐字稿校正與 AI 摘要{RESET}", flush=True)
             _webui_send_realtime_results(log_path, [p1 if recorder_lb else None, p2 if recorder_mic else None])
+        if interp is not None:
+            interp.stop(wait=0.5)
+            interp.audio.close()
+            if _pt is not None:
+                _pt.stop()
         return _still_active
 
     _sigint_count = [0]
@@ -10562,7 +10646,8 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
                             _lb_use_remote = bool(mic_remote_cfg)
                             threading.Thread(
                                 target=transcribe_chunk,
-                                args=(seq, wav_path, lb_lang, lb_pending_results, lb_results_lock, _lb_use_remote),
+                                args=(seq, wav_path, lb_lang, lb_pending_results, lb_results_lock, _lb_use_remote,
+                                      _interp_reject_lang(interp, _pt, length_ms)),
                                 daemon=True,
                             ).start()
                         else:
@@ -11823,6 +11908,13 @@ def _tts_list():
             mark = f"  {C_DIM}內建{RESET}" + mark
         g = T.GENDERS.get(v.get("gender") or "", "")
         print(f"  {v['id']}  {v['name']}{'（' + g + '）' if g else ''}  {C_DIM}{v.get('duration')} 秒，來源：{v.get('source')}{RESET}{mark}")
+    en = T.list_voices("en")
+    if en:
+        print(f"\n{C_TITLE}{BOLD}▎ 英文聲音（雙向口譯念給對方聽，--speak-them-voice）{RESET}")
+        en_vid = T.default_en_voice_id()
+        for v in en:
+            mark = (f"  {C_DIM}內建{RESET}" if v.get("builtin") else "") + (f"  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}" if v["id"] == en_vid else "")
+            print(f"  {v['id']}  {v['name']}  {C_DIM}{v.get('duration')} 秒，來源：{v.get('source')}{RESET}{mark}")
     print(f"\n{C_TITLE}{BOLD}▎ 播放裝置{RESET}")
     devs = _tts_output_devices()
     if not devs:
@@ -11854,6 +11946,495 @@ def _tts_open_stream(dev, sr):
         st = sd.RawOutputStream(samplerate=osr, channels=1, dtype="int16", device=dev)
         st.start()
         return st, osr
+
+
+# ── 雙向語音口譯（v2.28.0，規格 specs/2026-10-09_雙向語音口譯規格_v0.1.md）──────────────
+# 對方說的英文（系統音訊）翻成中文 → 念給我聽（耳機）；我說的中文（麥克風）翻成英文 → 念進虛擬麥克風給對方聽。
+# 排程與回授過濾在 jtlw_tts/interp.py；這裡是裝置、合成與接到雙向模式
+_INTERP_MODES = ("en_zh",)
+# 念給對方聽要把英文送進會議軟體的麥克風：要有虛擬麥克風（2026-10-10 使用者決定）。
+# macOS 安裝 BlackHole 2ch（GPL-3.0，免費）；Linux 程式自動建立；Windows 暫不支援（常見的虛擬音效卡是捐贈軟體、公司使用要付費，
+# 授權不合適；開放原始碼的驅動要開測試簽章模式才裝得起來）
+_INTERP_MAC_NEED = "需要先安裝 BlackHole 2ch（免費，GPL-3.0）：brew install --cask blackhole-2ch，裝完重新開機；會議軟體的麥克風改選「BlackHole 2ch」"
+_INTERP_WIN_NO = "Windows 暫不支援「念給對方聽」（需要虛擬麥克風，目前沒有授權合適的方案），可以先用「念給我聽」"
+_INTERP_SINK = "jtlw_interp"                 # Linux --speak-them auto 自動建立的虛擬裝置（結束時移除）
+_INTERP_SRC = "jtlw_interp_mic"
+_interp_modules = []                         # 自己載入（或接手上一次留下）的 PulseAudio 模組編號
+_interp_atexit = [False]
+
+
+def _interp_linux_sink():
+    """Linux：建立虛擬喇叭（念給對方聽的英文播到這裡）＋把它的聲音當成麥克風（會議軟體選「jt-live-whisper 口譯麥克風」）。
+    上一次沒收乾淨（當掉、被強制結束）留下的就接手：記進 _interp_modules，結束時一起移除（以前沿用但不記，永遠不會被移除）。
+    結束時一定移除：雙向模式的收尾、_force_exit、atexit（載入模型時按 Ctrl+C 會直接 sys.exit）。回傳錯誤說明或 None"""
+    import subprocess as sp
+    try:
+        mods = sp.run(["pactl", "list", "short", "modules"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, sp.SubprocessError) as e:
+        return f"找不到 pactl（PipeWire／PulseAudio），不能建立虛擬麥克風：{type(e).__name__}"
+    have = {}
+    for line in mods.splitlines():
+        f = line.split("\t")
+        if len(f) >= 3 and f[1] == "module-null-sink" and f"sink_name={_INTERP_SINK}" in f[2].split():
+            have["sink"] = f[0]
+        if len(f) >= 3 and f[1] == "module-remap-source" and f"source_name={_INTERP_SRC}" in f[2].split():
+            have["src"] = f[0]
+    for k in ("sink", "src"):
+        if k in have and have[k] not in _interp_modules:
+            _interp_modules.append(have[k])
+    cmds = []
+    if "sink" not in have:
+        cmds.append(["pactl", "load-module", "module-null-sink", f"sink_name={_INTERP_SINK}",
+                     "sink_properties=device.description=jt-live-whisper-interpreter"])
+    if "src" not in have:
+        cmds.append(["pactl", "load-module", "module-remap-source", f"master={_INTERP_SINK}.monitor",
+                     f"source_name={_INTERP_SRC}", "source_properties=device.description=jt-live-whisper-interpreter-mic"])
+    if not _interp_atexit[0]:
+        _interp_atexit[0] = True
+        atexit.register(_interp_linux_cleanup)
+    for c in cmds:
+        r = sp.run(c, capture_output=True, text=True, timeout=5)
+        if r.returncode != 0:
+            return f"建立虛擬麥克風失敗：{(r.stderr or r.stdout).strip()[:200]}"
+        _interp_modules.append(r.stdout.strip())
+    return None
+
+
+def _interp_linux_cleanup():
+    """移除虛擬麥克風。WebUI 切換裝置（重新啟動主程式）時保留給新的程式接手（.webui_interp_keep，60 秒內寫的才算）：
+    移除的話會議軟體會改用實體麥克風，新的建好之後也不會自己切回來，對方就聽到原聲而不是英文。回傳是不是保留了"""
+    import subprocess as sp
+    try:
+        if _interp_modules and time.time() - os.path.getmtime(_INTERP_KEEP_FILE) < 60:
+            _interp_modules.clear()
+            return True
+    except OSError:
+        pass
+    while _interp_modules:
+        m = _interp_modules.pop()
+        try:
+            sp.run(["pactl", "unload-module", m], capture_output=True, timeout=5)
+        except (OSError, sp.SubprocessError):
+            pass
+    return False
+
+
+def _interp_find_device(spec):
+    """--speak-me／--speak-them 的裝置 → ((種類, 值), 錯誤)。種類：sd＝sounddevice 編號（None＝系統預設）；
+    pulse＝Linux 的 PulseAudio／PipeWire 裝置名稱（sounddevice 在 Linux 只看得到 ALSA，個別的虛擬裝置要用 pacat 播）"""
+    spec = str(spec).strip()
+    if spec.lower() == "default":
+        return ("sd", None), None
+    if spec.lstrip("-").isdigit():
+        # 編號一律是 sounddevice 的（WebUI、互動選單送的都是）；要先判斷，不然 Linux 會拿「1」去比對
+        # PulseAudio 裝置名稱的一部分（alsa_output.pci-0000_00_1f...），播到別的裝置
+        import sounddevice as sd
+        try:
+            devs = sd.query_devices()
+        except Exception as e:
+            return None, f"列不出播放裝置：{type(e).__name__}: {e}"
+        i = int(spec)
+        if 0 <= i < len(devs) and devs[i]["max_output_channels"] > 0:
+            return ("sd", i), None
+        return None, f"沒有編號 {i} 的播放裝置（--tts-list 列出全部）"
+    if spec.lower() == "auto":
+        if not IS_LINUX:
+            return None, ("auto 只有 Linux（自動建立虛擬麥克風）。" + (_INTERP_MAC_NEED + "，再用 --speak-them \"BlackHole\" 指定"
+                                                                       if IS_MACOS else _INTERP_WIN_NO))
+        err = _interp_linux_sink()
+        return (None, err) if err else (("pulse", _INTERP_SINK), None)
+    if IS_LINUX:
+        import subprocess as sp
+        try:
+            sinks = [l.split("\t")[1] for l in sp.run(["pactl", "list", "short", "sinks"], capture_output=True,
+                                                         text=True, timeout=5).stdout.splitlines() if "\t" in l]
+        except (OSError, sp.SubprocessError):
+            sinks = []
+        hit = [s for s in sinks if s == spec] or [s for s in sinks if spec.lower() in s.lower()]
+        if hit:
+            return ("pulse", hit[0]), None
+    import sounddevice as sd
+    try:
+        devs = list(enumerate(sd.query_devices()))
+    except Exception as e:
+        return None, f"列不出播放裝置：{type(e).__name__}: {e}"
+    hit = [i for i, d in devs if d["max_output_channels"] > 0 and spec.lower() in d["name"].lower()]
+    if not hit:
+        return None, f"找不到名稱含「{spec}」的播放裝置（--tts-list 列出全部）"
+    return ("sd", hit[0]), None
+
+
+def _resample_pcm(pcm, sr, osr):
+    """16-bit 單聲道線性內插重新取樣（串流的每一段都要換時用；整句的用 ffmpeg）"""
+    import numpy as np
+    x = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+    if not len(x) or sr == osr:
+        return pcm
+    n = max(1, int(round(len(x) * osr / sr)))
+    y = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)
+    return np.clip(y, -32768, 32767).astype("<i2").tobytes()
+
+
+class _InterpAudio:
+    """每個方向一個播放裝置：sounddevice 的 RawOutputStream，或 Linux 的 pacat（指定 PulseAudio 裝置）"""
+
+    def __init__(self, devices, pause_ev=None):
+        self.devices = devices                     # {lane: (種類, 值)}
+        self.pause_ev = pause_ev or threading.Event()
+        self._out = {}                             # lane → (物件, 實際取樣率, 模型取樣率)
+        self._end = {}                             # lane → pacat 預計播完的時間
+
+    def _open(self, lane, sr):
+        kind, val = self.devices[lane]
+        if kind == "pulse":
+            import subprocess as sp
+            p = sp.Popen(["pacat", "--playback", f"--device={val}", "--format=s16le", f"--rate={sr}", "--channels=1",
+                          "--latency-msec=100"], stdin=sp.PIPE, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+            return p, sr
+        return _tts_open_stream(val, sr)
+
+    def play(self, lane, pcm, sr):
+        cur = self._out.get(lane)
+        if cur is None or cur[2] != sr:
+            self._close(lane)
+            obj, osr = self._open(lane, sr)
+            cur = self._out[lane] = (obj, osr, sr)
+        obj, osr, _ = cur
+        if osr != sr:
+            pcm = _resample_pcm(pcm, sr, osr)
+        try:
+            if hasattr(obj, "stdin"):
+                while self.pause_ev.is_set():
+                    time.sleep(0.1)
+                # pacat 不會等播完：照時間軸等到這段快播完（留一點緩衝，段與段之間才不會斷）。
+                # 管線滿的時候 write 本身就會擋（pacat 照播放速度讀），所以不可以寫完再整段等一次（以前 5 秒的段落要 9 秒）
+                now = time.monotonic()
+                end = max(now, self._end.get(lane, 0.0)) + len(pcm) / 2 / osr
+                self._end[lane] = end
+                obj.stdin.write(pcm)
+                obj.stdin.flush()
+                time.sleep(max(0.0, end - time.monotonic() - 0.3))
+            else:
+                _tts_play(obj, pcm, osr, self.pause_ev)
+        except Exception:
+            self._close(lane)                       # 耳機拔掉、pacat 結束：丟掉這個串流，下一句重新開（以前之後每句都失敗）
+            raise
+
+    def _close(self, lane):
+        cur = self._out.pop(lane, None)
+        self._end.pop(lane, None)
+        if not cur:
+            return
+        obj = cur[0]
+        try:
+            if hasattr(obj, "stdin"):
+                obj.stdin.close()
+                obj.wait(timeout=3)
+            else:
+                obj.stop()
+                obj.close()
+        except Exception:
+            pass
+
+    def close(self):
+        for lane in list(self._out):
+            self._close(lane)
+
+
+class _InterpPassthrough:
+    """同時送出原音（--passthrough）：麥克風的聲音即時送進虛擬麥克風，對方也聽得到你的原聲；念英文時原聲調小。
+    跟念出來的英文是兩個播放串流，混音由系統做（BlackHole、虛擬音效卡、PulseAudio 都會混）。
+    暫停時照樣送（暫停的是口譯，不是你的麥克風）；WebUI 把麥克風靜音時不送"""
+    DUCK = 0.25
+    MAX_Q = 20                      # 約 2 秒：裝置卡住寫不出去時丟掉舊的，延遲不會越積越長
+
+    def __init__(self, device, guard):
+        import queue
+        self.audio = _InterpAudio({"pt": device})
+        self.guard = guard
+        self.q, self._empty = queue.Queue(), queue.Empty
+        self._stop = threading.Event()
+        self.error = None
+
+    def start(self):
+        threading.Thread(target=self._loop, name="interp-passthrough", daemon=True).start()
+        return self
+
+    def push(self, audio, sr):
+        """audio：float32 單聲道（-1～1）"""
+        import numpy as np
+        if self._stop.is_set() or self.error:
+            return
+        g = self.DUCK if self.guard.busy("them") else 1.0
+        pcm = (np.clip(np.asarray(audio, dtype=np.float32) * g, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        while self.q.qsize() >= self.MAX_Q:
+            try:
+                self.q.get_nowait()
+            except self._empty:
+                break
+        self.q.put((pcm, sr))
+
+    def _loop(self):
+        while not self._stop.is_set():
+            try:
+                pcm, sr = self.q.get(timeout=0.3)
+            except self._empty:
+                continue
+            try:
+                self.audio.play("pt", pcm, sr)
+            except Exception as e:
+                self.error = f"{type(e).__name__}: {e}"[:200]
+                with _interp_print_lock:
+                    print(f"{C_DIM}  [口譯給對方] 原音送不出去，只送英文：{self.error}{RESET}", flush=True)
+                return
+
+    def stop(self):
+        self._stop.set()
+        self.audio.close()
+
+
+def _interp_build(args, mode, pause_ev=None):
+    """命令列的口譯參數 → (Interpreter（還沒啟動）, None)、(None, 錯誤說明)；沒有開口譯時 (None, None)"""
+    if not (args.speak_me or args.speak_them):
+        return None, None
+    if mode not in _INTERP_MODES:
+        return None, "語音口譯目前只支援英中雙向（--mode en_zh）"
+    try:
+        import jtlw_tts as T
+        from jtlw_tts import interp as I
+    except Exception as e:                       # 從舊版第一次 --upgrade 拿不到新加的 interp.py（舊的安裝程式、舊的清單）
+        return None, f"語音口譯元件不完整（{type(e).__name__}: {e}）：請再執行一次升級"
+    cfg = load_config()
+    s = T.settings(cfg)
+    # 合成只用 GPU 伺服器：Apple Silicon 本機合成約跟說話一樣快，兩個方向加上辨識跟不上（規格第一節）
+    prov, why = T.pick_provider(cfg, refresh=True, where="remote")
+    if prov is None:
+        return None, f"語音口譯要在 GPU 伺服器合成：{why}"
+    try:
+        health = prov.health()
+    except Exception:
+        health = {}
+    stream = bool(health.get("stream"))
+    if args.speak_them and "en" not in (health.get("langs") or ()):
+        # v2.27.0 的伺服器不認得 lang=en：英文句子會套台灣念法、數字念成中文，念給對方聽一定錯
+        return None, (f"GPU 伺服器的版本太舊（{health.get('version') or '不明'}），念不對英文：念給對方聽要 v2.28.0 以上的伺服器"
+                      "（設定了自動更新密鑰會自己更新，否則請在 GPU 伺服器更新 server.py）")
+    if args.speak_them and IS_WINDOWS:
+        return None, _INTERP_WIN_NO
+    lanes, devices = {}, {}
+    for lane, dev, vid, rate, lang in ((I.ME, args.speak_me, args.speak_me_voice, args.speak_me_rate, "zh"),
+                                       (I.THEM, args.speak_them, args.speak_them_voice, args.speak_them_rate, "en")):
+        if not dev:
+            continue
+        if not T.RATE_MIN <= float(rate) <= T.RATE_MAX:
+            return None, f"語速要在 {T.RATE_MIN}～{T.RATE_MAX} 之間"
+        d, err = _interp_find_device(dev)
+        if err:
+            return None, err
+        v = T.get_voice(vid or (T.default_en_voice_id() if lang == "en" else "") or T.default_voice_id(cfg), missing_ok=True)
+        if v is None:
+            return None, f"找不到聲音 {vid}（--tts-list 列出全部）"
+        if lang == "en" and not vid and v.get("lang") != "en":
+            print(f"{C_HIGHLIGHT}[提示] 沒有英文聲音（從舊版第一次升級拿不到，再執行一次升級就有），先用台灣華語的聲音念英文（會有口音）{RESET}")
+        lanes[lane] = {"rate": float(rate), "voice": v, "lang": lang}
+        devices[lane] = d
+    pace = I.Pace()
+
+    def synth(item, rate):
+        L = lanes[item.lane]
+        if stream and abs(rate - 1.0) < 1e-3:
+            need = pace.prebuffer(I.est_seconds(item.text, L["lang"]))
+            return I.buffered(prov.synth_stream(item.text, L["voice"], L["lang"],
+                                                custom=s["custom"] if L["lang"] == "zh" else None), need, pace)
+        t0 = time.monotonic()
+        wav, _ = prov.synth(item.text, L["voice"], s["custom"] if L["lang"] == "zh" else {}, lang=L["lang"])
+        raw, sr0 = T.wav_pcm(wav)
+        pace.update(time.monotonic() - t0, len(raw) / 2 / sr0)
+        return T.to_pcm(wav, rate)
+
+    def warm():
+        """開始時先各合成一句短的（背景）：GPU 的合成程式沒在跑時第一次要啟動約 28 秒，不先叫醒的話會議一開始的幾句
+        等超過 15 秒就被略過；順便上傳聲音、量現在的合成速度（GPU 忙的時候比說話慢，串流要先存多一點）"""
+        err = None
+        for L in lanes.values():
+            try:
+                t0 = time.monotonic()
+                wav, _ = prov.synth("好的。" if L["lang"] == "zh" else "Okay.", L["voice"], {}, lang=L["lang"])
+                raw, sr0 = T.wav_pcm(wav)
+                if time.monotonic() - t0 < 20:                  # 啟動合成程式的那一次不算速度
+                    pace.update(time.monotonic() - t0, len(raw) / 2 / sr0)
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"[:160]
+        with _interp_print_lock:
+            if err is None:
+                print(f"{C_DIM}  [語音口譯] GPU 語音合成已就緒{RESET}", flush=True)
+            else:                                               # 以前失敗也印「已就緒」
+                print(f"{C_HIGHLIGHT}  [語音口譯] GPU 語音合成沒有準備好：{err}（會議中每一句會再試）{RESET}", flush=True)
+
+    audio = _InterpAudio(devices, pause_ev)
+    ip = I.Interpreter(lanes, synth, audio.play, on_event=_interp_event)
+    ip.passthrough = _InterpPassthrough(devices[I.THEM], ip.guard) \
+        if getattr(args, "passthrough", False) and I.THEM in devices else None
+    ip.warm = warm
+    ip.audio, ip.provider, ip.streaming = audio, prov, stream
+    intro = I.INTRO_EN if args.interp_intro is None else args.interp_intro
+    ip.intro = None if str(intro).strip().lower() in ("", "none", "off") else intro
+    return ip, None
+
+
+_INTERP_VIRTUAL = re.compile(r"blackhole|virtual", re.I)   # 念給對方聽預選的虛擬裝置（同 webui.html）
+
+
+def _ask_pick(title, items, default_idx, default_label):
+    """列出 items（(值, 顯示文字)）讓使用者選，Enter＝default_idx。回傳值"""
+    print(f"\n{C_TITLE}{BOLD}▎ {title}{RESET}")
+    for k, (_, lab) in enumerate(items, 1):
+        print(f"  {C_DIM}[{k}]{RESET} {C_WHITE}{lab}{RESET}" + (f"  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}" if k - 1 == default_idx else ""))
+    print(f"{C_WHITE}選擇 (1-{len(items)}) [{default_label}]：{RESET}", end=" ")
+    try:
+        ans = input().strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+    return items[int(ans) - 1][0] if ans.isdigit() and 1 <= int(ans) <= len(items) else items[default_idx][0]
+
+
+def _ask_yes(q, default):
+    print(f"{C_WHITE}{q}({'Y/n' if default else 'y/N'})：{RESET}", end=" ")
+    try:
+        ans = input().strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+    return default if not ans else ans in ("y", "yes")
+
+
+def _ask_interp(args, mode):
+    """互動選單：英中雙向時問要不要語音口譯，選了就填 args.speak_me／speak_them（之後跟命令列走同一條路）。
+    GPU 伺服器沒有文字轉語音就不問（沒設定 GPU 伺服器時什麼都不印）"""
+    if mode not in _INTERP_MODES or args.speak_me or args.speak_them:
+        return
+    try:
+        import jtlw_tts as T
+        prov, why = T.pick_provider(load_config(), refresh=True, where="remote")
+    except Exception as e:
+        prov, why = None, f"{type(e).__name__}: {e}"
+    if prov is None:
+        if REMOTE_WHISPER_CONFIG:
+            print(f"\n{C_DIM}（語音口譯要在 GPU 伺服器合成，現在不能用：{why}）{RESET}")
+        return
+    print(f"\n{C_TITLE}{BOLD}▎ 語音口譯{RESET}")
+    print(f"  {C_DIM}把譯文念出來：對方的英文翻成中文念給你聽、你的中文翻成英文念給對方聽（合成在 GPU 伺服器）。{RESET}")
+    print(f"  {C_DIM}請戴耳機；念給對方聽時，會議軟體的麥克風要改選虛擬裝置，結束後改回來。{RESET}")
+    if IS_MACOS:
+        print(f"  {C_HIGHLIGHT}念給對方聽{_INTERP_MAC_NEED}{RESET}")
+    elif IS_WINDOWS:
+        print(f"  {C_HIGHLIGHT}{_INTERP_WIN_NO}{RESET}")
+    if not _ask_yes("是否開啟語音口譯？", False):
+        return
+    devs = _tts_output_devices()
+    if _ask_yes("念給我聽（對方的英文 → 中文，從耳機）？", True):
+        if len(devs) > 1:
+            items = [("default", "系統預設的播放裝置")] + [(str(d["id"]), d["name"]) for d in devs]
+            args.speak_me = _ask_pick("念給我聽：播放裝置（耳機）", items, 0, "系統預設")
+        else:
+            args.speak_me = "default"
+    if not IS_WINDOWS and _ask_yes("念給對方聽（我的中文 → 英文，送進虛擬麥克風）？", False):
+        if IS_LINUX:
+            import subprocess as sp
+            try:
+                sinks = [l.split("\t")[1] for l in sp.run(["pactl", "list", "short", "sinks"], capture_output=True,
+                                                             text=True, timeout=5).stdout.splitlines() if "\t" in l]
+            except (OSError, sp.SubprocessError):
+                sinks = []
+            items = [("auto", "自動建立虛擬麥克風（會議軟體的麥克風選 jt-live-whisper-interpreter-mic）")] + \
+                    [(n, n) for n in sinks if n != _INTERP_SINK]
+            args.speak_them = _ask_pick("念給對方聽：送到哪裡", items, 0, "自動建立")
+        else:
+            virt = [d for d in devs if _INTERP_VIRTUAL.search(d["name"])]
+            if not virt:
+                print(f"  {C_HIGHLIGHT}沒有偵測到 BlackHole 2ch：{_INTERP_MAC_NEED}；這次只念給我聽{RESET}")
+            else:
+                items = [(str(d["id"]), d["name"]) for d in virt] + [(str(d["id"]), d["name"]) for d in devs if d not in virt]
+                args.speak_them = _ask_pick("念給對方聽：虛擬麥克風（會議軟體的麥克風選它的另一端）", items, 0, virt[0]["name"])
+        if args.speak_them and not _ask_yes("開場先用英文告訴對方在用 AI 口譯？", True):
+            args.interp_intro = "none"
+        if args.speak_them and _ask_yes("同時送出你的原聲（念英文時原聲自動調小）？", False):
+            args.passthrough = True
+    if not (args.speak_me or args.speak_them):
+        print(f"  {C_DIM}→ 不念（只顯示字幕）{RESET}")
+
+
+_interp_print_lock = threading.Lock()
+_INTERP_CMD_FILE = os.path.join(SCRIPT_DIR, ".webui_interp_cmd")    # webui.py 的 INTERP_CMD（取消、靜音）
+_INTERP_KEEP_FILE = os.path.join(SCRIPT_DIR, ".webui_interp_keep")  # webui.py 的 INTERP_KEEP（切換裝置：虛擬麥克風留給新的程式）
+
+
+def _interp_watch_cmds(interp, stop_event):
+    """WebUI 的口譯控制：指令檔一行一個（cancel <編號>、mute me|them 1|0）。先改名再讀，WebUI 同時寫入也不會掉"""
+    work = _INTERP_CMD_FILE + ".work"
+    for f in (_INTERP_CMD_FILE, work):
+        try:
+            os.remove(f)                            # 上一場留下的不算
+        except OSError:
+            pass
+    while not stop_event.is_set():
+        time.sleep(0.2)
+        try:
+            os.replace(_INTERP_CMD_FILE, work)
+            with open(work, encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            os.remove(work)
+        except OSError:
+            continue
+        for line in lines:
+            p = line.split()
+            try:
+                if p[0] == "cancel":
+                    interp.cancel(int(p[1]))
+                elif p[0] == "mute":
+                    interp.mute(p[1], p[2] == "1")
+            except (IndexError, ValueError):
+                pass
+
+
+_interp_err_shown = {}
+
+
+def _interp_reject_lang(interp, passthrough, length_ms):
+    """系統音訊這一段要不要請 GPU 伺服器先判斷語言、是中文就不辨識（雙向口譯的回授）。
+    只在這段錄音可能錄到自己的中文時才送：念給我聽正在念或剛念過（這段錄音的長度內，加 2 秒延遲）；
+    同時送出原聲只在 macOS（ScreenCaptureKit 錄的是所有程式的聲音，可能錄到自己送給 BlackHole 的原聲）。
+    以前開了念給我聽就每一段都送：對方自己說中文、或只開原聲（Linux／Windows 本機根本沒播中文）時整段默默不見"""
+    if interp is None:
+        return None
+    if "me" in interp.lanes and interp.guard.played_within("me", length_ms / 1000 + 2):
+        return "zh"
+    if passthrough is not None and IS_MACOS:
+        return "zh"
+    return None
+
+
+def _interp_event(e, lock=None):
+    """口譯的進度給 WebUI（每句標「排隊／念出／略過／取消／失敗」）；失敗與略過在終端機也說。
+    同樣的失敗 60 秒內只說一次（GPU 伺服器斷線時每一句都會失敗，不要洗版）。
+    lock：雙向模式的 print_lock（跟狀態列共用，才不會印到一半被狀態列蓋掉）"""
+    _webui_send(e)
+    if e.get("state") not in ("failed", "skipped"):
+        return
+    who = "給我" if e.get("lane") == "me" else "給對方"
+    if e["state"] == "failed":
+        key = e.get("reason") or e.get("error", "")[:80]
+        now = time.monotonic()
+        if now - _interp_err_shown.get(key, -1e9) < 60:
+            return
+        _interp_err_shown[key] = now
+        why = {"down": "GPU 伺服器連不上，先不念（字幕照常），之後自動再試：", "play": "播放失敗："}.get(e.get("reason"), "合成失敗：") \
+            + e.get("error", "").replace("GPU 伺服器連不上：", "")
+    else:
+        why = "等太久，不念了（字幕照樣顯示）"
+    with (lock or _interp_print_lock):
+        print(f"{C_DIM}  [口譯{who}] {why}｜{e.get('text', '')[:40]}{RESET}", flush=True)
 
 
 def _tts_browser_pos(job):
@@ -17480,6 +18061,21 @@ def parse_args():
     tts.add_argument("--tts-start", type=int, default=1, metavar="N",
                      help="從第 N 段開始念（重念；預設 1）")
     tts.add_argument("--tts-list", action="store_true", help="列出聲音與播放裝置後離開")
+    ip = parser.add_argument_group("雙向語音口譯（v2.28.0，英中雙向 --mode en_zh；合成在 GPU 伺服器或 Apple Silicon Mac）")
+    ip.add_argument("--speak-me", metavar="DEV", default=None,
+                    help="對方說的英文翻成中文後念給我聽：播放裝置（default＝系統預設、裝置編號或名稱的一部分；請用耳機）")
+    ip.add_argument("--speak-them", metavar="DEV", default=None,
+                    help="我說的中文翻成英文後念給對方聽：輸出到虛擬麥克風，會議軟體的麥克風改選它。macOS 要先安裝 BlackHole 2ch"
+                         "（brew install --cask blackhole-2ch）再指定 \"BlackHole\"；Linux 用 auto 自動建立；Windows 暫不支援")
+    ip.add_argument("--speak-me-voice", metavar="ID", default=None, help="念給我聽的聲音（預設：朗讀的預設聲音）")
+    ip.add_argument("--speak-them-voice", metavar="ID", default=None, help="念給對方聽的聲音（預設：內建英文聲音；--tts-list 列出）")
+    ip.add_argument("--speak-me-rate", type=float, default=1.0, metavar="R", help="念給我聽的語速（0.5～2，預設 1；不是 1 時不用串流合成）")
+    ip.add_argument("--speak-them-rate", type=float, default=1.0, metavar="R", help="念給對方聽的語速（0.5～2，預設 1；不是 1 時不用串流合成）")
+    ip.add_argument("--interp-intro", default=None, metavar="TEXT",
+                    help="第一次念給對方聽之前先念的開場說明（預設："
+                         "\"Hi, I'm using an AI interpreter, so there will be a short delay.\"；none＝不念）")
+    ip.add_argument("--passthrough", action="store_true",
+                    help="念給對方聽時，你的原聲也同時送進虛擬麥克風（念英文時原聲自動調小）。預設只送英文")
     return parser.parse_args()
 
 
@@ -17687,6 +18283,17 @@ def _build_cli_command(**kwargs):
     if denoise:
         parts.append("--denoise")
 
+    for flag in ("speak_me", "speak_me_voice", "speak_them", "speak_them_voice", "interp_intro"):
+        v = kwargs.get(flag)
+        if v:
+            parts.append(f"--{flag.replace('_', '-')} {shlex.quote(str(v))}")
+    for flag in ("speak_me_rate", "speak_them_rate"):
+        v = kwargs.get(flag)
+        if v and abs(float(v) - 1.0) > 1e-6:
+            parts.append(f"--{flag.replace('_', '-')} {float(v):g}")
+    if kwargs.get("passthrough"):
+        parts.append("--passthrough")
+
     return " ".join(parts)
 
 
@@ -17711,6 +18318,13 @@ def _confirm_start(cli_cmd):
 def main():
     global _diarize_engine
     args = parse_args()
+    if (args.speak_me or args.speak_them) and (args.mode not in _INTERP_MODES or args.input or args.tts_file or args.tts_text):
+        # 只有命令列的英中雙向即時模式會接口譯；其他情況靜靜忽略的話，使用者會以為有在念（畫面選的要真的生效）
+        print(f"{C_ERR}[錯誤] --speak-me／--speak-them 要搭配即時的 --mode en_zh（英中雙向）{RESET}", file=sys.stderr)
+        sys.exit(1)
+    if args.passthrough and not args.speak_them:
+        print(f"{C_ERR}[錯誤] --passthrough（同時送出原音）要搭配 --speak-them（念給對方聽的虛擬麥克風）{RESET}", file=sys.stderr)
+        sys.exit(1)
     _diarize_engine = args.diarize_engine
     if args.model == QWEN_MODEL and not args.input:
         print(f"{C_HIGHLIGHT}[提示] Qwen3-ASR 只支援離線處理（--input），即時模式改用推薦模型{RESET}")
@@ -18702,8 +19316,17 @@ def main():
                            engine=engine,
                            llm_model=ollama_model if engine == "llm" else None,
                            llm_host=f"{host}:{port}" if engine == "llm" else None,
-                           denoise=args.denoise)
+                           denoise=args.denoise, speak_me=args.speak_me, speak_them=args.speak_them,
+                           interp_intro=args.interp_intro, passthrough=args.passthrough,
+                           speak_me_voice=args.speak_me_voice, speak_them_voice=args.speak_them_voice,
+                           speak_me_rate=args.speak_me_rate, speak_them_rate=args.speak_them_rate)
+            _interp, _interp_err = _interp_build(args, mode)
+            if _interp_err:
+                print(f"{C_ERR}[錯誤] 語音口譯：{_interp_err}{RESET}", file=sys.stderr)
+                _interp_linux_cleanup()
+                sys.exit(1)
             if not _confirm_start(_build_cli_command(**_cli_kw)):
+                _interp_linux_cleanup()
                 sys.exit(0)
             print()
             # 麥克風遠端辨識：有 GPU 伺服器時麥克風也送遠端
@@ -18716,7 +19339,8 @@ def main():
                                      meeting_topic=meeting_topic,
                                      use_mlx=_use_mlx_bidi,
                                      denoise=args.denoise,
-                                     mic_remote_cfg=_mic_remote)
+                                     mic_remote_cfg=_mic_remote,
+                                     interp=_interp)
             sys.exit(0)
 
         # --mic 衝突檢查
@@ -19132,13 +19756,23 @@ def main():
 
             # 場景（音訊緩衝長度）
             length_ms, step_ms = select_scene()
+            _ask_interp(args, mode)
 
             _cli_kw = dict(mode=mode, model=model_name, topic=meeting_topic,
                            engine=engine,
                            llm_model=model if engine == "llm" else None,
                            llm_host=f"{host}:{port}" if engine == "llm" else None,
-                           denoise=args.denoise)
+                           denoise=args.denoise, speak_me=args.speak_me, speak_them=args.speak_them,
+                           interp_intro=args.interp_intro, passthrough=args.passthrough,
+                           speak_me_voice=args.speak_me_voice, speak_them_voice=args.speak_them_voice,
+                           speak_me_rate=args.speak_me_rate, speak_them_rate=args.speak_them_rate)
+            _interp, _interp_err = _interp_build(args, mode)
+            if _interp_err:
+                print(f"{C_ERR}[錯誤] 語音口譯：{_interp_err}{RESET}", file=sys.stderr)
+                _interp_linux_cleanup()
+                sys.exit(1)
             if not _confirm_start(_build_cli_command(**_cli_kw)):
+                _interp_linux_cleanup()
                 sys.exit(0)
             print()
             _mic_remote = REMOTE_WHISPER_CONFIG if REMOTE_WHISPER_CONFIG else None
@@ -19150,7 +19784,8 @@ def main():
                                      meeting_topic=meeting_topic,
                                      use_mlx=_use_mlx_bidi,
                                      denoise=args.denoise,
-                                     mic_remote_cfg=_mic_remote)
+                                     mic_remote_cfg=_mic_remote,
+                                     interp=_interp)
             sys.exit(0)
 
         # 轉錄模式：提前詢問麥克風轉錄（影響辨識位置預設值）

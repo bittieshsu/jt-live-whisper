@@ -1,0 +1,12 @@
+{
+ "id": "b00000000010",
+ "name": "男聲・英文",
+ "transcript": "Hello everyone, and welcome. Today we will go over three things: the release schedule for next week, the feedback from our users, and the training plan. Please feel free to ask questions at any time.",
+ "gender": "male",
+ "lang": "en",
+ "duration": 14.56,
+ "builtin": true,
+ "source": "內建：VoxCPM2 依文字描述產生（中年男性，美式英語，聲音沉穩專業），不是真人錄音；給雙向口譯念英文用",
+ "sha": "01c9696789e76345872b2dab8b7a593101bd3c1ec367ab1e0a58ad98ace1f97e",
+ "created": "2026-10-10T00:00:00"
+}

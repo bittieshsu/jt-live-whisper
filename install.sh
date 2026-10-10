@@ -217,7 +217,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.27.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1648,7 +1648,7 @@ jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py \
 jtlw_api/__init__.py jtlw_api/__main__.py jtlw_api/app.py jtlw_api/config.py jtlw_api/engine.py \
 jtlw_api/events.py jtlw_api/keys.py jtlw_api/log.py jtlw_api/store.py jtlw_api/tls.py \
 jtlw_api/schemas/jtlw-api-v1.schema.json \
-jtlw_tts/__init__.py jtlw_tts/__main__.py jtlw_tts/engine.py jtlw_tts/tw_reading.py \
+jtlw_tts/__init__.py jtlw_tts/__main__.py jtlw_tts/engine.py jtlw_tts/tw_reading.py jtlw_tts/interp.py \
 jtlw_tts/voices/b00000000001/voice.json jtlw_tts/voices/b00000000001/ref.wav \
 jtlw_tts/voices/b00000000002/voice.json jtlw_tts/voices/b00000000002/ref.wav \
 jtlw_tts/voices/b00000000003/voice.json jtlw_tts/voices/b00000000003/ref.wav \
@@ -1657,6 +1657,8 @@ jtlw_tts/voices/b00000000005/voice.json jtlw_tts/voices/b00000000005/ref.wav \
 jtlw_tts/voices/b00000000006/voice.json jtlw_tts/voices/b00000000006/ref.wav \
 jtlw_tts/voices/b00000000007/voice.json jtlw_tts/voices/b00000000007/ref.wav \
 jtlw_tts/voices/b00000000008/voice.json jtlw_tts/voices/b00000000008/ref.wav \
+jtlw_tts/voices/b00000000009/voice.json jtlw_tts/voices/b00000000009/ref.wav \
+jtlw_tts/voices/b00000000010/voice.json jtlw_tts/voices/b00000000010/ref.wav \
 icons/jt-live-whisper.png icons/jt-live-whisper.ico icons/jt-live-whisper.icns"
 # jtlw_tts/（v2.27.0）：文字轉語音。新加的子資料夾：第一次 --upgrade 跑舊腳本、拿不到，第二次才會到
 # icons/（v2.26.2）：捷徑的 logo 圖示，由 tools/build_icons.py 照網站 favicon 產生

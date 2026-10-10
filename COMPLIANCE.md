@@ -3,7 +3,7 @@
 jt-live-whisper 的設計原則是**資料不出去**：語音、逐字稿、翻譯、摘要都在你自己的設備上處理，不需要任何雲端 AI 服務。
 這讓組織比較容易符合個人資料保護、資訊安全與 AI 管理的要求。
 
-先講清楚一件事：個人資料保護法、GDPR、ISO/IEC 27001、ISO/IEC 42001 這些法規與標準，**檢驗的是組織怎麼管理**，不是某一套軟體。
+先講清楚一件事：個人資料保護法、GDPR、ISO/IEC 27001:2022、ISO/IEC 42001:2023 這些法規與標準，**檢驗的是組織怎麼管理**，不是某一套軟體。
 所以本工具箱不會宣稱「通過」或「符合」哪一項認證；這份文件說明**工具本身做到了什麼**，以及**你的組織使用後還要做哪些事**才算到位。
 
 > 本文件不是法律意見。實際要做到什麼程度，請依你的組織的法務與資安規範決定。
@@ -62,6 +62,7 @@ jt-live-whisper 的設計原則是**資料不出去**：語音、逐字稿、翻
 - 內建的 8 個聲音是 AI 依文字描述產生，**不是真人錄音**
 - 匯入自己的聲音時必須勾選「已取得錄音者的書面同意」並填寫錄音來源，資料跟著聲音保存
 - 錄音者要求刪除時，刪除聲音會一併刪掉 GPU 伺服器上的快取
+- 雙向語音口譯念給對方聽的英文是 AI 合成：第一次念之前預設先說明「Hi, I'm using an AI interpreter...」，讓對方知道（念英文的 2 個內建聲音也是 AI 產生）
 
 ### REST API 的保存期限與紀錄
 
@@ -110,6 +111,90 @@ jt-live-whisper 的設計原則是**資料不出去**：語音、逐字稿、翻
 |---|---|---|---|
 | **個人資料保護法**（台灣） | 蒐集前告知、目的限制、安全維護 | 資料留在自有設備、存取控制、刪除聲音兩邊一起刪 | 告知與同意、保存期限、安全維護措施、當事人請求的處理流程 |
 | **GDPR**（處理歐盟個人資料時） | 合法依據、資料最小化、當事人權利、跨境傳輸 | 不跨境、不送第三方 AI 服務 | 合法依據與紀錄、刪除與查詢請求的處理、必要時的影響評估 |
-| **ISO/IEC 27001**（資訊安全管理） | 組織的資訊安全管理制度 | 存取控制、加密連線、資料留在內網、API 依呼叫端隔離、固定版本與變更紀錄 | 列入資產清單與風險評估、適用性聲明、網路隔離、備份、日誌與事件處理、內部稽核 |
-| **ISO/IEC 42001**（AI 管理） | 組織的 AI 管理制度 | 模型清單與版本、公開的實測與限制、摘要可追溯到原文、找不到依據的內容不輸出或標示、資料不出去 | AI 使用政策與範圍、風險與影響評估、人工覆核流程、人員訓練、使用監控與問題回報 |
+| **ISO/IEC 27001:2022**（資訊安全管理） | 組織的資訊安全管理制度 | 存取控制、加密連線、資料留在內網、API 依呼叫端隔離、固定版本與變更紀錄 | 列入資產清單與風險評估、適用性聲明、網路隔離、備份、日誌與事件處理、內部稽核（逐條對照見第四節） |
+| **ISO/IEC 42001:2023**（AI 管理） | 組織的 AI 管理制度 | 模型清單與版本、公開的實測與限制、摘要可追溯到原文、找不到依據的內容不輸出或標示、資料不出去 | AI 使用政策與範圍、風險與影響評估、人工覆核流程、人員訓練、使用監控與問題回報（逐條對照見第五節） |
 
+---
+
+## 四、ISO/IEC 27001:2022 附錄 A 控制項對照
+
+下表列出跟本工具箱有關的控制項：本工具箱提供了什麼，以及你的組織要做什麼。可以做為撰寫適用性聲明（SoA）、風險處理與稽核準備的參考；
+控制項適不適用、怎麼落實，由你的組織決定。
+
+> 編號與英文名稱依 ISO/IEC 27001:2022 附錄 A（與 ISO/IEC 27002:2022 相同）。中文名稱是本文的說明，正式譯名以標準的中文版為準。
+
+| 控制項 | 本工具箱提供的 | 你的組織要做的 |
+|---|---|---|
+| **5.9** 資訊及相關資產清冊<br>Inventory of information and other associated assets | 資料固定存在幾個位置：`recordings/`、`logs/`、`tts_voices/`、`config.json`（伺服器版的 REST API 另有 `api_data/`）；使用的模型、版本與授權列在文件 | 把這些資料、GPU 伺服器、LLM 伺服器列入資產清冊，指定負責人 |
+| **5.14** 資訊傳送<br>Information transfer | 內容只送到你設定的 GPU 伺服器與 LLM 伺服器；WebUI 可以開 TLS 加密連線，REST API 預設加密；字幕轉發預設關閉 | 規定哪些內容可以傳到哪裡；GPU 伺服器與 LLM 伺服器的連線放在內網或 VPN |
+| **5.15** 存取控制<br>Access control | WebUI 分管理與唯讀兩種密碼、可以限制允許連線的 IP；安全設定、轉發等含認證的設定頁只能在本機打開 | 訂出誰可以使用、從哪裡連線 |
+| **5.17** 鑑別資訊<br>Authentication information | 密碼與 API 金鑰只存雜湊；日誌不記錄金鑰與授權標頭 | 密碼強度、保管與更換方式 |
+| **5.18** 存取權限<br>Access rights | REST API 每個串接的系統一把金鑰，可以個別撤銷 | 定期檢視金鑰與密碼，不用的撤銷 |
+| **5.19、5.21** 供應者關係、ICT 供應鏈<br>Information security in supplier relationships, Managing information security in the ICT supply chain | 原始碼公開（Apache-2.0）可以自行稽核；使用的模型、上游套件與授權列在文件 | 把本工具箱與它使用的模型列入供應者評估 |
+| **5.23** 使用雲端服務之資訊安全<br>Information security for use of cloud services | 不需要任何雲端 AI 服務，模型都在自己的設備上執行 | 如果把 GPU 伺服器或 LLM 伺服器放在雲端或外部主機，依這個控制項評估 |
+| **5.34** 隱私及個人可識別資訊保護<br>Privacy and protection of PII | 資料留在自有設備；刪除聲音時本機與 GPU 伺服器的快取一起刪；REST API 有保存期限 | 告知與同意、保存期限、當事人請求的處理（見第二節） |
+| **5.37** 文件化操作程序<br>Documented operating procedures | [操作手冊](SOP.md)：安裝、升級、設定、各種模式的操作 | 依組織環境寫成內部程序（誰安裝、誰升級、怎麼備份與還原） |
+| **8.2** 特權存取權限<br>Privileged access rights | 管理密碼才能開始、停止、改設定，唯讀密碼只能看字幕；伺服器版的服務以安裝資料夾的擁有者身分執行，不會因為用 sudo 安裝就以 root 執行 | 管理密碼只給需要的人 |
+| **8.3** 資訊存取限制<br>Information access restriction | REST API 每個呼叫端只看得到自己送的作業 | 依用途分配金鑰，不共用 |
+| **8.5** 安全鑑別<br>Secure authentication | WebUI 與 REST API 受保護的功能要先輸入密碼或金鑰才能使用（WebUI 沒設密碼時啟動會提醒） | 設定密碼；跨網段使用時開啟 TLS |
+| **8.8** 技術脆弱性管理<br>Management of technical vulnerabilities | 安全性修正記在 [CHANGELOG](CHANGELOG.md)；`--upgrade` 升級到最新版 | 追蹤新版本並及時升級；作業系統與套件更新 |
+| **8.10** 資訊刪除<br>Information deletion | GPU 伺服器辨識完立刻刪除暫存音檔；REST API 確認收到後刪除作業內容、沒確認的 7 天後刪除；刪除聲音兩邊一起刪 | 依保存期限刪除 `recordings/`、`logs/` 與備份 |
+| **8.12** 資料洩露預防<br>Data leakage prevention | WebUI 不載入外部的字型、腳本或追蹤程式；REST API 從網址抓音檔只允許設定好的主機（避免被拿來探測內網） | 端點與網路的資料外洩防護 |
+| **8.15** 日誌<br>Logging | REST API 的日誌記錄每件作業的每個步驟，不記錄金鑰、授權標頭、詞彙庫與逐字稿內容 | 日誌的保存期限、集中保存、定期檢視 |
+| **8.20、8.22** 網路安全、網路區隔<br>Networks security, Segregation of networks | WebUI 可以限制允許連線的 IP，反向代理後面也能正確判斷來源 | GPU 伺服器與 LLM 伺服器放在內網，防火牆只開給需要的電腦，跨網段走 VPN |
+| **8.24** 密碼技術之使用<br>Use of cryptography | TLS（WebUI 可選、REST API 預設；可以換成組織自己的憑證）；密碼與金鑰以雜湊保存 | 憑證管理；磁碟加密 |
+| **8.29** 開發及驗收中之安全測試<br>Security testing in development and acceptance | 每次發版前跑守門測試（三個平台、升級、全新安裝、WebUI 授權檢查） | 導入與升級前在自己的環境驗收 |
+| **8.32** 變更管理<br>Change management | 每一版的改動記在 CHANGELOG；模型與上游程式固定版本；升級由管理者執行，GPU 伺服器的自動更新預設關閉 | 升級前看 CHANGELOG、排定升級時間、保留前一版以便還原 |
+
+**以下控制項由組織的制度落實，跟本工具箱有關的做法：**
+
+- **5.10** 可接受使用（Acceptable use of information and other associated assets）：規定哪些會議可以錄、轉錄結果可以怎麼用
+- **5.12、5.13** 資訊分類與標示（Classification of information, Labelling of information）：會議錄音與逐字稿的分類等級與標示
+- **5.24～5.28** 資訊安全事故管理（Information security incident management）：WebUI、REST API、GPU 伺服器列入事故處理範圍
+- **6.3** 資訊安全認知、教育及訓練（Information security awareness, education and training）：使用者知道 AI 輸出要人工確認、密碼不共用
+- **8.1** 使用者端點裝置（User endpoint devices）：安裝本工具箱的電腦開啟磁碟加密、螢幕鎖定
+- **8.13** 資訊備份（Information backup）：備份 `recordings/`、`logs/`、`tts_voices/`、`config.json`（伺服器版另有 `api_data/`），定期測試還原
+
+---
+
+## 五、ISO/IEC 42001:2023 條文與附錄 A 控制項對照
+
+ISO/IEC 42001:2023 是 AI 管理制度的標準：條文（第 4～10 章）是管理制度本身的要求，附錄 A 是控制項。
+使用本工具箱的組織通常是自己架設、自己使用 AI 系統，下表列出本工具箱可以做為依據或輸入的部分。
+
+> 編號與英文名稱依 ISO/IEC 42001:2023。中文名稱是本文的說明，正式譯名以標準的中文版為準。
+
+### 條文
+
+| 條文 | 本工具箱提供的 | 你的組織要做的 |
+|---|---|---|
+| **4.3** 決定 AI 管理系統的範圍<br>Determining the scope of the AI management system | 文件列出哪些功能用到 AI（語音辨識、翻譯、摘要、講者辨識、朗讀）、各在哪台設備上執行 | 決定本工具箱是否納入範圍、用在哪些部門與場合 |
+| **6.1.2、8.2** AI 風險評估<br>AI risk assessment | [BENCHMARKS.md](BENCHMARKS.md) 公開準確度與已知限制，包括哪些情況會出錯 | 依組織的用途評估風險並留下紀錄 |
+| **6.1.4、8.4** AI 系統影響評估<br>AI system impact assessment | 同上；第二節的檢查清單（告知與同意、人工覆核、合成語音） | 評估對與會者與對外的影響並文件化 |
+| **7.5** 文件化資訊<br>Documented information | README、操作手冊、BENCHMARKS、CHANGELOG、本文件、REST API 介面規格 | 納入組織的文件管理 |
+| **9.1** 監督、量測、分析及評估<br>Monitoring, measurement, analysis and evaluation | BENCHMARKS 寫明量測方法（語料、指標），可以做為自己量測的參考 | 用自己的錄音定期確認品質是否夠用 |
+
+### 附錄 A 控制項
+
+| 控制項 | 本工具箱提供的 | 你的組織要做的 |
+|---|---|---|
+| **A.4.2、A.4.4、A.4.5** 資源文件化、工具資源、系統與運算資源<br>Resource documentation, Tooling resources, System and computing resources | 使用的模型、推論引擎、版本、授權與硬體需求列在 README 與操作手冊 | 依此建立組織的 AI 資源清單 |
+| **A.4.3** 資料資源<br>Data resources | 不拿你的資料訓練或微調模型；資料存放位置固定 | 記錄哪些資料會進到 AI 系統（錄音、逐字稿、聲音） |
+| **A.5.2～A.5.5** AI 系統影響評估<br>AI system impact assessment process, documentation, impacts on individuals, societal impacts | BENCHMARKS 的已知限制與第二節的檢查清單可以做為評估的輸入 | 進行評估、文件化，並定期更新 |
+| **A.6.2.4** AI 系統驗證與確認<br>AI system verification and validation | 公開的實測（辨識錯誤率、講者辨識錯誤率、使用的語料與方法）；發版前的守門測試 | 導入前用自己的錄音驗證是否夠用 |
+| **A.6.2.5、A.6.2.6** AI 系統部署、運作及監督<br>AI system deployment, AI system operation and monitoring | 操作手冊的部署方式；用戶端與 GPU 伺服器版本不一致時會提醒；處理失敗時畫面會顯示（例如翻譯失敗照樣顯示原文並標示） | 部署計畫、運作監督、問題回報管道 |
+| **A.6.2.7** AI 系統技術文件<br>AI system technical documentation | README、操作手冊、REST API 介面規格（`jtlw_api/schemas/`） | 依需要提供給相關人員 |
+| **A.6.2.8** AI 系統事件紀錄<br>AI system recording of event logs | 逐字稿、翻譯、摘要附時間存在 `logs/`；摘要每一條附時間點與引用的原文；REST API 日誌記錄每件作業的每個步驟 | 決定紀錄保存多久、誰可以看 |
+| **A.7.3、A.7.5** 資料取得、資料來源<br>Acquisition of data, Data provenance | 匯入朗讀用的聲音時要勾選「已取得錄音者的書面同意」並填寫錄音來源，跟著聲音保存；內建聲音是 AI 依文字描述產生 | 保存同意書，確認用途與期限 |
+| **A.8.2** 給使用者的系統文件及資訊<br>System documentation and information for users | 文件與畫面說明用途與限制；AI 輸出用在重要場合前要人工確認 | 讓使用者知道限制與正確用法 |
+| **A.8.5** 給利害關係人的資訊<br>Information for interested parties | 雙向語音口譯第一次念給對方聽之前，預設先說明這是 AI 口譯 | 會議前告知與會者有 AI 轉錄、翻譯或口譯 |
+| **A.9.2、A.9.4** 負責任使用 AI 系統的流程、預期用途<br>Processes for responsible use of AI systems, Intended use of the AI system | 摘要可以追溯到原文，引用驗證不過的不輸出、找不到依據的數字或名詞會標示；校正後保留原始辨識結果，方便人工覆核 | 訂出 AI 使用政策、預期用途與人工覆核流程 |
+| **A.10.3** 供應者<br>Suppliers | 原始碼公開；上游模型、套件與授權列在文件；固定版本 | 把本工具箱與它使用的模型列入供應者評估 |
+
+**以下由組織的制度落實：**
+
+- **5.2、A.2.2** AI 政策（AI policy）：哪些場合可以用 AI 轉錄、翻譯、摘要、合成語音
+- **5.3、A.3.2** 角色、責任及權限（Roles, responsibilities and authorities; AI roles and responsibilities）：誰負責部署、升級、覆核輸出
+- **A.3.3** 關注事項的通報（Reporting of concerns）：使用者發現 AI 輸出有問題時怎麼回報
+- **7.2、7.3** 能力、認知（Competence, Awareness）：使用者知道 AI 輸出可能出錯、要人工確認
+- **9.2、9.3、10.2** 內部稽核、管理審查、不符合事項及矯正措施（Internal audit, Management review, Nonconformity and corrective action）
