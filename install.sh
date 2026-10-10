@@ -217,7 +217,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1883,6 +1883,7 @@ os.replace(tmp, p)
 # 升級（macOS；Linux 升級後會重跑完整安裝流程、在那裡問）：有設定 GPU 伺服器、而且不必輸入密碼就連得上時，問要不要加裝 BreezyVoice
 offer_breezy_on_upgrade() {
     [ "$(uname -s)" = "Linux" ] && return 0              # Linux 升級後會重跑完整安裝流程（先同步伺服器程式），在那裡問
+    [ -n "${JTLW_UPGRADE_QUIET:-}" ] && return 0         # start.sh 啟動時自動補檔：不問、不連 GPU 伺服器
     [ -f "$SCRIPT_DIR/config.json" ] || return 0
     local host user port key opts
     host=$(_rw_cfg_get host)
@@ -1898,19 +1899,30 @@ offer_breezy_on_upgrade() {
 do_upgrade() {
     section "從 GitHub 升級程式"
 
-    # 建立暫存目錄
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
-    trap "rm -rf '$tmp_dir'" EXIT
-
-    echo -e "  ${C_DIM}正在從 GitHub 下載最新版本...${NC}"
-    local zip_path="$tmp_dir/jt-live-whisper.zip"
-    if ! curl -fsSL "https://github.com/jasoncheng7115/jt-live-whisper/archive/refs/heads/main.zip" -o "$zip_path"; then
-        check_fail "無法連接 GitHub，請檢查網路連線"
-        return 1
+    # 升級一律用「新版」的清單（2026-10-10）：以前跑的是舊版安裝程式、只複製舊版清單上的檔案，
+    # 新版才加入的檔案（v2.27.0 的 jtlw_tts/ 等）要再升級一次才會到；只跑一次的人停在「新版 WebUI＋缺模組」。
+    # 現在複製完、發現安裝程式本身換了，就把下載好的資料夾交給新版的安裝程式（JTLW_UPGRADE_REPO）接手補齊，
+    # 不重新下載；exec 不會執行 EXIT trap，暫存資料夾由接手的那一個刪（JTLW_UPGRADE_TMP）
+    local tmp_dir repo_dir handoff=""
+    if [ -n "${JTLW_UPGRADE_REPO:-}" ] && [ -f "$JTLW_UPGRADE_REPO/translate_meeting.py" ]; then
+        repo_dir="$JTLW_UPGRADE_REPO"
+        tmp_dir="${JTLW_UPGRADE_TMP:-}"
+        [ -n "$tmp_dir" ] && trap "rm -rf '$tmp_dir'" EXIT
+        handoff=1
+        unset JTLW_UPGRADE_REPO JTLW_UPGRADE_TMP
+        echo -e "  ${C_DIM}由新版安裝程式接手，補齊新版才加入的檔案...${NC}"
+    else
+        tmp_dir=$(mktemp -d)
+        trap "rm -rf '$tmp_dir'" EXIT
+        echo -e "  ${C_DIM}正在從 GitHub 下載最新版本...${NC}"
+        local zip_path="$tmp_dir/jt-live-whisper.zip"
+        if ! curl -fsSL "https://github.com/jasoncheng7115/jt-live-whisper/archive/refs/heads/main.zip" -o "$zip_path"; then
+            check_fail "無法連接 GitHub，請檢查網路連線"
+            return 1
+        fi
+        unzip -q "$zip_path" -d "$tmp_dir"
+        repo_dir="$tmp_dir/jt-live-whisper-main"
     fi
-    unzip -q "$zip_path" -d "$tmp_dir"
-    local repo_dir="$tmp_dir/jt-live-whisper-main"
 
     if [ ! -f "$repo_dir/translate_meeting.py" ]; then
         check_fail "下載的檔案不完整，請檢查網路連線"
@@ -1923,8 +1935,10 @@ do_upgrade() {
     local local_version
     local_version=$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/')
 
-    echo -e "  ${C_WHITE}目前版本: v${local_version:-未知}${NC}"
-    echo -e "  ${C_WHITE}最新版本: v${remote_version:-未知}${NC}"
+    if [ -z "$handoff" ]; then
+        echo -e "  ${C_WHITE}目前版本: v${local_version:-未知}${NC}"
+        echo -e "  ${C_WHITE}最新版本: v${remote_version:-未知}${NC}"
+    fi
 
     if [ "$local_version" = "$remote_version" ]; then
         # 版本相同時，逐檔比對內容而不是只看檔案在不在。
@@ -1938,7 +1952,7 @@ do_upgrade() {
             fi
         done
         if [ -n "$_stale" ]; then
-            echo -e "  ${C_WARN}版本相同但有檔案與最新版不符，更新中...${NC}"
+            [ -z "$handoff" ] && echo -e "  ${C_WARN}版本相同但有檔案與最新版不符，更新中...${NC}"
             for _uf in $_stale; do
                 mkdir -p "$(dirname "$SCRIPT_DIR/$_uf")"
                 cp "$repo_dir/$_uf" "$SCRIPT_DIR/$_uf"
@@ -1946,9 +1960,17 @@ do_upgrade() {
             chmod +x "$SCRIPT_DIR/start.sh" "$SCRIPT_DIR/install.sh" 2>/dev/null
             chmod +x "$SCRIPT_DIR/install-linux.sh" 2>/dev/null || true
             build_sck_helper
-            check_ok "已更新與最新版不符的檔案（${_stale}）"
-        else
+            if [ -n "$handoff" ]; then
+                check_ok "已補上新版才加入的檔案（${_stale}）"
+            else
+                check_ok "已更新與最新版不符的檔案（${_stale}）"
+            fi
+        elif [ -z "$handoff" ]; then
             check_ok "已經是最新版本 (v${local_version})"
+        fi
+        if [ -n "$handoff" ] && [ "$(uname -s)" != "Linux" ]; then
+            echo ""
+            echo -e "  ${C_WARN}建議重新執行 ./install.sh 確認相依套件完整${NC}"
         fi
         offer_desktop_shortcut
         offer_breezy_on_upgrade
@@ -1964,6 +1986,10 @@ do_upgrade() {
         echo -e "  ${C_WARN}[跳過]${NC} 本地版本 (v${local_version}) 比 GitHub (v${remote_version}) 還新，不覆蓋"
         return 0
     fi
+
+    # 安裝程式本身有沒有換（換了就交給新版接手：新版的清單可能多了檔案）
+    local installer_changed=""
+    cmp -s "$repo_dir/install.sh" "$SCRIPT_DIR/install.sh" || installer_changed=1
 
     # 更新主要程式檔案
     local files_updated=0
@@ -1983,10 +2009,41 @@ do_upgrade() {
     build_sck_helper
 
     check_ok "已升級 v${local_version} → v${remote_version}（更新 ${files_updated} 個檔案）"
+    if [ -n "$installer_changed" ] && [ -z "$handoff" ] && [ -f "$SCRIPT_DIR/install.sh" ]; then
+        # 交給新版安裝程式：用它的清單補齊、問它新增的問題。JTLW_UPGRADE_FROM 讓 Linux 照樣知道版本換了（要重啟服務）
+        export JTLW_UPGRADE_REPO="$repo_dir" JTLW_UPGRADE_TMP="$tmp_dir" JTLW_UPGRADE_FROM="$local_version"
+        trap - EXIT
+        exec bash "$SCRIPT_DIR/install.sh" --upgrade
+    fi
     echo ""
     echo -e "  ${C_WARN}建議重新執行 ./install.sh 確認相依套件完整${NC}"
     offer_desktop_shortcut
     offer_breezy_on_upgrade
+    return 0
+}
+
+# 清單上缺了哪些檔（空白分隔；沒缺就是空字串）
+_upgrade_missing_files() {
+    local _f
+    for _f in $_UPGRADE_FILES; do
+        [ -e "$SCRIPT_DIR/$_f" ] || printf '%s ' "$_f"
+    done
+}
+
+# 完整安裝一開始先補齊上次升級漏掉的檔案（2026-10-10）：v2.28.0 以前的安裝程式升級時只複製它自己清單上的檔案，
+# Linux 接著執行「新版」的 install-linux.sh 檢查相依套件——新版才加入的檔案就在這裡補上。
+# 從 git 或壓縮檔全新安裝時不會缺，什麼都不做
+_complete_upgrade_files() {
+    local miss
+    miss=$(_upgrade_missing_files)
+    [ -n "$miss" ] || return 0
+    echo ""
+    echo -e "  ${C_WARN}上次升級沒有完成：缺 $(echo $miss | wc -w | tr -d ' ') 個新版才加入的檔案，先補齊${NC}"
+    JTLW_UPGRADE_QUIET=1 do_upgrade || true
+    miss=$(_upgrade_missing_files)
+    if [ -n "$miss" ]; then
+        check_notice "還缺 $(echo $miss | wc -w | tr -d ' ') 個檔案（連不到 GitHub？），連上網路後執行 ./install.sh --upgrade"
+    fi
     return 0
 }
 
@@ -3363,7 +3420,7 @@ _shortcut_icon() {
     printf '%s\n' "$f"
 }
 _GUI_SESSION_DIRS="/usr/share/xsessions /usr/share/wayland-sessions"
-_MAC_APPS_DIRS="/Applications $HOME/Applications"      # 先放得進去的那一個；找舊的兩個都找
+_MAC_APPS_DIRS="${JTLW_MAC_APPS_DIRS:-/Applications $HOME/Applications}"   # 先放得進去的那一個；找舊的兩個都找（測試可換掉，不碰真的「應用程式」）
 
 # Linux 有沒有圖形桌面：正在圖形環境裡，或裝了桌面工作階段（從 SSH 安裝一台桌機時也算）
 _linux_has_gui() {
@@ -3533,11 +3590,31 @@ _write_shortcut() {             # $1＝desktop／menu  $2＝路徑
 }
 
 # 建過的捷徑還在就確認內容是最新的（安裝資料夾搬過、啟動方式改過）；刪掉了就不管
+# 這個捷徑是不是這一份安裝的（2026-10-10）：指向這一份、或指向的資料夾已經不在（搬過家）才算；
+# 指向另一份還在的安裝就不碰。以前位置上有捷徑就當成自己的，第二份安裝（測試副本）升級時把正式那份的
+# 「應用程式」捷徑改成指向自己（macOS 的 /Applications 不在家目錄裡，連換掉 HOME 的升級模擬都擋不住）
+_shortcut_ours() {              # $1＝desktop／menu  $2＝捷徑路徑
+    local f t
+    f=$(_shortcut_content "$1" "$2")
+    [ -f "$f" ] || return 1
+    if grep -q '^\[Desktop Entry\]' "$f" 2>/dev/null; then
+        t=$(sed -n 's/^Path=//p' "$f" | head -1 | sed 's/\\\\/\\/g')
+    else
+        grep -qF "$(printf 'cd %q && exec' "$SCRIPT_DIR")" "$f" 2>/dev/null && return 0
+        t=$(sed -n 's/^cd \(.*\) && exec .*/\1/p' "$f" | head -1)
+        case "$t" in \$\'*|\"*|\'*) return 1 ;; esac          # printf %q 的 $'…'、引號形式不猜
+        t=$(printf '%s' "$t" | sed 's/\\\(.\)/\1/g')          # 還原反斜線跳脫（空白、$ 等），不用 eval
+    fi
+    [ -n "$t" ] || return 1
+    [ "$t" = "$SCRIPT_DIR" ] || [ ! -d "$t" ]
+}
+
 _refresh_shortcuts() {          # $@＝記錄的位置
     local loc path tmp
     for loc in "$@"; do
         path=$(_shortcut_path "$loc" find) || continue
         [ -e "$path" ] || continue
+        _shortcut_ours "$loc" "$path" || continue           # 別份安裝的捷徑不碰
         tmp=$(mktemp -d) || continue
         # 期望的內容先寫到暫存檔（.app 只產生裡面那份 .command），跟現在的比；圖示另外看（v2.26.2 起是 logo）
         if [ "$(uname -s)" = "Darwin" ]; then
@@ -3571,6 +3648,9 @@ offer_desktop_shortcut() {
         _refresh_shortcuts $state
         return 0
     fi
+    if [ -n "${JTLW_UPGRADE_QUIET:-}" ]; then            # start.sh 啟動時自動補檔：不問
+        return 0
+    fi
     local locs="desktop"
     if [ "$(uname -s)" = "Linux" ]; then
         [ "${LINUX_MODE:-desktop}" = "desktop" ] || return 0
@@ -3580,15 +3660,19 @@ offer_desktop_shortcut() {
     else
         locs="desktop menu"
     fi
-    # 已經有了（自己建的、或舊版留下的）：當作建過，不問
-    local loc found=""
+    # 已經有了：這一份建的（或舊版留下的）當作建過、之後升級會更新；別人的（使用者自己做的、另一份安裝的）
+    # 不問、不記、永遠不改（以前一律記成建過，下一次升級的「更新」就把它改成指向這一份）
+    local loc p found="" other=""
     for loc in $locs; do
-        _shortcut_path "$loc" find >/dev/null 2>&1 && [ -e "$(_shortcut_path "$loc" find)" ] && found="$found $loc"
+        p=$(_shortcut_path "$loc" find 2>/dev/null) || continue
+        [ -e "$p" ] || continue
+        if _shortcut_ours "$loc" "$p"; then found="$found $loc"; else other=1; fi
     done
     if [ -n "$found" ]; then
         printf '%s\n' "${found# }" > "$SHORTCUT_STATE_FILE" 2>/dev/null || true
         return 0
     fi
+    [ -n "$other" ] && return 0
     # 只在有人可以回答時問。curl | bash 時標準輸入是管線，改從 /dev/tty 讀
     local tty_in
     if [ -t 0 ]; then
@@ -3653,7 +3737,7 @@ if [ -n "${JTLW_INSTALL_LIB:-}" ]; then
 fi
 
 # ─── 主流程 ──────────────────────────────────────
-print_title
+[ -z "${JTLW_UPGRADE_REPO:-}" ] && print_title      # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 
 # 處理 --upgrade 參數
 if [ "$1" = "--upgrade" ]; then
@@ -3664,6 +3748,7 @@ fi
 check_macos_version || exit 1
 check_xcode_clt || exit 1
 check_internet || exit 1
+_complete_upgrade_files
 check_running_processes || exit 1
 check_disk_space || exit 1
 check_homebrew || exit 1

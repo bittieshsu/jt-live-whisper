@@ -138,7 +138,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.28.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.28.1 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1259,6 +1259,11 @@ cd C:\jt-live-whisper
 .\install.ps1 -Upgrade
 </code></pre>
 <p>自動從 GitHub 下載最新版本的程式檔案（translate_meeting.py、start.sh、install.sh、SOP.md 等），不影響現有的 venv、whisper.cpp、模型和設定檔。macOS 與 Windows 升級後請再執行一次安裝腳本（macOS: <code>./install.sh</code>、Windows: <code>.\install.ps1</code>），新版本需要的套件才會裝上。</p>
+<ul>
+<li><strong>升級執行一次就好</strong>（v2.28.1 起）：新版才加入的檔案由新版的安裝程式接手補齊。以前跑的是「舊版」安裝程式，只會複製舊版清單上的檔案，新版才加入的（例如 v2.27.0 的朗讀模組 <code>jtlw_tts/</code>）要再升級一次才會到</li>
+<li><strong>從 v2.28.0 以前升級上來的</strong>：第一次升級跑的還是舊的安裝程式，新加入的檔案可能還沒到；之後執行 <code>./start.sh</code>（Windows：<code>.\start.ps1</code>，點捷徑也是）時會先自動補齊（畫面顯示「升級沒有完成…自動補齊」），連不到 GitHub 時會說要再執行一次升級</li>
+<li><strong>升級後把 WebUI 關掉再重新啟動</strong>：開著的 WebUI 還在跑升級前的程式（例如朗讀的選單是空的、或顯示「文字轉語音元件還沒安裝完成」）</li>
+</ul>
 <p>升級結束時，還沒建過捷徑的電腦會問一次要不要建立桌面與應用程式選單捷徑（見 3-4）。</p>
 <p>Linux 的 <code>--upgrade</code> 下載完新檔案後會自動重新執行安裝檢查，補齊新版本需要的相依套件；伺服器版若程式版本有變更，會一併重新啟動 <code>jt-live-whisper-webui</code> 服務。不想在升級時檢查相依套件，可設定 <code>JTLW_SKIP_DEP_CHECK=1</code>。</p>
 <h3 id="3-3-搬遷資料夾後">3-3. 搬遷資料夾後</h3>
@@ -1295,6 +1300,7 @@ cd C:\jt-live-whisper
 <li><strong>選了「都不要」之後升級不會再問</strong>；想建立時刪掉安裝資料夾裡的 <code>.desktop_shortcut</code>，再執行一次安裝腳本</li>
 <li>建過之後自己刪掉捷徑，升級也不會再建回來；捷徑還在的話，搬過資料夾後重新執行安裝腳本會一併更新</li>
 <li>用 SSH、排程等沒有人可以回答的方式執行時不問（也不記錄），下次在終端機前執行時再問；伺服器版（<code>--server</code>）不問</li>
+<li>位置上已經有別的捷徑（自己做的、或同一台電腦另一份安裝建的）：不問、不記錄，升級時也不會改它；原本指向的資料夾已經不在（搬過家）的才會接手、改指到這一份（v2.28.1 起；之前會把另一份安裝的捷徑改成指向自己）</li>
 <li><strong>從 v2.25.3 以前升級上來的</strong>：macOS、Windows 第一次 <code>--upgrade</code> 跑的是舊版安裝腳本，不會問；
 第二次 <code>--upgrade</code>（或重新執行一次安裝腳本）才會問。Linux 的 <code>--upgrade</code> 會接著用新版安裝腳本檢查相依套件，第一次就會問</li>
 <li>已經開著 WebUI 時再點一次捷徑，會直接在瀏覽器開啟原本那個，不會把它關掉重開；啟動失敗時視窗會停住，看得到錯誤訊息</li>
@@ -2567,7 +2573,7 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 </tr>
 <tr>
 <td>從舊版升級只跑了一次 <code>--upgrade</code></td>
-<td>「找不到會議分析模組 jtdt_meeting」→ 再執行一次 <code>--upgrade</code>（Windows：<code>-Upgrade</code>）</td>
+<td>「找不到會議分析模組 jtdt_meeting」→ 再執行一次 <code>--upgrade</code>（Windows：<code>-Upgrade</code>）；v2.28.1 起啟動 <code>start.sh</code>／<code>start.ps1</code> 時會自動補齊</td>
 </tr>
 <tr>
 <td>分析整個失敗（例如 LLM 伺服器中途斷線）</td>

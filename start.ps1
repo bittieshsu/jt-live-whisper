@@ -97,12 +97,40 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.28.0 - 100% 全地端 AI 語音工具箱${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
 Write-Host "${C_DIM}  提示：已自動關閉終端機「快速編輯」模式，避免滑鼠誤點導致程式凍結${NC}"
 Write-Host ""
+
+# ─── 上次升級沒有完成就先補齊（2026-10-10，與 start.sh 相同）──────────
+# v2.28.0 以前的安裝程式升級時只複製「它自己清單上」的檔案，新版才加入的（例如 v2.27.0 的 jtlw_tts\）
+# 要再升級一次才會到。這支 start.ps1 在那一次升級已經換成新版：清單照新版 install.sh 的 _UPGRADE_FILES
+# （與 install.ps1 的清單相同，tools/test_upgrade_file_lists.py 擋），缺檔就自動跑一次升級補齊
+function upgrade_missing() {
+    $inst = Join-Path $SCRIPT_DIR "install.sh"
+    if (-not (Test-Path $inst)) { return @() }
+    $m = [regex]::Match((Get-Content $inst -Raw -Encoding UTF8), '(?s)_UPGRADE_FILES="([^"]*)"')
+    if (-not $m.Success) { return @() }
+    return @($m.Groups[1].Value -split '[\s\\]+' | Where-Object { $_ -and -not (Test-Path (Join-Path $SCRIPT_DIR $_)) })
+}
+$upgMiss = @(upgrade_missing)
+if ($upgMiss.Count -gt 0 -and -not $env:JTLW_NO_UPGRADE_FIX) {
+    Write-Host "${C_WARN}[升級沒有完成] 缺 $($upgMiss.Count) 個新版才加入的檔案（$(($upgMiss | Select-Object -First 3) -join ' ')…），自動補齊...${NC}"
+    $env:JTLW_UPGRADE_QUIET = "1"
+    $psExe = (Get-Process -Id $PID).Path
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $SCRIPT_DIR "install.ps1") -Upgrade
+    Remove-Item Env:JTLW_UPGRADE_QUIET -ErrorAction SilentlyContinue
+    $upgMiss = @(upgrade_missing)
+    if ($upgMiss.Count -gt 0) {
+        Write-Host "${C_ERR}[升級沒有完成] 還缺 $($upgMiss.Count) 個檔案（連不到 GitHub？），有些功能不能用；連上網路後執行：${NC}"
+        Write-Host "  ${C_OK}cd `"$SCRIPT_DIR`"; .\install.ps1 -Upgrade${NC}"
+    } else {
+        Write-Host "${C_OK}[完成] 已補齊${NC}"
+    }
+    Write-Host ""
+}
 
 # ─── 背景 GitHub 版本檢查（不阻塞啟動流程）──────────────────
 $updateJob = Start-Job -ScriptBlock {

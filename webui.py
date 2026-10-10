@@ -1056,7 +1056,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.28.0",
+        "last": last, "version": "2.28.1",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2,
@@ -1830,8 +1830,9 @@ try:
 except Exception as _e:          # 第一次 --upgrade 跑的是舊腳本舊清單，拿不到新加的 jtlw_tts/；第二次才會到
     _tts = None
     _tts_import_err = f"{type(_e).__name__}: {_e}"
-_TTS_MISSING = "文字轉語音元件還沒安裝完成：請再執行一次升級（" + (r".\install.ps1 -Upgrade" if os.name == "nt"
-                                                                  else "./install.sh --upgrade") + "）"
+_TTS_MISSING = ("文字轉語音元件還沒安裝完成（通常是升級沒有完成）：請在安裝資料夾執行 "
+                + (r".\install.ps1 -Upgrade" if os.name == "nt" else "./install.sh --upgrade")
+                + "，完成後關掉 WebUI 再重新啟動")
 TTS_POS_FLAG = BASE_DIR / ".webui_tts_pos"   # translate_meeting.py 的 _TTS_POS_FLAG：瀏覽器播到第幾段
 _TTS_LIVE_RE = re.compile(r"^[0-9a-f]{16}$")
 

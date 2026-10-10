@@ -29,10 +29,36 @@ _COLS=$(tput cols 2>/dev/null || echo 60)
 [ "$_COLS" -lt 40 ] && _COLS=40
 _LINE=$(printf '%*s' "$_COLS" '' | tr ' ' '=')
 echo -e "${C_TITLE}${_LINE}${NC}"
-echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.0 - 100% 全地端 AI 語音工具箱${NC}"
+echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱${NC}"
 echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 echo -e "${C_TITLE}${_LINE}${NC}"
 echo ""
+
+# 上次升級沒有完成就先補齊（2026-10-10）：v2.28.0 以前的安裝程式升級時只複製「它自己清單上」的檔案，
+# 新版才加入的（例如 v2.27.0 的 jtlw_tts/）要再升級一次才會到；只升一次的人停在「新版程式＋缺模組」，
+# WebUI 的朗讀選單整個是空的。這支 start.sh 在那一次升級已經換成新版，清單照新版 install.sh 的 _UPGRADE_FILES：
+# 缺檔就自動跑一次升級（只下載、比對、複製清單上的檔案；不問問題、不裝套件），補不到就說要執行哪一行
+_upgrade_missing() {
+    [ -f "$SCRIPT_DIR/install.sh" ] || return 0
+    local _f
+    for _f in $(sed -n '/^_UPGRADE_FILES="/,/"$/p' "$SCRIPT_DIR/install.sh" | tr -d '\\"' | sed 's/^_UPGRADE_FILES=//'); do
+        [ -e "$SCRIPT_DIR/$_f" ] || printf '%s\n' "$_f"
+    done
+}
+_UPG_MISS=$(_upgrade_missing)
+if [ -n "$_UPG_MISS" ] && [ -z "${JTLW_NO_UPGRADE_FIX:-}" ]; then
+    _n=$(printf '%s\n' "$_UPG_MISS" | wc -l | tr -d ' ')
+    echo -e "${C_WARN}[升級沒有完成] 缺 ${_n} 個新版才加入的檔案（$(printf '%s\n' "$_UPG_MISS" | head -3 | tr '\n' ' ')…），自動補齊...${NC}"
+    JTLW_UPGRADE_QUIET=1 JTLW_SKIP_DEP_CHECK=1 bash "$SCRIPT_DIR/install.sh" --upgrade < /dev/null || true
+    _UPG_MISS=$(_upgrade_missing)
+    if [ -n "$_UPG_MISS" ]; then
+        echo -e "${C_ERR}[升級沒有完成] 還缺 $(printf '%s\n' "$_UPG_MISS" | wc -l | tr -d ' ') 個檔案（連不到 GitHub？），有些功能不能用；連上網路後執行：${NC}"
+        echo -e "  ${C_OK}cd \"$SCRIPT_DIR\" && ./install.sh --upgrade${NC}"
+    else
+        echo -e "${C_OK}[完成] 已補齊${NC}"
+    fi
+    echo ""
+fi
 
 # 背景檢查 GitHub 新版本（不阻塞啟動流程）
 _UPDATE_TMP=$(mktemp /tmp/jt-update.XXXXXX 2>/dev/null || echo "")

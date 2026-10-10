@@ -81,6 +81,8 @@ body:not(.has-live){overflow:auto}
 .ip-need.warn{background:rgba(255,193,7,.12);border:1px solid rgba(255,193,7,.5)}
 .ip-need.ok{background:rgba(25,135,84,.08);border:1px solid rgba(25,135,84,.3);color:var(--green)}
 .ip-need.no{background:rgba(220,53,69,.08);border:1px solid rgba(220,53,69,.25);color:var(--red)}
+/* 文字轉語音元件不在（例如升級沒有完成）：只留標題、說明與原因，下面一排空的選單不顯示（2026-10-10） */
+#rTtsMode.tts-off>:not(.sec-title):not(.sec-hint):not(#ttsMissing){display:none}
 .row2{display:flex;gap:12px}.row2 .fg{flex:1;min-width:0}@media(max-width:600px){.row2{flex-direction:column;gap:0}}
 .row3{display:flex;gap:8px;align-items:flex-end}.row3 .fg{flex:1;margin-bottom:0}
 .test-btn{padding:0 16px;font-size:13px;background:var(--bg2);color:var(--text);border:1px solid var(--input-border);border-radius:var(--radius-sm);cursor:pointer;white-space:nowrap;flex-shrink:0;height:38px;line-height:38px;transition:all .2s;margin-bottom:0}.test-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -308,6 +310,7 @@ body.dark .ver-warn{background:#3a2f0b;color:#ffda6a;border-color:#665216}
   <div class="sec" id="rTtsMode">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M11 5L6 9H2v6h4l5 4V5z" stroke="currentColor" stroke-linejoin="round"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13" stroke="currentColor" stroke-linecap="round"/></svg>語音合成</div>
     <div class="sec-hint">念法以台灣日常說法為準、教育部辭典為基礎（「和」念<span style="white-space:nowrap">ㄏㄢˋ</span>，可在發音字典改）。合成在 GPU 伺服器或 Apple Silicon Mac 上進行，資料不經雲端。聲音可以用內建的 8 個（AI 產生，不是真人），或匯入台灣華語錄音。</div>
+    <div class="ip-need no" id="ttsMissing" style="display:none"></div>
     <div class="fg"><label>功能模式</label><div class="csel" id="iTtsMode" data-value=""></div></div>
     <div class="fg"><label>合成模型</label><div class="csel" id="iTtsModel" data-value=""></div><div class="tts-note" id="ttsModelNote"></div></div>
     <div class="fg"><label>合成位置</label><div class="csel" id="iTtsWhere" data-value=""></div></div>
@@ -1614,7 +1617,9 @@ function ttsWarm(){if(_authRole==='read'||!_ttsInfo||!_ttsInfo.installed)return;
   _ttsFetch('/api/tts/warm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({where:cselVal($('iTtsWhere'))||'auto',model:cselVal($('iTtsModel'))||''})}).catch(()=>{})}
 function ttsFill(info,keep){
   _ttsInfo=info||null;const note=$('ttsStatusNote');
-  if(!info||!info.installed){note.textContent=(info&&info.reason)||'文字轉語音元件還沒安裝完成';note.style.color='var(--red)';return}
+  const miss=$('ttsMissing'),sec=$('rTtsMode');
+  if(!info||!info.installed){const r=(info&&info.reason)||'文字轉語音元件還沒安裝完成';note.textContent=r;note.style.color='var(--red)';miss.textContent=r;miss.style.display='';sec.classList.add('tts-off');return}
+  miss.style.display='none';sec.classList.remove('tts-off');
   const L=_ttsLast||{};
   // 合成模型：預設的標「預設」；BreezyVoice 標台灣口音、較慢；不能用的反灰並寫原因
   const ms=info.models||[],prevM=keep?cselVal($('iTtsModel')):(L.tts_model||''),defM=(ms.find(m=>m.default)||ms[0]||{}).value||'';

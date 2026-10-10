@@ -46,6 +46,8 @@ $SCRIPT_DIR = if ($MyInvocation.MyCommand.Path) {
 }
 $GITHUB_REPO    = "https://github.com/jasoncheng7115/jt-live-whisper.git"
 $GITHUB_ZIP     = "https://github.com/jasoncheng7115/jt-live-whisper/archive/refs/heads/main.zip"
+# 升級模擬用（tools/e2e_win_upgrade.py）：換成本機的 file:/// 壓縮檔，push 之前就能驗 Windows 的升級（bash 版用假的 curl）
+if ($env:JTLW_UPGRADE_ZIP_URL) { $GITHUB_ZIP = $env:JTLW_UPGRADE_ZIP_URL }
 
 # venv 能不能用：python 跑得起來，而且是建立 venv 時的那個 Python 版本（2026-10-05）。
 # 與 install.sh 的 _VENV_CHECK_PY 逐字相同（tools/test_venv_python_version.py 比對），理由見那邊：
@@ -335,6 +337,17 @@ function desktop_shortcut_spec {
     return @{ Target = $ps; Arguments = $cmdArgs; WorkingDirectory = $SCRIPT_DIR; Icon = $icon }
 }
 
+# 這個捷徑是不是這一份安裝的（2026-10-10，與 install.sh 的 _shortcut_ours 相同）：工作目錄是這一份、
+# 或指向的資料夾已經不在（搬過家）才算；指向另一份還在的安裝就不碰（以前位置上有捷徑就當成自己的）
+function desktop_shortcut_ours([string]$lnkPath) {
+    try {
+        $wd = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath).WorkingDirectory
+    } catch { return $false }
+    if (-not $wd) { return $false }
+    if ($wd.TrimEnd('\') -ieq $SCRIPT_DIR.TrimEnd('\')) { return $true }
+    return -not (Test-Path $wd)
+}
+
 function write_desktop_shortcut([string]$lnkPath) {
     try {
         $spec = desktop_shortcut_spec
@@ -458,18 +471,22 @@ function offer_desktop_shortcut($answer = $null, $desktopDir = $null, $programsD
         foreach ($loc in ($state -split '\s+')) {
             if (-not $paths.Contains($loc)) { continue }
             $p = $paths[$loc]
-            if ((Test-Path $p) -and -not (desktop_shortcut_is_current $p)) {
+            if ((Test-Path $p) -and (desktop_shortcut_ours $p) -and -not (desktop_shortcut_is_current $p)) {
                 if (write_desktop_shortcut $p) { check_ok "已更新捷徑：$p" }
             }
         }
         return
     }
+    if ($env:JTLW_UPGRADE_QUIET) { return }      # start.ps1 啟動時自動補檔：不問
     if ($paths.Count -eq 0) { return }
-    $found = @($paths.Keys | Where-Object { Test-Path $paths[$_] })   # 已經有了（自己建的）：當作建過
+    # 已經有了：這一份建的當作建過、之後升級會更新；別人的（使用者自己做的、另一份安裝的）不問、不記、永遠不改
+    $existing = @($paths.Keys | Where-Object { Test-Path $paths[$_] })
+    $found = @($existing | Where-Object { desktop_shortcut_ours $paths[$_] })
     if ($found.Count -gt 0) {
         Set-Content -Path $SHORTCUT_STATE_FILE -Value ($found -join " ") -Encoding ASCII
         return
     }
+    if ($existing.Count -gt 0) { return }
     if ($null -eq $answer) {
         if ([Console]::IsInputRedirected) { return }
         section "捷徑"
@@ -566,6 +583,7 @@ function rw_offer_breezy([string]$sshOpts, [string]$userHost, [bool]$upgrading =
 # 升級：有設定 GPU 伺服器、而且不必輸入密碼就連得上時問（BatchMode：不可以卡在問密碼）
 function offer_breezy_on_upgrade() {
     if ([Console]::IsInputRedirected) { return }
+    if ($env:JTLW_UPGRADE_QUIET) { return }      # start.ps1 啟動時自動補檔：不問、不連 GPU 伺服器
     $cfg = read_config
     if (-not ($cfg | Get-Member -Name "remote_whisper")) { return }
     $rw = $cfg.remote_whisper
@@ -583,14 +601,16 @@ $cols = try { $Host.UI.RawUI.WindowSize.Width } catch { 60 }
 if ($cols -lt 40) { $cols = 40 }
 $banner_line = '=' * $cols
 
+if (-not $env:JTLW_UPGRADE_REPO) {          # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.28.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
 Write-Host "${C_DIM}  提示：已自動關閉終端機「快速編輯」模式，避免滑鼠誤點導致程式凍結${NC}"
 Write-Host ""
+}
 
 # ═══════════════════════════════════════════════════════════════
 # Upgrade 模式
@@ -631,6 +651,16 @@ if ($Upgrade) {
 
     section "從 GitHub 升級程式"
 
+    # 升級一律用「新版」的清單（2026-10-10，與 install.sh 相同）：以前跑的是舊版安裝程式、只複製舊版清單上的檔案，
+    # 新版才加入的檔案要再升級一次才會到。現在複製完、發現安裝程式本身換了，就把下載好的資料夾交給新版接手補齊
+    $handoff = $false
+    if ($env:JTLW_UPGRADE_REPO -and (Test-Path (Join-Path $env:JTLW_UPGRADE_REPO "translate_meeting.py"))) {
+        $repoDir = $env:JTLW_UPGRADE_REPO
+        $tmpDir = $env:JTLW_UPGRADE_TMP
+        $handoff = $true
+        Remove-Item Env:JTLW_UPGRADE_REPO, Env:JTLW_UPGRADE_TMP -ErrorAction SilentlyContinue
+        info "由新版安裝程式接手，補齊新版才加入的檔案..."
+    } else {
     $tmpDir = Join-Path $env:TEMP "jt-upgrade-$(Get-Random)"
     $zipPath = Join-Path $tmpDir "jt-live-whisper.zip"
     New-Item -Path $tmpDir -ItemType Directory -Force | Out-Null
@@ -646,6 +676,7 @@ if ($Upgrade) {
     $ProgressPreference = $oldProg
     Expand-Archive $zipPath -DestinationPath $tmpDir -Force
     $repoDir = (Get-ChildItem $tmpDir -Directory | Where-Object { $_.Name -ne "jt-live-whisper.zip" } | Select-Object -First 1).FullName
+    }
 
     if (-not $repoDir -or -not (Test-Path (Join-Path $repoDir "translate_meeting.py"))) {
         check_fail "下載的檔案不完整，請檢查網路連線"
@@ -658,8 +689,10 @@ if ($Upgrade) {
     $localVer  = (Select-String -Path (Join-Path $SCRIPT_DIR "translate_meeting.py") -Pattern 'APP_VERSION\s*=\s*"(.+)"' |
                   Select-Object -First 1).Matches.Groups[1].Value
 
-    Write-Host "  ${C_WHITE}目前版本: v${localVer}${NC}"
-    Write-Host "  ${C_WHITE}最新版本: v${remoteVer}${NC}"
+    if (-not $handoff) {
+        Write-Host "  ${C_WHITE}目前版本: v${localVer}${NC}"
+        Write-Host "  ${C_WHITE}最新版本: v${remoteVer}${NC}"
+    }
 
     if ($localVer -eq $remoteVer) {
         # 版本相同時逐檔比對「內容」而不是只看檔案在不在。
@@ -676,17 +709,22 @@ if ($Upgrade) {
             if ($a -ne $b) { $staleFiles += $f }
         }
         if ($staleFiles.Count -gt 0) {
-            info "版本相同但有檔案與最新版不符，更新中..."
+            if (-not $handoff) { info "版本相同但有檔案與最新版不符，更新中..." }
             foreach ($f in $staleFiles) {
                 $dst = Join-Path $SCRIPT_DIR $f
                 New-Item -Path (Split-Path $dst -Parent) -ItemType Directory -Force | Out-Null
                 Copy-Item (Join-Path $repoDir $f) $dst -Force
             }
-            check_ok "已更新與最新版不符的檔案（$($staleFiles -join '、')）"
-        } else {
+            if ($handoff) { check_ok "已補上新版才加入的檔案（$($staleFiles -join '、')）" }
+            else { check_ok "已更新與最新版不符的檔案（$($staleFiles -join '、')）" }
+        } elseif (-not $handoff) {
             check_ok "已經是最新版本 (v${localVer})"
         }
-        Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($handoff) {
+            Write-Host ""
+            Write-Host "  ${C_WARN}建議重新執行 .\install.ps1 確認相依套件完整${NC}"
+        }
+        if ($tmpDir) { Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
         $null = ensure_script_execution          # 升級上來的機器也要能直接打 .\start.ps1（v2.27.0）
         offer_desktop_shortcut
         offer_breezy_on_upgrade
@@ -723,6 +761,10 @@ if ($Upgrade) {
         info "已歸檔 v${localVer} 到 versions\v${localVer}\"
     }
 
+    # 安裝程式本身有沒有換（換了就交給新版接手：新版的清單可能多了檔案）
+    $installerChanged = (Get-FileHash (Join-Path $repoDir "install.ps1") -Algorithm SHA256).Hash -ne
+                        (Get-FileHash (Join-Path $SCRIPT_DIR "install.ps1") -Algorithm SHA256).Hash
+
     # 更新檔案
     $updated = 0
     foreach ($f in $UPGRADE_FILES) {
@@ -735,8 +777,15 @@ if ($Upgrade) {
         }
     }
 
-    Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     check_ok "已升級 v${localVer} -> v${remoteVer}（更新 ${updated} 個檔案）"
+    if ($installerChanged -and -not $handoff) {
+        # 交給新版安裝程式：用它的清單補齊、問它新增的問題（PowerShell 開始執行前就把整支讀完，這裡覆寫自己沒關係）
+        $env:JTLW_UPGRADE_REPO = $repoDir; $env:JTLW_UPGRADE_TMP = $tmpDir; $env:JTLW_UPGRADE_FROM = $localVer
+        $psExe = (Get-Process -Id $PID).Path
+        & $psExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $SCRIPT_DIR "install.ps1") -Upgrade
+        exit $LASTEXITCODE
+    }
+    if ($tmpDir) { Remove-Item $tmpDir -Recurse -Force -ErrorAction SilentlyContinue }
     Write-Host ""
     Write-Host "  ${C_WARN}建議重新執行 .\install.ps1 確認相依套件完整${NC}"
     $null = ensure_script_execution

@@ -786,8 +786,10 @@ _api_restart_hint() {
 }
 
 # ─── 主流程 ──────────────────────────────────────
-print_title
-echo -e "  ${C_DIM}Linux 版（$( [ "$LINUX_MODE" = "server" ] && echo 伺服器 || echo 桌面 )）${NC}"
+if [ -z "${JTLW_UPGRADE_REPO:-}" ]; then            # 升級時交給新版接手的那一次不再印標題（同一個畫面）
+    print_title
+    echo -e "  ${C_DIM}Linux 版（$( [ "$LINUX_MODE" = "server" ] && echo 伺服器 || echo 桌面 )）${NC}"
+fi
 
 case "$LINUX_ACTION" in
     help)
@@ -795,9 +797,10 @@ case "$LINUX_ACTION" in
         exit 0
         ;;
     upgrade)
-        _ver_before=$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null)
+        # 版本號只取數字：舊版安裝程式交給新版接手時，檔案已經換成新版了，換之前的版本由 JTLW_UPGRADE_FROM 帶過來
+        _ver_before=${JTLW_UPGRADE_FROM:-$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/')}
         do_upgrade || exit $?
-        _ver_after=$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null)
+        _ver_after=$(grep -m1 'APP_VERSION' "$SCRIPT_DIR/translate_meeting.py" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/')
         [ "$_ver_before" != "$_ver_after" ] && export JTLW_RESTART_SERVICE=1
         # 不接著檢查相依套件時（JTLW_SKIP_DEP_CHECK），摘要不會出現，提示要在這裡印
         [ -n "${JTLW_SKIP_DEP_CHECK:-}" ] && _api_restart_hint
@@ -825,6 +828,7 @@ esac
 
 check_linux_system
 check_internet || exit 1
+_complete_upgrade_files               # 舊版安裝程式升級時漏掉的新檔（2026-10-10，見 install.sh）
 check_running_processes || exit 1
 check_disk_space || exit 1
 check_linux_packages || exit 1
