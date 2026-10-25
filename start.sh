@@ -33,7 +33,7 @@ _COLS=$(tput cols 2>/dev/null || echo 60)
 [ "$_COLS" -lt 40 ] && _COLS=40
 _LINE=$(printf '%*s' "$_COLS" '' | tr ' ' '=')
 echo -e "${C_TITLE}${_LINE}${NC}"
-echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.31.5 - 100% 全地端 AI 語音工具箱${NC}"
+echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.31.6 - 100% 全地端 AI 語音工具箱${NC}"
 echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 echo -e "${C_TITLE}${_LINE}${NC}"
 echo ""
@@ -196,6 +196,40 @@ if [ "$(uname -s)" = "Linux" ]; then
 fi
 
 echo -e "${C_OK}Python 環境已啟用${NC}"
+
+# pip／certifi 太舊就自動升級一次（2026-10-23）：eMudhra（emSign）中間憑證私鑰外洩，舊的 pip／certifi 會相信冒充
+# pypi.org、huggingface.co 的假憑證。macOS 的 ./install.sh --upgrade 只換檔案不裝套件，所以在這裡補。
+# 檢查不連網路；要升級才連，失敗的話一天最多再試一次（不讓沒有網路的電腦每次啟動都等）。
+# 與 install.sh 的 _PIP_SECURE_PY 逐字相同（tools/test_pip_secure.py 比對）
+_PIP_SECURE_PY='import sys
+try:
+    from importlib.metadata import version
+except ImportError:
+    sys.exit(0)
+def v(n):
+    try:
+        return tuple(int(x) for x in version(n).split(".")[:3])
+    except Exception:
+        return None
+p, c = v("pip"), v("certifi")
+print("pip=%s certifi=%s" % (p and ".".join(map(str, p)), c and ".".join(map(str, c))))
+sys.exit(4 if (p and p < (26, 2, 2)) or (c and c < (2026, 10, 19)) else 0)'
+if ! printf '%s\n' "$_PIP_SECURE_PY" | "$VENV_DIR/bin/python3" - >/dev/null 2>&1; then
+    _ps_mark="$SCRIPT_DIR/.pip_secure_tried"
+    if [ ! -f "$_ps_mark" ] || [ -n "$(find "$_ps_mark" -mmin +1440 2>/dev/null)" ]; then
+        echo -e "${C_WARN}[安全性更新] pip／certifi 的憑證清單太舊（emSign 中間憑證外洩），自動升級中...${NC}"
+        "$VENV_DIR/bin/python3" -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "pip>=26.2.2" >/dev/null 2>&1
+        "$VENV_DIR/bin/python3" -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "certifi>=2026.10.19" >/dev/null 2>&1
+        if _ps_state=$(printf '%s\n' "$_PIP_SECURE_PY" | "$VENV_DIR/bin/python3" - 2>/dev/null); then
+            rm -f "$_ps_mark"
+            echo -e "${C_OK}[安全性更新] 完成（${_ps_state}）${NC}"
+        else
+            touch "$_ps_mark" 2>/dev/null
+            echo -e "${C_WARN}[安全性更新] 沒有成功（${_ps_state}，連不到 PyPI？），明天啟動時再試；也可以自己執行：${NC}"
+            echo -e "  ${C_OK}\"$VENV_DIR/bin/python3\" -m pip install -U \"pip>=26.2.2\" \"certifi>=2026.10.19\"${NC}"
+        fi
+    fi
+fi
 
 # 顯示新版本提醒（背景 curl 應已完成）
 if [ -n "$_UPDATE_PID" ]; then

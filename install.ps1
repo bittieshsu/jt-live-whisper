@@ -67,6 +67,24 @@ print(v, n)
 sys.exit(0 if v in ("", n) else 3)
 '@
 
+# pip／certifi 太舊就升級（2026-10-23，emSign 中間憑證外洩 GHSA-6q48-6c7w-9gw2）：pip 自帶一份 certifi、一律信任它，
+# 只更新 Windows 擋不住。與 install.sh 的 _PIP_SECURE_PY 逐字相同（tools/test_pip_secure.py 比對），結束碼 4＝要升級
+$PIP_SECURE_PY = @'
+import sys
+try:
+    from importlib.metadata import version
+except ImportError:
+    sys.exit(0)
+def v(n):
+    try:
+        return tuple(int(x) for x in version(n).split(".")[:3])
+    except Exception:
+        return None
+p, c = v("pip"), v("certifi")
+print("pip=%s certifi=%s" % (p and ".".join(map(str, p)), c and ".".join(map(str, c))))
+sys.exit(4 if (p and p < (26, 2, 2)) or (c and c < (2026, 10, 19)) else 0)
+'@
+
 # ─── Bootstrap：透過 irm | iex 執行時，自動下載並安裝 ─────────
 if (-not (Test-Path (Join-Path $SCRIPT_DIR "translate_meeting.py"))) {
     Write-Host ""
@@ -761,7 +779,7 @@ $banner_line = '=' * $cols
 if (-not $env:JTLW_UPGRADE_REPO) {          # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.5 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.6 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -1380,6 +1398,23 @@ if ($pipJson) {
 if ($pipOutdated) {
     info "升級 pip..."
     & $VENV_PYTHON -m pip install --upgrade pip --quiet 2>$null
+}
+
+# 已經夠新回傳 $true（不連網路）；升級後仍不夠新回傳 $false，版本放在 $script:PIP_SECURE_STATE
+function pip_secure_upgrade($py) {
+    $script:PIP_SECURE_STATE = ($PIP_SECURE_PY | & $py - 2>$null) -join ""
+    if ($LASTEXITCODE -eq 0) { return $true }
+    # 先換 pip（新的 pip 帶新的 certifi），再用它下載 certifi
+    & $py -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "pip>=26.2.2" 2>$null | Out-Null
+    & $py -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "certifi>=2026.10.19" 2>$null | Out-Null
+    $script:PIP_SECURE_STATE = ($PIP_SECURE_PY | & $py - 2>$null) -join ""
+    return ($LASTEXITCODE -eq 0)
+}
+if (pip_secure_upgrade $VENV_PYTHON) {
+    check_ok "pip／certifi 憑證清單已是安全版本"
+} else {
+    check_fail "pip／certifi 升級失敗（$($script:PIP_SECURE_STATE)；需要 pip 26.2.2、certifi 2026.10.19 以上）"
+    Write-Host "  連上網路後執行：& `"$VENV_PYTHON`" -m pip install -U `"pip>=26.2.2`" `"certifi>=2026.10.19`""
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -3018,6 +3053,8 @@ echo "`$missing"
             ssh_cmd $sshOpts $userHost "rm -rf ~/jt-whisper-server/venv" | Out-Null
         }
         ssh_cmd $sshOpts $userHost "mkdir -p ~/jt-whisper-server && if [ ! -d ~/jt-whisper-server/venv ]; then if command -v python3.12 >/dev/null 2>&1; then python3.12 -m venv ~/jt-whisper-server/venv; else python3 -m venv ~/jt-whisper-server/venv; fi; fi" | Out-Null
+        # pip／certifi 太舊就先升級（emSign 中間憑證外洩，見 $PIP_SECURE_PY），之後的套件都用新的 pip 下載
+        ssh_cmd $sshOpts $userHost "~/jt-whisper-server/venv/bin/python3 -m pip install -q --disable-pip-version-check --upgrade 'pip>=26.2.2' && ~/jt-whisper-server/venv/bin/python3 -m pip install -q --disable-pip-version-check --upgrade 'certifi>=2026.10.19'" | Out-Null
 
         # PyTorch（檢查是否已正常，避免重複安裝 2-3 GB）
         $skipTorch = $false

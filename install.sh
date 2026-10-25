@@ -217,7 +217,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.31.5 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.31.6 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -787,6 +787,34 @@ n = "%d.%d" % sys.version_info[:2]
 print(v, n)
 sys.exit(0 if v in ("", n) else 3)'
 
+# ─── pip／certifi 太舊就升級（2026-10-23）──────────────
+# eMudhra（emSign）8 把中間憑證私鑰外洩（GHSA-6q48-6c7w-9gw2）：拿它們簽的假憑證可以冒充 pypi.org、huggingface.co。
+# pip 自帶一份 certifi、一律信任它，只更新作業系統擋不住；venv 建立時拿到的 pip 是 Python 安裝當下的版本。
+# 要 pip >= 26.2.2、certifi >= 2026.10.19。同一段 Python 在 install.ps1、start.sh、start.ps1 各一份、逐字相同
+# （tools/test_pip_secure.py 比對）。結束碼 4＝要升級；沒裝 pip／certifi 不算。
+_PIP_SECURE_PY='import sys
+try:
+    from importlib.metadata import version
+except ImportError:
+    sys.exit(0)
+def v(n):
+    try:
+        return tuple(int(x) for x in version(n).split(".")[:3])
+    except Exception:
+        return None
+p, c = v("pip"), v("certifi")
+print("pip=%s certifi=%s" % (p and ".".join(map(str, p)), c and ".".join(map(str, c))))
+sys.exit(4 if (p and p < (26, 2, 2)) or (c and c < (2026, 10, 19)) else 0)'
+
+# $1=venv 的 python。已經夠新回傳 0（不連網路）；升級後仍不夠新回傳非 0，版本放在 PIP_SECURE_STATE
+pip_secure_upgrade() {
+    PIP_SECURE_STATE=$(printf '%s\n' "$_PIP_SECURE_PY" | "$1" - 2>/dev/null) && return 0
+    # 先換 pip（新的 pip 帶新的 certifi），再用它下載 certifi
+    "$1" -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "pip>=26.2.2" >/dev/null 2>&1
+    "$1" -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "certifi>=2026.10.19" >/dev/null 2>&1
+    PIP_SECURE_STATE=$(printf '%s\n' "$_PIP_SECURE_PY" | "$1" - 2>/dev/null)
+}
+
 # $1=venv 資料夾。可用回傳 0；要重建回傳 1，原因放在 VENV_PROBLEM
 venv_problem() {
     local out rc
@@ -852,6 +880,13 @@ check_venv() {
 
     # 檢查必要套件
     source "$VENV_DIR/bin/activate"
+
+    if pip_secure_upgrade "$VENV_DIR/bin/python3"; then
+        check_ok "pip／certifi 憑證清單已是安全版本"
+    else
+        check_fail "pip／certifi 升級失敗（${PIP_SECURE_STATE}；需要 pip 26.2.2、certifi 2026.10.19 以上）"
+        echo -e "  ${C_DIM}  連上網路後執行：\"$VENV_DIR/bin/python3\" -m pip install -U \"pip>=26.2.2\" \"certifi>=2026.10.19\"${NC}"
+    fi
 
     local missing_pkgs=()
     if ! python3 -c "import ctranslate2" &>/dev/null 2>&1; then
@@ -2866,6 +2901,12 @@ else:
             if command -v python3.12 >/dev/null 2>&1; then python3.12 -m venv ~/jt-whisper-server/venv; else python3 -m venv ~/jt-whisper-server/venv; fi
         fi
     "
+    # pip／certifi 太舊就先升級（emSign 中間憑證外洩，見 _PIP_SECURE_PY），之後的套件都用新的 pip 下載
+    if ! printf '%s\n' "$_PIP_SECURE_PY" | ssh $ssh_opts "$rw_user@$rw_host" "~/jt-whisper-server/venv/bin/python3 -" >/dev/null 2>&1; then
+        ssh $ssh_opts "$rw_user@$rw_host" "~/jt-whisper-server/venv/bin/python3 -m pip install -q --disable-pip-version-check --upgrade 'pip>=26.2.2' && ~/jt-whisper-server/venv/bin/python3 -m pip install -q --disable-pip-version-check --upgrade 'certifi>=2026.10.19'" >/dev/null 2>&1 \
+            && check_ok "伺服器 pip／certifi 已升級" \
+            || echo -e "  ${C_WARN}[警告]${NC} 伺服器 pip／certifi 升級失敗（需要 pip 26.2.2、certifi 2026.10.19 以上）"
+    fi
 
     # 檢查 PyTorch CUDA 是否已正常（避免重複安裝 2-3 GB）
     local skip_torch=0

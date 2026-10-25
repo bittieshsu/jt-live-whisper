@@ -1116,7 +1116,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.31.5",
+        "last": last, "version": "2.31.6",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2, "interp_rate_default": _TM_INTERP_RATE_DEFAULT,
@@ -1442,8 +1442,9 @@ async def api_open_folder(request: Request):
     if not folder:
         return JSONResponse({"ok": False, "error": "未指定路徑"})
     full = (BASE_DIR / folder).resolve()
-    # 安全檢查：必須在專案目錄下
-    if not str(full).startswith(str(BASE_DIR.resolve())):
+    # 安全檢查：必須在專案目錄下（v2.31.6 前比字串開頭，相鄰的 jt-live-whisper-xxx 也會過；CodeQL #19）
+    base = BASE_DIR.resolve()
+    if full != base and base not in full.parents:
         return JSONResponse({"ok": False, "error": "路徑不合法"})
     if not full.is_dir():
         return JSONResponse({"ok": False, "error": "資料夾不存在"})

@@ -954,7 +954,7 @@ def _tts_setup_main():
                                    "and m.version('voxcpm')=='2.0.3' and m.version('g2pw') else 1)" % TTS_TORCH],
                         capture_output=True).returncode == 0
     if not ok:
-        run([py, "-m", "pip", "install", "-q", "--upgrade", "pip"], "更新 pip")
+        run([py, "-m", "pip", "install", "-q", "--upgrade", "pip>=26.2.2", "certifi>=2026.10.19"], "更新 pip／certifi")  # emSign 中間憑證外洩（2026-10）
         run([py, "-m", "pip", "install", "-q", "--no-cache-dir", f"torch=={TTS_TORCH}", f"torchaudio=={TTS_TORCH}",
              "--index-url", f"https://download.pytorch.org/whl/{idx}"], f"安裝 torch {TTS_TORCH}（{idx}，含 CUDA 程式庫約 7 GB）")
         # voxcpm 宣告的相依有 torchcodec（沒有 ARM Linux 版；VoxCPM2 讀音檔用 librosa，用不到）、funasr 等：不讓 pip 自己解
@@ -1223,7 +1223,7 @@ def _breezy_setup_main():
                                    "and m.version('wetext')=='0.1.8' and m.version('ruamel.yaml')=='0.17.40' else 1)" % TTS_TORCH],
                         capture_output=True).returncode == 0
     if not ok:
-        run([py, "-m", "pip", "install", "-q", "--upgrade", "pip"], "更新 pip")
+        run([py, "-m", "pip", "install", "-q", "--upgrade", "pip>=26.2.2", "certifi>=2026.10.19"], "更新 pip／certifi")  # emSign 中間憑證外洩（2026-10）
         run([py, "-m", "pip", "install", "-q", "--no-cache-dir", f"torch=={TTS_TORCH}", f"torchaudio=={TTS_TORCH}",
              "--index-url", f"https://download.pytorch.org/whl/{idx}"], f"安裝 torch {TTS_TORCH}（{idx}，含 CUDA 程式庫約 7 GB）")
         run([py, "-m", "pip", "install", "-q", "--no-cache-dir"] + BREEZY_PIP, "安裝其他套件")
@@ -1291,7 +1291,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.31.5"
+SERVER_VERSION = "2.31.6"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。

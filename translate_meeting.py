@@ -2731,7 +2731,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.31.5"
+APP_VERSION = "2.31.6"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -3865,7 +3865,42 @@ _PUNCT_NORMALIZE = str.maketrans({"\u00a0": " ", "\u202f": " ", "\u2007": " ",
 # 呼叫端送來的專有名詞常常一行寫好幾個（`Proxmox VE / PVE`、`王經理、李主任`）。
 # 整行當一個詞永遠比對不到（v2.26.7 以前就是這樣：`Proxmox` 從來不在清單裡）。
 # 「/」兩邊至少一邊有空白才拆：`TCP/IP`、`I/O` 這種本身就是一個詞
-_GLOSSARY_SPLIT_RE = re.compile(r"\s+/\s*|\s*/\s+|\s*[／、，,;；|｜\n]\s*")
+_GLOSSARY_SPLIT_RE = re.compile(r"\s+/\s*|\s*/\s+|\s*[／、，,;；|｜\n]\s*")   # 規則的定義；實際拆用 _glossary_split
+_GLOSSARY_SEPS = frozenset("／、，,;；|｜")
+_GLOSSARY_MAX_PART = 200     # 比這個長的不是專有名詞（API 直接送的每筆上限也是 200 字）
+
+
+def _glossary_split(s):
+    """跟 _GLOSSARY_SPLIT_RE.split 結果逐項相同，但只掃一遍（v2.31.6，CodeQL #45）：
+    那個正規表示式遇到一長串空白會一個位置一個位置重試，3 萬個空白要 6 秒；
+    API 的 glossary_url 詞彙表沒有限制每筆長度，一筆就能卡住作業"""
+    out, n, start, i = [], len(s), 0, 0
+    while i < n:
+        c = s[i]
+        if c.isspace():
+            j = i
+            while j < n and s[j].isspace():
+                j += 1
+            nxt = s[j] if j < n else ""
+            if nxt in _GLOSSARY_SEPS or nxt == "/":       # 空白後面接分隔符號（「/」前面有空白就算）
+                e = j + 1
+            elif "\n" in s[i:j]:                         # 空白裡有換行：換行本身就是分隔符號
+                e = j
+            else:
+                i = j
+                continue
+            q = i
+        elif c in _GLOSSARY_SEPS or (c == "/" and i + 1 < n and s[i + 1].isspace()):
+            q, e = i, i + 1
+        else:
+            i += 1
+            continue
+        while e < n and s[e].isspace():
+            e += 1
+        out.append(s[start:q])
+        start = i = e
+    out.append(s[start:])
+    return out
 
 
 _GLOSSARY_EDGE = " \t\r\"'「」『』"
@@ -3900,7 +3935,9 @@ def _glossary_parts(sources):
     去掉一個字的、不分大小寫去重，保留原本的順序（ASR 提示只取前面幾個）"""
     out, seen = [], set()
     for src in sources or []:
-        for part in _GLOSSARY_SPLIT_RE.split(str(src)):
+        for part in _glossary_split(str(src)):
+            if len(part) > _GLOSSARY_MAX_PART:          # _glossary_trim 對很長的成對括號是平方時間
+                continue
             part = _glossary_trim(part)
             if len(part) < 2 or part.lower() in seen:
                 continue

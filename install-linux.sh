@@ -195,7 +195,12 @@ check_linux_venv() {
     fi
 
     source "$VENV_DIR/bin/activate"
-    pip install --quiet --disable-pip-version-check --upgrade pip >/dev/null 2>&1
+    # pip／certifi 太舊就升級（emSign 中間憑證外洩，見 install.sh 的 _PIP_SECURE_PY）
+    if pip_secure_upgrade "$VENV_DIR/bin/python3"; then
+        check_ok "pip／certifi 憑證清單已是安全版本"
+    else
+        check_fail "pip／certifi 升級失敗（${PIP_SECURE_STATE}；需要 pip 26.2.2、certifi 2026.10.19 以上）"
+    fi
     # resemblyzer 依賴的 webrtcvad 需要 pkg_resources（setuptools < 81）
     pip install --quiet --disable-pip-version-check "setuptools<81" wheel >/dev/null 2>&1
 

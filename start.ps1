@@ -97,7 +97,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.5 - 100% 全地端 AI 語音工具箱${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.6 - 100% 全地端 AI 語音工具箱${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -190,6 +190,44 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "${C_OK}Python 環境已啟用${NC}"
+
+# ─── pip／certifi 太舊就自動升級一次（2026-10-23）───────────
+# eMudhra（emSign）中間憑證私鑰外洩，舊的 pip／certifi 會相信冒充 pypi.org、huggingface.co 的假憑證。
+# .\install.ps1 -Upgrade 只換檔案不裝套件，所以在這裡補。檢查不連網路；失敗的話一天最多再試一次。
+# 與 install.sh 的 _PIP_SECURE_PY 逐字相同（tools/test_pip_secure.py 比對）
+$PIP_SECURE_PY = @'
+import sys
+try:
+    from importlib.metadata import version
+except ImportError:
+    sys.exit(0)
+def v(n):
+    try:
+        return tuple(int(x) for x in version(n).split(".")[:3])
+    except Exception:
+        return None
+p, c = v("pip"), v("certifi")
+print("pip=%s certifi=%s" % (p and ".".join(map(str, p)), c and ".".join(map(str, c))))
+sys.exit(4 if (p and p < (26, 2, 2)) or (c and c < (2026, 10, 19)) else 0)
+'@
+$null = $PIP_SECURE_PY | & $VENV_PYTHON - 2>$null
+if ($LASTEXITCODE -ne 0) {
+    $psMark = Join-Path $SCRIPT_DIR ".pip_secure_tried"
+    if (-not (Test-Path $psMark) -or ((Get-Item $psMark).LastWriteTime -lt (Get-Date).AddDays(-1))) {
+        Write-Host "${C_WARN}[安全性更新] pip／certifi 的憑證清單太舊（emSign 中間憑證外洩），自動升級中...${NC}"
+        & $VENV_PYTHON -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "pip>=26.2.2" 2>$null | Out-Null
+        & $VENV_PYTHON -m pip install -q --disable-pip-version-check --retries 1 --timeout 15 --upgrade "certifi>=2026.10.19" 2>$null | Out-Null
+        $psState = ($PIP_SECURE_PY | & $VENV_PYTHON - 2>$null) -join ""
+        if ($LASTEXITCODE -eq 0) {
+            Remove-Item $psMark -Force -ErrorAction SilentlyContinue
+            Write-Host "${C_OK}[安全性更新] 完成（${psState}）${NC}"
+        } else {
+            Set-Content -Path $psMark -Value (Get-Date -Format o) -ErrorAction SilentlyContinue
+            Write-Host "${C_WARN}[安全性更新] 沒有成功（${psState}，連不到 PyPI？），明天啟動時再試；也可以自己執行：${NC}"
+            Write-Host "${C_OK}  & `"$VENV_PYTHON`" -m pip install -U `"pip>=26.2.2`" `"certifi>=2026.10.19`"${NC}"
+        }
+    }
+}
 
 # ─── 顯示新版本提醒（背景檢查應已完成）─────────────────────
 $null = Wait-Job $updateJob -Timeout 2

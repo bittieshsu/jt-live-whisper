@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.31.5 (by Jason Cheng)
+即時英翻中字幕系統 v2.31.6 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -620,7 +620,7 @@ journalctl -u jt-whisper-server@8978        # 系統紀錄；程式輸出在 /tm
 ```bash
 cd ~/jt-whisper-server
 python3.12 -m venv venv-qwen      # 沒有 python3.12 才用 python3
-venv-qwen/bin/pip install --upgrade pip
+venv-qwen/bin/pip install --upgrade "pip>=26.2.2" "certifi>=2026.10.19"
 venv-qwen/bin/pip install "qwen-asr[vllm]==0.0.6"
 venv-qwen/bin/pip install --force-reinstall torch==2.9.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu128
 venv-qwen/bin/pip install "numpy<2.3"
@@ -795,6 +795,16 @@ Linux 的 `--upgrade` 下載完新檔案後會自動重新執行安裝檢查，�
 - **GPU 伺服器**：在用戶端重新執行安裝程式，檢查 GPU 伺服器時選擇修復，會重建伺服器的 venv。Qwen3-ASR 的 `venv-qwen` 要照「Qwen3-ASR（實驗）」重建
 - Linux 的 `./install.sh --doctor` 會直接指出 venv 的 Python 版本與建立時不同
 - 新的作業系統若只有比 3.12 更新的 Python，部分套件可能還沒有對應的版本、安裝會失敗；安裝腳本有 `python3.12` 時會優先用它
+
+### 3-6. pip／certifi 安全性更新（v2.31.6 起）
+
+2026-10 公告的 eMudhra（emSign）中間憑證私鑰外洩（GHSA-6q48-6c7w-9gw2）：舊版 pip 與 certifi 會相信冒充 pypi.org、huggingface.co 的假憑證，只更新作業系統擋不住（pip 自帶一份憑證清單）。
+
+- 安裝程式在裝套件之前、`start.sh`／`start.ps1` 每次啟動時都會檢查：pip 低於 26.2.2 或 certifi 低於 2026.10.19 就自動升級（畫面顯示「[安全性更新]」）。檢查本身不連網路
+- 沒有網路而升級失敗時，畫面會列出指令，一天內不再自動試。可以自己在安裝資料夾執行：
+  macOS／Linux `venv/bin/python3 -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"`、Windows `venv\Scripts\python.exe -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"`
+- **GPU 伺服器**：在用戶端重新執行安裝程式時會一起升級主服務的 venv；文字轉語音、BreezyVoice、Qwen3-ASR 的 venv（`venv-tts`、`venv-breezy`、`venv-qwen`）只有新建立時會升級，已經建好的請在伺服器的 `~/jt-whisper-server` 對每個 venv 執行上面的指令（例如 `venv-tts/bin/python -m pip install -U "pip>=26.2.2" "certifi>=2026.10.19"`）
+- 執行中的服務（WebUI、REST API、GPU 伺服器）重新啟動之後才會用到新的憑證清單
 
 ---
 

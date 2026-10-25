@@ -22,6 +22,7 @@ api_data/
 
 # 桌面捷徑要不要建的回答（每台機器各自的，v2.25.4）
 .desktop_shortcut
+.pip_secure_tried
 
 # 暫存檔
 .whisper_output.txt
