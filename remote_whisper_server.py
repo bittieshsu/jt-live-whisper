@@ -993,7 +993,9 @@ BREEZY_PIP = ["conformer==0.3.2", "diffusers==0.41.0", "hydra-core==1.3.2", "Hyp
               "safetensors==0.8.0", "numpy==2.5.3", "scipy==1.18.1", "librosa==1.0.0", "soundfile==0.14.0",
               "onnxruntime==1.30.0", "g2pw==0.1.1", "pypinyin==0.55.0", "opencc-python-reimplemented==0.1.7",
               "tqdm==4.70.1", "requests"]
-_BREEZY_DOTS = re.compile(r"\d+(?:\.\d+){2,}")
+# (?<!\d)：從一串數字中間開始比對一定比對不到（從開頭比對不到的話，從中間更不可能），
+# 拿掉這些嘗試結果完全相同；沒有它時一長串數字要平方時間（32,000 個 9 約 13 秒，CodeQL #44）
+_BREEZY_DOTS = re.compile(r"(?<!\d)\d+(?:\.\d+){2,}")
 
 
 def _breezy_prep(text):
@@ -1291,7 +1293,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.31.7"
+SERVER_VERSION = "2.31.8"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。

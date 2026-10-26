@@ -351,25 +351,115 @@ def _ip_allowed(client) -> bool:
     return any(ip in n for n in _allowed_nets)
 
 
-# 密碼**只存 sha256 雜湊**（`webui_passwords.read_sha256` / `admin_sha256`）。
-# 舊版存的是明文（`read` / `admin`），仍然讀得進來並可登入，
-# 但只要從設定頁存過一次就會改寫成雜湊。
+# 密碼**只存雜湊**（`webui_passwords.read_sha256` / `admin_sha256`；欄位名稱沿用舊版）。
+# v2.31.8 起是加鹽的 PBKDF2（`pbkdf2_sha256$次數$鹽$雜湊`，CodeQL #53）：以前是沒加鹽的 sha256，
+# 設定檔外流時自己取的短密碼一下就被試出來。欄位名稱不改：退回舊版時舊版比對不到＝鎖住，而不是當成沒設密碼。
+# 舊格式照樣登入：明文（`read` / `admin`，更早的版本）與 64 字元 sha256，WebUI 啟動時（`_migrate_password_hashes`）
+# 換成新格式——sha256 那種拿不到明文，就把舊雜湊再包一層 PBKDF2（`pbkdf2_sha256_w$…`），比對時先算一次 sha256。
 _webui_passwords = {"read": "", "admin": ""}   # 這裡放的是雜湊，不是明文
+_PW_ITER = 200000            # 一般電腦約 0.1 秒；比對結果有快取，畫面每秒輪詢不會每次都算
+_PW_NEW = "pbkdf2_sha256"
+_PW_WRAPPED = "pbkdf2_sha256_w"
+_pw_cache = {}               # (存的雜湊, 送來的密碼) → 對不對；只放在記憶體
+
+
+def _pw_derive(raw, salt, iters):
+    import hashlib
+    return hashlib.pbkdf2_hmac("sha256", raw.encode("utf-8"), bytes.fromhex(salt), iters).hex()
 
 
 def _pw_hash(raw):
-    import hashlib
+    import secrets as _secrets
     raw = (raw or "").strip()
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest() if raw else ""
+    if not raw:
+        return ""
+    salt = _secrets.token_hex(16)
+    return f"{_PW_NEW}${_PW_ITER}${salt}${_pw_derive(raw, salt, _PW_ITER)}"
 
 
-def _pw_match(raw, stored_hash):
+def _pw_legacy_sha256(raw):
+    """v2.31.7 以前存的格式（沒加鹽的 sha256）。只用來認舊的雜湊，不再產生新的"""
+    import hashlib
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _pw_is_legacy(stored):
+    return len(stored) == 64 and all(c in "0123456789abcdef" for c in stored)
+
+
+def _pw_wrap_legacy(stored):
+    """舊的 sha256 雜湊再包一層 PBKDF2（拿不到明文，沒辦法直接換成新格式）"""
+    import secrets as _secrets
+    salt = _secrets.token_hex(16)
+    return f"{_PW_WRAPPED}${_PW_ITER}${salt}${_pw_derive(stored, salt, _PW_ITER)}"
+
+
+def _pw_check(raw, stored):
     """**用 compare_digest 而不是 `==`**：字串比較會在第一個不同的字元就回傳，
     比對時間會洩漏「猜對了幾個字元」。這條路徑是對外開放的。"""
     import secrets as _secrets
+    raw = (raw or "").strip()
+    if not raw:
+        return False
+    if _pw_is_legacy(stored):
+        return _secrets.compare_digest(_pw_legacy_sha256(raw), stored)
+    try:
+        kind, iters, salt, dk = stored.split("$")
+        iters = int(iters)
+        if kind == _PW_WRAPPED:
+            raw = _pw_legacy_sha256(raw)
+        elif kind != _PW_NEW:
+            return False
+        return _secrets.compare_digest(_pw_derive(raw, salt, iters), dk)
+    except ValueError:
+        return False                 # 看不懂的格式一律不通過
+
+
+def _pw_match(raw, stored_hash):
+    """PBKDF2 一次約 0.1 秒、又在事件迴圈裡算，所以對錯都記下來（畫面每秒輪詢；舊密碼留在瀏覽器時也不會每次都算）"""
     if not stored_hash:
         return False
-    return _secrets.compare_digest(_pw_hash(raw), stored_hash)
+    key = (stored_hash, raw or "")
+    hit = _pw_cache.get(key)
+    if hit is None:
+        if len(_pw_cache) >= 256:
+            _pw_cache.clear()
+        hit = _pw_cache[key] = _pw_check(raw, stored_hash)
+    return hit
+
+
+def _migrate_password_hashes():
+    """WebUI 啟動時把設定檔裡舊格式的密碼（明文、沒加鹽的 sha256）換成 PBKDF2；回傳換了幾個。
+    放在啟動時而不是載入模組時：測試會 import webui，不可以順手改到設定檔"""
+    if not CONFIG_FILE.exists():
+        return 0
+    try:
+        cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return 0                     # 讀不懂的設定檔不要動（_load_passwords 已經說過了）
+    wp = cfg.get("webui_passwords")
+    if not isinstance(wp, dict):
+        return 0
+    n = 0
+    for role in ("read", "admin"):
+        stored = wp.get(f"{role}_sha256") or ""
+        new = stored
+        if stored and _pw_is_legacy(stored):
+            new = _pw_wrap_legacy(stored)
+        elif not stored and (wp.get(role) or "").strip():
+            new = _pw_hash(wp[role])
+        if new == stored and role not in wp:
+            continue
+        n += 1
+        if new:
+            wp[f"{role}_sha256"] = new
+        wp.pop(role, None)           # 明文欄位一律拿掉（有新格式時本來就不用它）
+        _webui_passwords[role] = new
+    if not n:
+        return 0
+    cfg["webui_passwords"] = wp
+    _write_config(cfg)
+    return n
 
 
 def _load_passwords():
@@ -467,13 +557,18 @@ async def _ip_allowlist(request, call_next):
 async def serve_logs(request: Request, rel: str):
     route = getattr(request.scope.get("route"), "path", "") or request.url.path
     top = "recordings" if route.startswith("/recordings") else "logs"
-    token = ""
+    by_query = False
     if not _is_local(request) and _webui_passwords["read"]:
         # 逐字稿 HTML 用相對路徑載入同資料夾的音檔，那個請求帶不了 ?token=：
-        # 第一次用 ?token= 驗過後發一個只限 /logs 的 cookie，後續請求靠它
-        token = (request.headers.get("X-Auth-Token", "") or request.query_params.get("token", "")
-                 or request.cookies.get("jtlw_logs", ""))
-        if not (_pw_match(token, _webui_passwords["read"]) or _pw_match(token, _webui_passwords["admin"])):
+        # 第一次用 ?token= 驗過後發一個只限 /logs 的 cookie，後續請求靠它。
+        # cookie 放的是隨機的工作階段代碼，不是密碼（v2.31.8 前是密碼本身，CodeQL #54）
+        token = request.headers.get("X-Auth-Token", "") or request.query_params.get("token", "")
+        if token:
+            ok = _pw_match(token, _webui_passwords["read"]) or _pw_match(token, _webui_passwords["admin"])
+            by_query = ok and not request.headers.get("X-Auth-Token")
+        else:
+            ok = _logs_session_ok(request.cookies.get("jtlw_logs", ""))
+        if not ok:
             return JSONResponse({"ok": False, "error": "需要密碼"}, status_code=403)
     logs_dir = (BASE_DIR / top).resolve()
     target = (logs_dir / rel).resolve()
@@ -481,9 +576,31 @@ async def serve_logs(request: Request, rel: str):
         return JSONResponse({"ok": False, "error": "找不到檔案"}, status_code=404)
     from fastapi.responses import FileResponse
     resp = FileResponse(str(target))
-    if token and request.query_params.get("token") and top == "logs":
-        resp.set_cookie("jtlw_logs", token, path="/logs", httponly=True, samesite="strict")
+    if by_query and top == "logs":
+        resp.set_cookie("jtlw_logs", _logs_session_new(), path="/logs", httponly=True, samesite="strict",
+                        max_age=_LOGS_SESSION_SEC)
     return resp
+
+
+_LOGS_SESSION_SEC = 12 * 3600
+_logs_sessions = {}          # 代碼 → 到期時間；只在記憶體（WebUI 重開就要重新從畫面打開逐字稿）
+
+
+def _logs_session_new():
+    import secrets as _secrets
+    now = time.time()
+    for k in [k for k, exp in _logs_sessions.items() if exp < now]:
+        del _logs_sessions[k]
+    if len(_logs_sessions) >= 1000:
+        _logs_sessions.clear()
+    sid = _secrets.token_urlsafe(32)
+    _logs_sessions[sid] = now + _LOGS_SESSION_SEC
+    return sid
+
+
+def _logs_session_ok(sid):
+    exp = _logs_sessions.get(sid or "")
+    return exp is not None and exp >= time.time()
 
 # ─── WebSocket 連線管理 ──────────────────────────────────────
 connected_clients: list[WebSocket] = []
@@ -1116,7 +1233,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.31.7",
+        "last": last, "version": "2.31.8",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2, "interp_rate_default": _TM_INTERP_RATE_DEFAULT,
@@ -1204,6 +1321,7 @@ async def api_save_passwords(request: Request, body: dict = {}):
     for role in ("read", "admin"):
         if role in body:
             _webui_passwords[role] = _pw_hash(body.get(role, ""))
+    _logs_sessions.clear()           # 換了密碼，用舊密碼拿到的 /logs 代碼一起失效
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
         # 只寫雜湊，並把舊版留下的明文欄位一起清掉
@@ -2551,6 +2669,11 @@ def main():
     print(f"\n  jt-live-whisper WebUI")
     print(f"  {scheme}://localhost:{args.port}")
     print(f"  請在瀏覽器中操作\n")
+    try:
+        if _migrate_password_hashes():
+            print("  [安全] 設定檔裡舊格式的 WebUI 密碼雜湊已換成加鹽的 PBKDF2（密碼不變）")
+    except Exception as e:
+        print(f"  [安全] 舊格式的 WebUI 密碼雜湊換不了，照舊格式比對：{e}")
     for line in _remote_access_warnings():
         print(f"  [安全提醒] {line}")
     # **一定要 flush**：systemd 下 stdout 是區塊緩衝，不 flush 的話上面這段

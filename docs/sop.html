@@ -141,7 +141,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.31.7 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.31.8 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3170,7 +3170,8 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 <p>這個做法不必改任何設定，也是安全性最好的一種（不必把管理介面暴露在網路上）。</p>
 <h4 id="遠端管理密碼與唯讀密碼">遠端管理密碼與唯讀密碼</h4>
 <p><code>install.sh --server</code> 第一次安裝時會<strong>自動產生管理密碼與唯讀密碼（v2.22.3 起）並各印出來一次</strong>，
-請當下記下來。存的是 sha256 雜湊，設定檔裡沒有明文，<strong>遺失只能重設</strong>
+請當下記下來。存的是加鹽的雜湊（PBKDF2，v2.31.8 起；以前的版本存的是沒加鹽的 sha256，
+WebUI 啟動時會自動換成新格式，密碼不變），設定檔裡沒有明文，<strong>遺失只能重設</strong>
 （在伺服器本機開 WebUI → 安全設定）。</p>
 <ul>
 <li><strong>升級或重新安裝不會覆蓋、也不會新增密碼</strong>：已經設過管理密碼的部署一律不動</li>

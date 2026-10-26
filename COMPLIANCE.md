@@ -197,7 +197,7 @@ jt-live-whisper 的設計原則是**資料不出去**：語音、逐字稿、翻
 | **8.12** 資料洩露預防（部分）<br>Data leakage prevention | WebUI 不載入外部的字型、腳本或追蹤程式；REST API 從網址抓音檔只允許設定好的主機（主要是防止被拿來探測內網）。這些不是資料外洩防護（DLP）系統 | 端點與網路的資料外洩防護 |
 | **8.15** 日誌（部分）<br>Logging | REST API 記錄每個請求（含授權失敗與來源 IP）與每件作業的每個步驟，不記錄金鑰、授權標頭、詞彙庫與逐字稿內容。WebUI 的登入失敗與設定變更、REST API 金鑰的新增與撤銷目前沒有記錄 | 日誌的保存期限、集中保存、定期檢視；需要時用主機或反向代理的存取紀錄補上 WebUI 的部分 |
 | **8.20、8.22** 網路安全、網路區隔<br>Networks security, Segregation of networks | WebUI 可以限制允許連線的 IP；放在反向代理後面時，設定信任的代理（`trusted_proxies`）後只採信這些代理轉來的來源位址 | GPU 伺服器與 LLM 伺服器放在內網，防火牆只開給需要的電腦，跨網段走 VPN；用反向代理時設定 `trusted_proxies` |
-| **8.24** 密碼技術之使用<br>Use of cryptography | TLS（WebUI 可選、預設關閉；REST API 預設開啟；可以換成組織自己的憑證）；密碼與金鑰以雜湊保存。GPU 伺服器的連線沒有加密、LLM 伺服器預設也沒有（v2.31.4 起可用 https）；LLM 伺服器的 API 金鑰以明文存在 config.json | 憑證管理；磁碟加密；GPU 與 LLM 伺服器的連線放在內網或 VPN |
+| **8.24** 密碼技術之使用<br>Use of cryptography | TLS（WebUI 可選、預設關閉；REST API 預設開啟；可以換成組織自己的憑證）；WebUI 密碼以加鹽的 PBKDF2 保存（v2.31.8 起）、API 金鑰（隨機產生的長字串）以 sha256 保存。GPU 伺服器的連線沒有加密、LLM 伺服器預設也沒有（v2.31.4 起可用 https）；LLM 伺服器的 API 金鑰以明文存在 config.json | 憑證管理；磁碟加密；GPU 與 LLM 伺服器的連線放在內網或 VPN |
 | **8.29** 開發及驗收中之安全測試<br>Security testing in development and acceptance | 每次發版前跑守門測試（三個平台、升級、全新安裝、WebUI 授權檢查）；測試程式與結果沒有公開 | 導入與升級前在自己的環境驗收 |
 | **8.32** 變更管理<br>Change management | 每一版的改動記在 CHANGELOG；已安裝的模型與套件不會自己更新（朗讀模型固定版本，其他模型與套件在安裝時取得當時的版本）；升級由管理者執行，GPU 伺服器的自動更新預設關閉 | 升級前看 CHANGELOG、先在測試環境試、排定升級時間、保留前一版以便還原 |
 

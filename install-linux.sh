@@ -490,7 +490,10 @@ for role in ("admin", "read"):
     if role == "read" and has_read:
         continue
     pw = secrets.token_urlsafe(12)
-    wp[f"{role}_sha256"] = hashlib.sha256(pw.encode("utf-8")).hexdigest()
+    # 格式與 webui.py 的 _pw_hash 相同（加鹽 PBKDF2，v2.31.8；欄位名稱沿用舊版）
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), bytes.fromhex(salt), 200000).hex()
+    wp[f"{role}_sha256"] = f"pbkdf2_sha256$200000${salt}${dk}"
     out.append(f"{role.upper()} {pw}")
 cfg["webui_passwords"] = wp
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -505,7 +508,7 @@ PYEOF
         echo -e "  ${C_WARN}${BOLD}WebUI 密碼（只顯示這一次，請立刻記下來）${NC}"
         echo -e "      管理密碼（上傳、開始／停止作業）：${C_OK}${BOLD}${admin_pw}${NC}"
         [ -n "$read_pw" ] && echo -e "      唯讀密碼（看畫面、讀逐字稿）  ：${C_OK}${BOLD}${read_pw}${NC}"
-        echo -e "  ${C_DIM}存的是 sha256 雜湊，設定檔裡沒有明文，遺失只能重設${NC}"
+        echo -e "  ${C_DIM}存的是加鹽的雜湊，設定檔裡沒有明文，遺失只能重設${NC}"
         echo -e "  ${C_DIM}要更換：在伺服器本機開 WebUI → 安全設定（那一頁只有本機能開）${NC}"
         echo -e "  ${C_DIM}建議同時設定 webui.allowed_ips 限制來源網段${NC}"
     elif echo "$out" | grep -q "NO_READ"; then
