@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.31.6 (by Jason Cheng)
+即時英翻中字幕系統 v2.31.7 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [REST API](#五rest-api給其他系統串接) · [使用流程總結](#六使用流程總結) · [常見問題](#七常見問題) · [檔案說明](#八檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -491,6 +491,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 | 項目 | 說明 |
 |---|---|
 | [Python 3.12+](https://www.python.org/downloads/) | 從 python.org 下載安裝（安裝時勾選「Add to PATH」） |
+| Microsoft Visual C++ 執行階段 | 語音辨識（ctranslate2）需要；剛重灌的 Windows 沒有，安裝程式會自動從微軟下載安裝（v2.31.7 起，會跳「使用者帳戶控制」） |
 | ffmpeg | 音訊轉檔工具（`winget install ffmpeg` 或從 [ffmpeg.org](https://ffmpeg.org/download.html) 下載） |
 | whisper.cpp | 即時語音辨識引擎（選用；自動安裝 CMake 與 Visual Studio C++ 編譯器後從原始碼編譯，沒有時即時辨識改用 faster-whisper） |
 | whisper 模型 | 語音辨識模型（預設下載 large-v3-turbo） |
@@ -3031,6 +3032,10 @@ v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝�
 都找不到時說明缺哪些檔，改用 CPU 辨識（較慢，但不會每一段都失敗）。要用顯示卡：在安裝資料夾重新執行 `.\install.ps1`，
 它會補裝這些套件，最後的「套件載入檢查」會顯示「本機辨識會使用顯示卡（CUDA）」。
 辨識途中顯示卡出錯（例如顯示記憶體不足）時，同樣自動改用 CPU 並說明原因；顯示記憶體不足時改用較小的模型（例如 `-m small`）就能繼續用顯示卡。
+
+### Q: Windows 上出現「Could not find module ...ctranslate2.dll (or one of its dependencies)」？（Windows）
+
+缺少 Microsoft Visual C++ 執行階段（`msvcp140.dll`），剛重灌的 Windows 沒有。語音辨識（faster-whisper）、Argos、NLLB 都用 ctranslate2，所以會整個不能用。v2.31.7 起 `.\install.ps1` 會自動安裝；也可以手動安裝 [vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)，裝好後重新執行一次 `.\install.ps1`（補下載第一次失敗的 Argos、Moonshine 模型）。
 
 ### Q: Windows 上出現「應用程式控制原則已封鎖此檔案」（An Application Control policy has blocked this file）？（Windows）
 這是 Windows 的安全設定擋下了 Python 套件裡的程式檔：Windows 11 的「智慧型應用程式控制」，或公司電腦設定的應用程式控制原則。本工具無法繞過：

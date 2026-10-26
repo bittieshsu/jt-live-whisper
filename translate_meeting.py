@@ -88,10 +88,27 @@ _exit_if_venv_python_changed(
 _APP_CONTROL_MARKERS = ("應用程式控制原則", "application control policy", "应用程序控制策略")
 
 
+# 乾淨的 Windows 沒有 Microsoft Visual C++ 執行階段（2026-10-26 重裝的 Win11）：ctranslate2 要 msvcp140.dll，
+# 錯誤只寫「Could not find module ...ctranslate2.dll (or one of its dependencies)」，看不出缺的是什麼
+_DLL_MISSING_MARKERS = ("could not find module", "dll load failed", "找不到指定的模組")
+_VC_RUNTIME_DLLS = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+
+
+def _vc_runtime_missing():
+    if not IS_WINDOWS:
+        return []
+    sysdir = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+    return [d for d in _VC_RUNTIME_DLLS if not os.path.exists(os.path.join(sysdir, d))]
+
+
 def _dll_block_hint(e):
-    """這個錯誤是不是 Windows 應用程式控制擋下的；是的話回傳說明，不是回傳空字串"""
+    """這個錯誤是不是 Windows 應用程式控制擋下的、或缺 Visual C++ 執行階段；是的話回傳說明，不是回傳空字串"""
     text = f"{e}"
     if not any(m in text.lower() for m in _APP_CONTROL_MARKERS):
+        missing = _vc_runtime_missing() if any(m in text.lower() for m in _DLL_MISSING_MARKERS) else []
+        if missing:
+            return (f"[說明] 這台電腦缺少 Microsoft Visual C++ 執行階段（{'、'.join(missing)}），語音辨識等套件載入不了。"
+                    "重新執行 .\\install.ps1 會自動安裝，或手動安裝 https://aka.ms/vs/17/release/vc_redist.x64.exe")
         return ""
     folder = os.path.dirname(os.path.abspath(__file__))
     return ("[說明] Windows 的應用程式控制擋下了 Python 套件裡的程式檔（Windows 11 的「智慧型應用程式控制」，"
@@ -2731,7 +2748,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.31.6"
+APP_VERSION = "2.31.7"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化

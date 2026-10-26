@@ -770,6 +770,75 @@ function offer_interp_mic {
     $null = install_usbip_win2
 }
 
+# ─── Microsoft Visual C++ 執行階段（v2.31.7，2026-10-26 乾淨重裝的 Win11 實機）──────────
+# ctranslate2（faster-whisper、Argos、NLLB）要 msvcp140.dll；乾淨的 Windows 沒有，Python 只自帶 vcruntime140*.dll。
+# 以前是後面裝 Visual Studio C++ 編譯器時順便裝上，所以編譯器裝不起來（沒有 winget、沒有系統管理員）的電腦語音辨識整個不能用，
+# 而且第一次安裝 Argos、Moonshine 模型也下載失敗。這裡在裝 Python 套件之前先補。
+$VC_RUNTIME_DLLS = @("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+$VC_SIGNER = "CN=Microsoft Corporation"
+
+function vc_runtime_missing([string]$sysDir = "") {
+    if (-not $sysDir) { $sysDir = Join-Path $env:SystemRoot "System32" }
+    return @($VC_RUNTIME_DLLS | Where-Object { -not (Test-Path (Join-Path $sysDir $_)) })
+}
+
+# 下載的檔案對不對：微軟每次更新同一個網址的檔案，沒辦法固定 SHA256，所以要求有效簽章＋簽署者是 Microsoft Corporation
+function vc_redist_ok([string]$path) {
+    if (-not (Test-Path $path)) { return "找不到下載的檔案" }
+    $sig = Get-AuthenticodeSignature -FilePath $path
+    if ("$($sig.Status)" -ne "Valid") { return "數位簽章無效（$($sig.Status)）" }
+    $subj = if ($sig.SignerCertificate) { "$($sig.SignerCertificate.Subject)" } else { "" }
+    if (-not (($subj -split ', ') -contains $VC_SIGNER)) { return "簽署者不是 Microsoft Corporation（$subj）" }
+    return ""
+}
+
+function ensure_vc_runtime {
+    $missing = @(vc_runtime_missing)
+    if ($missing.Count -eq 0) {
+        check_ok "Microsoft Visual C++ 執行階段"
+        return $true
+    }
+    check_missing "找不到 Microsoft Visual C++ 執行階段（$($missing -join '、')），語音辨識需要它，正在自動安裝..."
+    $arch = if ("$env:PROCESSOR_ARCHITECTURE" -eq "ARM64") { "arm64" } else { "x64" }
+    $url = if ($env:JTLW_VC_REDIST_URL) { $env:JTLW_VC_REDIST_URL } else { "https://aka.ms/vs/17/release/vc_redist.$arch.exe" }
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) "vc_redist.$arch.exe"
+    $manual = "請手動安裝後重新執行 .\install.ps1：https://aka.ms/vs/17/release/vc_redist.$arch.exe"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+    } catch {
+        check_fail "下載失敗：$($_.Exception.Message)"
+        info $manual
+        return $false
+    }
+    $why = vc_redist_ok $tmp
+    if ($why) {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        check_fail "下載的安裝檔沒有通過檢查，不安裝：$why"
+        info $manual
+        return $false
+    }
+    Write-Host "  ${C_WARN}安裝要系統管理員權限：接下來會跳出「使用者帳戶控制」，請按「是」${NC}"
+    try {
+        $p = Start-Process -FilePath $tmp -ArgumentList "/install", "/quiet", "/norestart" -Verb RunAs -Wait -PassThru
+        $rc = $p.ExitCode
+    } catch {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        check_fail "沒有安裝（$($_.Exception.Message)）"
+        info $manual
+        return $false
+    }
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    $missing = @(vc_runtime_missing)
+    if ($missing.Count -gt 0) {
+        check_fail "Microsoft Visual C++ 執行階段沒有安裝完成（結束碼 $rc，仍缺 $($missing -join '、')）"
+        info $manual
+        return $false
+    }
+    check_ok "Microsoft Visual C++ 執行階段安裝完成"
+    return $true
+}
+
 # ─── Banner ───────────────────────────────────────────────────
 
 $cols = try { $Host.UI.RawUI.WindowSize.Width } catch { 60 }
@@ -779,7 +848,7 @@ $banner_line = '=' * $cols
 if (-not $env:JTLW_UPGRADE_REPO) {          # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.6 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.7 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -1423,6 +1492,8 @@ if (pip_secure_upgrade $VENV_PYTHON) {
 
 section "安裝 Python 套件"
 
+$null = ensure_vc_runtime
+
 # ─── PyTorch（GPU 敏感）──────────────────────────────────────
 if ($GPU_AVAILABLE) {
     $null = pip_install "torch" "PyTorch (CUDA ${TORCH_CUDA_TAG})" @("--index-url", "https://download.pytorch.org/whl/${TORCH_CUDA_TAG}")
@@ -1568,14 +1639,20 @@ $checkFile = Join-Path $env:TEMP "jtlw_import_check.py"
 $importOut = & $VENV_PYTHON $checkFile @($importLabels.Keys) 2>$null
 Remove-Item $checkFile -ErrorAction SilentlyContinue
 $appControlBlocked = $false
+$importFailed = $false
 foreach ($line in $importOut) {
     $p = "$line".Split("`t")
     if ($p.Count -lt 2 -or -not $importLabels.Contains($p[1])) { continue }
     if ($p[0] -eq "OK") { check_ok $importLabels[$p[1]] }
     else {
+        $importFailed = $true
         check_fail "$($importLabels[$p[1]]) 無法載入：$($p[2])"
         if ("$($p[2])" -match '應用程式控制原則|Application Control policy|应用程序控制策略') { $appControlBlocked = $true }
     }
+}
+if ($importFailed -and @(vc_runtime_missing).Count -gt 0) {
+    check_notice "缺少 Microsoft Visual C++ 執行階段（$(@(vc_runtime_missing) -join '、')），上面的套件因此載入不了"
+    info "  安裝 https://aka.ms/vs/17/release/vc_redist.x64.exe 後重新執行 .\install.ps1"
 }
 if ($appControlBlocked) {
     Write-Host ""

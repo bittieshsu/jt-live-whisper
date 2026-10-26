@@ -121,6 +121,7 @@
       <a class="lv3" href="#q-windows-上找不到-stereo-mixwindows">Q: Windows 上找不到 Stereo Mix？（Windows）</a>
       <a class="lv3" href="#q-windows-上開即時字幕出現找不到-whisper-streamwindows">Q: Windows 上開即時字幕出現「找不到 whisper-stream」？（Windows）</a>
       <a class="lv3" href="#q-windows-上有-nvidia-顯示卡卻出現cublas64_12dll-is-not-found或顯示卡cuda不能用來辨識windows">Q: Windows 上有 NVIDIA 顯示卡，卻出現「cublas64_12.dll is not found」或「顯示卡（CUDA）不能用來辨識」？（Windows）</a>
+      <a class="lv3" href="#q-windows-上出現could-not-find-module-ctranslate2dll-or-one-of-its-dependencieswindows">Q: Windows 上出現「Could not find module ...ctranslate2.dll (or one of its dependencies)」？（Windows）</a>
       <a class="lv3" href="#q-windows-上出現應用程式控制原則已封鎖此檔案an-application-control-policy-has-blocked-this-filewindows">Q: Windows 上出現「應用程式控制原則已封鎖此檔案」（An Application Control policy has blocked this file）？（Windows）</a>
       <a class="lv3" href="#q-linux-上懸浮字幕沒有出現linux">Q: Linux 上懸浮字幕沒有出現？（Linux）</a>
       <a class="lv3" href="#q-linux-上用-nvidia-gpu-辨識出現找不到-cublas-cudnnlinux">Q: Linux 上用 NVIDIA GPU 辨識出現找不到 cuBLAS / cuDNN？（Linux）</a>
@@ -140,7 +141,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.31.6 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.31.7 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -843,6 +844,10 @@ bash install.sh --server
 <tbody><tr>
 <td><a href="https://www.python.org/downloads/">Python 3.12+</a></td>
 <td>從 python.org 下載安裝（安裝時勾選「Add to PATH」）</td>
+</tr>
+<tr>
+<td>Microsoft Visual C++ 執行階段</td>
+<td>語音辨識（ctranslate2）需要；剛重灌的 Windows 沒有，安裝程式會自動從微軟下載安裝（v2.31.7 起，會跳「使用者帳戶控制」）</td>
 </tr>
 <tr>
 <td>ffmpeg</td>
@@ -4169,6 +4174,8 @@ v2.26.13 起，程式會自動到 CUDA 版 PyTorch 自帶的那一組、pip 裝�
 都找不到時說明缺哪些檔，改用 CPU 辨識（較慢，但不會每一段都失敗）。要用顯示卡：在安裝資料夾重新執行 <code>.\install.ps1</code>，
 它會補裝這些套件，最後的「套件載入檢查」會顯示「本機辨識會使用顯示卡（CUDA）」。
 辨識途中顯示卡出錯（例如顯示記憶體不足）時，同樣自動改用 CPU 並說明原因；顯示記憶體不足時改用較小的模型（例如 <code>-m small</code>）就能繼續用顯示卡。</p>
+<h3 id="q-windows-上出現could-not-find-module-ctranslate2dll-or-one-of-its-dependencieswindows">Q: Windows 上出現「Could not find module ...ctranslate2.dll (or one of its dependencies)」？（Windows）</h3>
+<p>缺少 Microsoft Visual C++ 執行階段（<code>msvcp140.dll</code>），剛重灌的 Windows 沒有。語音辨識（faster-whisper）、Argos、NLLB 都用 ctranslate2，所以會整個不能用。v2.31.7 起 <code>.\install.ps1</code> 會自動安裝；也可以手動安裝 <a href="https://aka.ms/vs/17/release/vc_redist.x64.exe">vc_redist.x64.exe</a>，裝好後重新執行一次 <code>.\install.ps1</code>（補下載第一次失敗的 Argos、Moonshine 模型）。</p>
 <h3 id="q-windows-上出現應用程式控制原則已封鎖此檔案an-application-control-policy-has-blocked-this-filewindows">Q: Windows 上出現「應用程式控制原則已封鎖此檔案」（An Application Control policy has blocked this file）？（Windows）</h3>
 <p>這是 Windows 的安全設定擋下了 Python 套件裡的程式檔：Windows 11 的「智慧型應用程式控制」，或公司電腦設定的應用程式控制原則。本工具無法繞過：</p>
 <ul>

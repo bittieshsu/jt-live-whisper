@@ -1,5 +1,18 @@
 # Changelog
 
+### v2.31.7 (2026-10-26)
+
+**修正：乾淨的 Windows 沒有 Microsoft Visual C++ 執行階段，語音辨識可能整個不能用**
+- 在一台剛重灌的 Windows 11 照 README 安裝時發現：安裝中途的「套件載入檢查」ctranslate2、faster-whisper 都「無法載入」，
+  錯誤只寫「Could not find module ...ctranslate2.dll (or one of its dependencies)」；Argos、Moonshine 模型也下載失敗
+- 原因：ctranslate2（faster-whisper、Argos、NLLB 都用它）需要 Microsoft Visual C++ 執行階段的 msvcp140.dll，剛重灌的 Windows 沒有
+  （Python 只自帶一部分）。以前是安裝後段裝 Visual Studio C++ 編譯器時順便裝上，所以多半看不出來；編譯器裝不起來的電腦
+  （沒有 winget、沒有系統管理員權限）語音辨識就整個不能用。已經裝過其他軟體的電腦通常早就有，不受影響
+- 現在 `install.ps1` 在裝 Python 套件之前先檢查，缺了就從微軟下載 vc_redist 安裝（檢查數位簽章是 Microsoft Corporation，
+  會跳「使用者帳戶控制」）；裝不起來時說明手動安裝的網址
+- 主程式遇到同樣的錯誤時也會說明缺的是 Visual C++ 執行階段、怎麼補（以前只有一串 traceback）
+- 已經裝好、可以正常使用的電腦不用做任何事
+
 ### v2.31.6 (2026-10-25)
 
 **安全性：pip／certifi 太舊時自動升級（eMudhra／emSign 中間憑證私鑰外洩，GHSA-6q48-6c7w-9gw2）**
